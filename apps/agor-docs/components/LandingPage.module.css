@@ -995,12 +995,7 @@
 
 /* Link-styled button — opens the HubSpot beta modal (not a navigation). */
 .busBetaLink {
-  padding: 0;
-  border: 0;
-  background: none;
   color: var(--landing-teal);
-  font: inherit;
-  cursor: pointer;
   text-decoration: underline;
   text-decoration-color: rgba(52, 230, 196, 0.45);
   text-underline-offset: 3px;
@@ -1094,26 +1089,6 @@
 }
 
 .footerLinks a:hover {
-  color: var(--landing-teal);
-}
-
-/* Footer entry that opens the beta modal instead of navigating — dressed
- * exactly like the sibling anchors. */
-.footerLinkButton {
-  display: block;
-  margin-bottom: 10px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--landing-muted);
-  font-family: inherit;
-  font-size: 0.95rem;
-  text-align: left;
-  cursor: pointer;
-  transition: color 140ms ease;
-}
-
-.footerLinkButton:hover {
   color: var(--landing-teal);
 }
 

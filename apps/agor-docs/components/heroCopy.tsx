@@ -11,7 +11,6 @@ export interface HeroCopy {
   headline: string;
   /** Sub-headline (h2). Same {white}/[blue]/\n markup. */
   subheadline: string;
-  ctaLabel: string;
 }
 
 // Problem-framed collaboration hero — won the 2026 hero A/B tests (formerly
@@ -19,7 +18,6 @@ export interface HeroCopy {
 export const HOME_HERO: HeroCopy = {
   headline: 'Your AI coding agents\nare working [alone]',
   subheadline: 'Bring every session onto one [board] your whole team can see.',
-  ctaLabel: 'Start building together',
 };
 
 // {word} → bold ink highlight (.headingStrong), [word] → teal/sky gradient

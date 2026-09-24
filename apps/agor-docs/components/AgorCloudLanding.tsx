@@ -25,7 +25,7 @@ import { DISCORD_INVITE_URL, GITHUB_REPO_URL, PRESET_URL, presetUtm } from '../l
 import { getBasePath, LOGO_MARK_PATH } from '../lib/siteMetadata';
 import styles from './AgorCloudLanding.module.css';
 import Aurora from './Aurora/Aurora';
-import { HubSpotFormModal } from './HubSpotFormModal';
+import { CloudCtaLink } from './CloudCtaLink';
 import { HubSpotMeetingModal } from './HubSpotMeetingModal';
 import Lightfall from './Lightfall/Lightfall';
 
@@ -196,7 +196,6 @@ const security: Array<{ title: string; body: string }> = [
 
 export function AgorCloudLanding() {
   const shellRef = useRef<HTMLElement>(null);
-  const [isFormOpen, setIsFormOpen] = useState(false);
   const [isDemoOpen, setIsDemoOpen] = useState(false);
   // Lightfall runs its own requestAnimationFrame/WebGL loop regardless of
   // CSS visibility, so respecting reduced-motion has to happen via its
@@ -209,14 +208,6 @@ export function AgorCloudLanding() {
     media.addEventListener('change', onChange);
     return () => media.removeEventListener('change', onChange);
   }, []);
-  // Which CTA opened the (single, shared) beta form, stamped into the form's
-  // hidden source_page field for attribution, matching the site convention.
-  const [formSource, setFormSource] = useState('cloud-page-hero');
-
-  const openForm = (source: string) => {
-    setFormSource(source);
-    setIsFormOpen(true);
-  };
 
   const [activeCapability, setActiveCapability] = useState(0);
 
@@ -312,13 +303,7 @@ export function AgorCloudLanding() {
             handled, so your team can focus on working together, not the platform underneath it.
           </p>
           <div className={styles.heroActions}>
-            <button
-              type="button"
-              className={styles.primaryButton}
-              onClick={() => openForm('cloud-page-hero')}
-            >
-              Request an invite
-            </button>
+            <CloudCtaLink placement="cloud-page-hero" className={styles.primaryButton} />
             <button
               type="button"
               className={styles.secondaryButton}
@@ -661,17 +646,11 @@ export function AgorCloudLanding() {
             Bring your team to <span className={styles.headingAccent}>Agor Cloud</span>
           </h2>
           <p>
-            We’re onboarding teams into the private beta now. Tell us about your team and use case,
-            and we’ll take it from there: a quick fit call, then you’re set up in minutes.
+            We’re bringing teams onto Agor Cloud now. Start from the console, and we’ll help your
+            team get set up.
           </p>
           <div className={styles.heroActions}>
-            <button
-              type="button"
-              className={styles.primaryButton}
-              onClick={() => openForm('cloud-page-final')}
-            >
-              Request an invite
-            </button>
+            <CloudCtaLink placement="cloud-page-final" className={styles.primaryButton} />
             <button
               type="button"
               className={styles.secondaryButton}
@@ -729,23 +708,11 @@ export function AgorCloudLanding() {
             >
               Preset
             </Link>
-            <button
-              type="button"
-              className={styles.footerLink}
-              onClick={() => openForm('cloud-page-footer')}
-            >
-              Request an invite
-            </button>
+            <CloudCtaLink placement="cloud-page-footer" className={styles.footerLink} />
           </div>
         </div>
       </footer>
 
-      <HubSpotFormModal
-        isOpen={isFormOpen}
-        onClose={() => setIsFormOpen(false)}
-        title="Request an Agor Cloud invite"
-        sourceCta={formSource}
-      />
       <HubSpotMeetingModal isOpen={isDemoOpen} onClose={() => setIsDemoOpen(false)} />
     </main>
   );

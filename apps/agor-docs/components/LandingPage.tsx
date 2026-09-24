@@ -39,7 +39,7 @@ import {
 } from '../lib/links';
 import { getBasePath, LOGO_MARK_PATH } from '../lib/siteMetadata';
 import Aurora from './Aurora/Aurora';
-import { HubSpotFormModal } from './HubSpotFormModal';
+import { CloudCtaLink } from './CloudCtaLink';
 import { HubSpotMeetingModal } from './HubSpotMeetingModal';
 import { HighlightedText, HOME_HERO } from './heroCopy';
 import styles from './LandingPage.module.css';
@@ -551,14 +551,6 @@ export function LandingPage() {
   const heroH1Ref = useFitText<HTMLHeadingElement>([HOME_HERO.headline]);
   const heroH2Ref = useFitText<HTMLHeadingElement>([HOME_HERO.subheadline]);
   const landingRef = useRef<HTMLElement>(null);
-  const [isBetaFormOpen, setIsBetaFormOpen] = useState(false);
-  // Which on-page CTA opened the (single, shared) beta form modal — stamped
-  // into the form's hidden source_page field for attribution.
-  const [betaCtaSource, setBetaCtaSource] = useState('landing-hero');
-  const openBetaForm = (source: string) => {
-    setBetaCtaSource(source);
-    setIsBetaFormOpen(true);
-  };
   const [isDemoFormOpen, setIsDemoFormOpen] = useState(false);
   const [activeShot, setActiveShot] = useState(0);
   const [activeSurface, setActiveSurface] = useState(0);
@@ -773,13 +765,7 @@ export function LandingPage() {
               <HighlightedText text={HOME_HERO.subheadline} />
             </h2>
             <div className={styles.heroActions}>
-              <button
-                type="button"
-                className={styles.primaryButton}
-                onClick={() => openBetaForm('landing-hero')}
-              >
-                {HOME_HERO.ctaLabel}
-              </button>
+              <CloudCtaLink placement="landing-hero" className={styles.primaryButton} />
               <button
                 type="button"
                 className={styles.secondaryButton}
@@ -1285,14 +1271,7 @@ export function LandingPage() {
                 {item.desc}
                 {item.beta && (
                   <>
-                    <button
-                      type="button"
-                      className={styles.busBetaLink}
-                      onClick={() => openBetaForm('landing-bus-item')}
-                    >
-                      Register for the Agor Cloud beta
-                    </button>
-                    .
+                    <CloudCtaLink placement="landing-bus-item" className={styles.busBetaLink} />.
                   </>
                 )}
               </div>
@@ -1484,13 +1463,7 @@ export function LandingPage() {
             to us about rolling Agor out across your team. Agor Cloud is opening to teams now.
           </p>
           <div className={styles.heroActions}>
-            <button
-              type="button"
-              className={styles.primaryButton}
-              onClick={() => openBetaForm('landing-final-cta')}
-            >
-              Sign up for Agor Cloud
-            </button>
+            <CloudCtaLink placement="landing-final-cta" className={styles.primaryButton} />
             <button
               type="button"
               className={styles.secondaryButton}
@@ -1540,13 +1513,7 @@ export function LandingPage() {
             <Link href={DISCORD_INVITE_URL} target="_blank" rel="noopener noreferrer">
               Discord
             </Link>
-            <button
-              type="button"
-              className={styles.footerLinkButton}
-              onClick={() => openBetaForm('landing-footer')}
-            >
-              Sign up for Agor Cloud
-            </button>
+            <CloudCtaLink placement="landing-footer" />
           </div>
         </div>
         <p className={styles.footerCredit}>
@@ -1571,12 +1538,6 @@ export function LandingPage() {
         </p>
       </footer>
 
-      <HubSpotFormModal
-        isOpen={isBetaFormOpen}
-        onClose={() => setIsBetaFormOpen(false)}
-        title="Join the Agor Cloud private beta"
-        sourceCta={betaCtaSource}
-      />
       <HubSpotMeetingModal isOpen={isDemoFormOpen} onClose={() => setIsDemoFormOpen(false)} />
     </main>
   );

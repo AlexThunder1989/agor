@@ -1,34 +1,23 @@
 'use client';
 
 import { useState } from 'react';
-import { AGOR_CLOUD_INVITE_URL } from '../lib/links';
+import { CloudCtaLink } from './CloudCtaLink';
 import styles from './CloudInviteCTA.module.css';
 import { HubSpotMeetingModal } from './HubSpotMeetingModal';
 
 interface CloudInviteCTAProps {
-  primaryLabel?: string;
+  /** Attribution slug for this spot (utm_content on the console link). */
+  placement: string;
   demoLabel?: string;
-  primaryHref?: string;
 }
 
-export function CloudInviteCTA({
-  primaryLabel = 'Join the Private Beta',
-  demoLabel = 'Book a Demo',
-  primaryHref = AGOR_CLOUD_INVITE_URL,
-}: CloudInviteCTAProps) {
-  const isInPageAnchor = primaryHref.startsWith('#') || primaryHref.startsWith('/');
+export function CloudInviteCTA({ placement, demoLabel = 'Book a Demo' }: CloudInviteCTAProps) {
   // The scheduler opens in an on-site modal instead of linking out to the
   // (Preset-branded) meetings.hubspot.com page.
   const [isDemoOpen, setIsDemoOpen] = useState(false);
   return (
     <div className={styles.wrapper}>
-      <a
-        href={primaryHref}
-        {...(isInPageAnchor ? {} : { target: '_blank', rel: 'noopener noreferrer' })}
-        className={styles.primary}
-      >
-        {primaryLabel} →
-      </a>
+      <CloudCtaLink placement={placement} className={styles.primary} suffix=" →" />
       <button
         type="button"
         className={styles.secondary}
