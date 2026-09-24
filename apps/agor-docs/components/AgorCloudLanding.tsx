@@ -178,7 +178,7 @@ const deployments: Array<{
 const security: Array<{ title: string; body: string }> = [
   {
     title: 'Hardened by default',
-    body: 'The open-source flags that widen attack surface (shared dev boxes, broad bypass modes) are off in Cloud. We know which knobs belong in which position because we run it ourselves.',
+    body: 'The self-hosted flags that widen attack surface (shared dev boxes, broad bypass modes) are off in Cloud. We know which knobs belong in which position because we run it ourselves.',
   },
   {
     title: 'Substrate isolation',
@@ -307,10 +307,9 @@ export function AgorCloudLanding() {
             Fully managed Agor for your <span className={styles.headingStrong}>whole team</span>
           </h1>
           <p className={styles.heroSub}>
-            Agor is open, and yours to run. Agor Cloud is for teams who’d rather not. We operate a
-            hardened, always-current Agor for you, with scaling, isolation, governance, and
-            observability handled, so your team can focus on the work, not the platform underneath
-            it.
+            Agor is yours to run. Agor Cloud is for teams who’d rather not. We operate a hardened,
+            always-current Agor for you, with scaling, isolation, governance, and observability
+            handled, so your team can focus on working together, not the platform underneath it.
           </p>
           <div className={styles.heroActions}>
             <button
@@ -350,7 +349,7 @@ export function AgorCloudLanding() {
           />
         </div>
         <div className={styles.sectionHead}>
-          <span className={styles.eyebrow}>Open source, minus the ops</span>
+          <span className={styles.eyebrow}>Self-hosting, minus the ops</span>
           <h2>
             You can run Agor yourself.
             <br />
@@ -387,8 +386,8 @@ export function AgorCloudLanding() {
             Everything running, <span className={styles.headingAccent}>nothing to babysit</span>
           </h2>
           <p className={styles.lead}>
-            The same platform you know from the open project, operated for you with the rigor Preset
-            brings to Preset Cloud.
+            The same platform you know from the self-hosted build, operated for you with the rigor
+            Preset brings to Preset Cloud.
           </p>
         </div>
         {/* Screenshot carousel for the three capabilities with something

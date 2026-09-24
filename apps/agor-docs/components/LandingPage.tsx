@@ -53,62 +53,62 @@ const basePath = getBasePath();
 // mint solution palette arrives at the pivot line below the grid.
 const problemCards: Array<{ icon: LucideIcon; title: string; body: ReactNode }> = [
   {
-    icon: Boxes,
-    title: 'Boxed into silos',
-    body: (
-      <>
-        Agents live in <strong>personal terminals</strong>, but real processes cut across{' '}
-        <strong>teams</strong>. The work crosses boundaries; the agents can’t.
-      </>
-    ),
-  },
-  {
-    icon: DatabaseZap,
-    title: 'Context everywhere, truth nowhere',
-    body: (
-      <>
-        Knowledge is <strong>scattered</strong> across repos, docs, and DMs, letting agents answer
-        confidently without your business’s <strong>actual context</strong>.
-      </>
-    ),
-  },
-  {
-    icon: EyeOff,
-    title: 'Zero line of sight',
-    body: (
-      <>
-        Tokens burned isn’t a KPI. Nobody can point to which AI work actually{' '}
-        <strong>impacted the business</strong>.
-      </>
-    ),
-  },
-  {
-    icon: Unlink,
-    title: 'Married to one model',
-    body: (
-      <>
-        It’s a <strong>multi-model</strong> world. Locking workflows to a single frontier is signing
-        up for tomorrow’s migration.
-      </>
-    ),
-  },
-  {
     icon: UserX,
-    title: 'Multipliers can’t multiply',
+    title: 'Everyone’s figuring it out alone',
     body: (
       <>
-        AI-enablement skill is scarce and mostly grown in-house. The few people who have it are
-        stuck <strong>doing</strong> instead of <strong>enabling</strong>.
+        Each person experiments behind <strong>their own screen</strong>. Good techniques stay
+        private, and the team repeats the same mistakes.
+      </>
+    ),
+  },
+  {
+    icon: Boxes,
+    title: 'Too many agents to track',
+    body: (
+      <>
+        More agents and conversations mean more coordination. Which one is <strong>blocked</strong>?
+        Which one <strong>needs you</strong>?
       </>
     ),
   },
   {
     icon: Repeat,
-    title: 'Efficiency theater',
+    title: 'Starting over every time',
     body: (
       <>
-        Most AI spend just makes an <strong>old process</strong> faster, not making the business{' '}
-        <strong>operate differently</strong>.
+        Good context gets buried in old conversations, so every recurring task needs the{' '}
+        <strong>same explanation</strong> again.
+      </>
+    ),
+  },
+  {
+    icon: Unlink,
+    title: 'Workflows only one person can run',
+    body: (
+      <>
+        That useful PR reviewer lives in <strong>one person’s setup</strong>. Nobody else can
+        improve it or take it over.
+      </>
+    ),
+  },
+  {
+    icon: DatabaseZap,
+    title: 'Context scattered everywhere',
+    body: (
+      <>
+        Knowledge is <strong>spread</strong> across repos, docs, and DMs, so agents answer without
+        your team’s <strong>actual context</strong>.
+      </>
+    ),
+  },
+  {
+    icon: EyeOff,
+    title: 'New tools, same old habits',
+    body: (
+      <>
+        Handing out AI accounts doesn’t create <strong>shared practices</strong>. Individual wins
+        never become the way the team works.
       </>
     ),
   },
@@ -215,7 +215,7 @@ const featureCards: Array<{
   {
     title: 'Conversational onboarding',
     icon: MessagesSquare,
-    body: 'Teach a teammate by talking to it. The programming language is conversation, and the useful parts become reusable context.',
+    body: 'Teach a teammate by talking to it. Anyone on the team can refine it, and the useful parts become reusable context.',
     href: '/guide/teammates',
     linkLabel: 'Read about Teammates',
   },
@@ -234,15 +234,15 @@ const featureCards: Array<{
     linkLabel: 'Explore Scheduler',
   },
   {
-    title: 'Personality + boundaries',
+    title: 'Identity + boundaries',
     icon: SlidersHorizontal,
-    body: 'Tune voice, style, and level of agency so every teammate knows how bold to be and when to ask first.',
+    body: 'Define each teammate’s purpose, voice, and level of agency, so it knows how bold to be and when to ask first.',
     href: '/blog/agent-modeling-101',
     linkLabel: 'Agent modeling 101',
   },
 ];
 // Spatial boards, rich sessions, and the message gateway are deliberately
-// absent — the "So much more than a chat box" showcase above already tells
+// absent — the "See the work and shape it together" showcase already tells
 // those stories with video.
 const productPreviews = [
   {
@@ -265,7 +265,7 @@ const productPreviews = [
   },
   {
     title: 'Built-in knowledge base',
-    body: 'Give humans and agents one shared place for decisions, runbooks, prompts, memory, and reusable context.',
+    body: 'Give your team and its agents one shared place for decisions, runbooks, prompts, memory, and reusable context.',
     image: '/images/knowledge-hero.png',
     href: '/guide/knowledge',
   },
@@ -298,9 +298,8 @@ const harnesses: Array<{ name: string; logo?: string; glyph?: string; beta?: boo
 
 // The "Compound Amplifying Bus": six trust items on a vertical mint spine —
 // the deliberate counterpoint to the six amber problem cards piled up in the
-// section above (same count, calm straight line). Order is intentional: it
-// answers the problem cards in spirit (context moats, tomorrow's migration,
-// tokens-not-a-KPI, scarce multipliers, safe openness). Ripple ring sizes
+// section above (same count, calm straight line). These are the supporting
+// trust layer: what's running, what it costs, who can do what. Ripple ring sizes
 // and delays are static literals (SSR-safe, no randomness): ring count and
 // size grow toward the bottom of the line — the "amplifying" effect. Delays
 // spread each node's rings evenly across the shared 3s loop.
@@ -312,7 +311,7 @@ const busItems: Array<{
   rippleDelays: number[];
 }> = [
   {
-    title: 'Open & self-hosted',
+    title: 'Self-hosted & source-available',
     desc: 'Your repos, your database, your infrastructure. Production use is permitted under BSL 1.1.',
     rippleSize: 10,
     rippleDelays: [0, 1500],
@@ -325,13 +324,13 @@ const busItems: Array<{
   },
   {
     title: 'Governance & visibility',
-    desc: 'One auditable canvas for every session and prompt. Leadership sees outcomes, not token bills.',
+    desc: 'Every session and prompt on one board, with usage tracked along the way. Know what’s running and what it costs.',
     rippleSize: 17,
     rippleDelays: [0, 750, 1500, 2250],
   },
   {
     title: 'MCP-native',
-    desc: 'Anything you can do, an agent can do too, over Agor’s own MCP server. Enablement that scales beyond headcount.',
+    desc: 'Anything you can do, an agent can do too, over Agor’s own MCP server: spawn peers, move work, schedule runs.',
     rippleSize: 20,
     rippleDelays: [0, 600, 1200, 1800, 2400],
   },
@@ -361,14 +360,14 @@ function GitHubIcon() {
   );
 }
 
-// "So much more than a chat box" carousel. Each slide is a short loop-perfect
+// "See the work and shape it together" carousel. Each slide is a short loop-perfect
 // demo video rendered by the demo-videos pipeline (apps/agor-docs/demo-videos);
 // the poster doubles as the reduced-motion / JS-off fallback.
 const showcaseSlides = [
   {
     label: 'Multiplayer presence',
     blurb:
-      'Humans and agents share the same board — live cursors, shared sessions, queued follow-ups.',
+      'Your team and its agents share one board: live cursors, shared sessions, queued follow-ups.',
     video: '/videos/showcase-multiplayer.mp4',
     videoSmall: '/videos/showcase-multiplayer-540.mp4',
     poster: '/videos/showcase-multiplayer-poster.jpg',
@@ -382,14 +381,15 @@ const showcaseSlides = [
   },
   {
     label: 'Rich agent sessions',
-    blurb: 'Watch tool calls, decisions, and handoffs unfold with full context.',
+    blurb: 'Follow an agent’s tool calls, decisions, and handoffs, and bring a colleague in.',
     video: '/videos/showcase-sessions.mp4',
     videoSmall: '/videos/showcase-sessions-540.mp4',
     poster: '/videos/showcase-sessions-poster.jpg',
   },
   {
     label: 'Message gateway',
-    blurb: 'Bring agents into Slack, GitHub, and the threads where your team already works.',
+    blurb:
+      'Work with agents from Slack, GitHub, and the threads where your team already talks. No board required.',
     video: '/videos/showcase-gateway.mp4',
     videoSmall: '/videos/showcase-gateway-540.mp4',
     poster: '/videos/showcase-gateway-poster.jpg',
@@ -414,7 +414,7 @@ const rosterMembers: Array<{
   {
     icon: Code2,
     name: 'AgorClaw',
-    role: 'Main coding orchestrator — the first assistant in the instance',
+    role: 'Main coding orchestrator, and the first teammate in the instance',
     meta: '55B tokens · 1,600+ tasks',
     r: 100,
     a: -90,
@@ -486,7 +486,7 @@ const rosterMembers: Array<{
   {
     icon: DoorOpen,
     name: 'Hodor!',
-    role: 'Agor’s own PM — issues, roadmap, ritual notes',
+    role: 'Agor’s own PM: issues, roadmap, ritual notes',
     meta: 'lives in #agor · attends rituals',
     r: 200,
     a: -158,
@@ -765,7 +765,7 @@ export function LandingPage() {
         </div>
         <section className={styles.heroSection}>
           <div className={styles.heroCopy} data-reveal>
-            <p className={styles.heroBadge}>The command center for AI enablement</p>
+            <p className={styles.heroBadge}>Multiplayer AI</p>
             <h1 ref={heroH1Ref} className={styles.heroForcedBreak}>
               <HighlightedText text={HOME_HERO.headline} />
             </h1>
@@ -811,14 +811,13 @@ export function LandingPage() {
         </h2>
         <p className={styles.liveSub}>
           <span className={styles.headingDim}>
-            Disconnected tools, solo wins, no line of sight.
+            We’re getting better at AI on our own, but not better together.
           </span>
         </p>
-        {/* Sits ABOVE the pileup so "this operational nightmare" reads as
-            pointing at the cards below it, not at the next section. */}
+        {/* Sits ABOVE the pileup so the question reads as pointing at the
+            cards below it, not at the next section. */}
         <p className={styles.problemPivot}>
-          Agor helps your team avoid this{' '}
-          <span className={styles.headingAccentWarm}>operational nightmare</span>
+          Sound <span className={styles.headingAccentWarm}>familiar</span>?
           <span aria-hidden="true"> ↓</span>
         </p>
         {/* Collision composition: slots carry the static scatter pose (rotate/
@@ -861,8 +860,8 @@ export function LandingPage() {
           <div className={styles.showcaseHeader}>
             <div className={styles.sectionHeader}>
               <h2>
-                So much <span className={styles.headingStrong}>more</span> than a{' '}
-                <span className={styles.headingAccent}>chat box</span>
+                See the work and <span className={styles.headingStrong}>shape</span> it{' '}
+                <span className={styles.headingAccent}>together</span>
               </h2>
             </div>
             <div className={styles.showcaseTabs}>
@@ -1000,20 +999,20 @@ export function LandingPage() {
 
       <section className={styles.workspaceSection} data-reveal>
         <div className={styles.workspaceCopy}>
-          <span className={styles.eyebrow}>Agents that learn with you</span>
+          <span className={styles.eyebrow}>Build on what your team teaches them</span>
           <h2>
-            Raise <span className={styles.headingAccent}>AI teammates</span> with memory, skills,
-            and a place to <span className={styles.headingStrong}>work</span>
+            Raise <span className={styles.headingAccent}>AI teammates</span> your whole{' '}
+            <span className={styles.headingStrong}>team</span> can teach
           </h2>
           <p>
-            One-off prompts don’t compound. In Agor, teammates have durable identities your team can
-            teach conversationally, then equip with memory, tools, channels, and schedules as they
-            grow. Your{' '}
+            You shouldn’t have to start over every time. Give teammates memory, teach them skills,
+            connect them to your tools, and bring them where your team works. People decide their
+            scope and when they ask for help, and anyone can pick up where a colleague left off.
+            What your{' '}
             <Link href={AI_ENABLEMENT_POST_URL} target="_blank" rel="noopener noreferrer">
-              most AI-enabled teammates
+              most AI-enabled people
             </Link>{' '}
-            can uplevel workflows across the entire org, and what works for one person finally
-            reaches everyone.
+            figure out becomes something the whole team can build on.
           </p>
         </div>
         <div className={styles.featureRing} data-reveal>
@@ -1084,10 +1083,10 @@ export function LandingPage() {
 
       <section className={styles.productShowcase} data-reveal>
         <div className={styles.sectionHeader}>
-          <span className={styles.eyebrow}>Let power users get down to business</span>
+          <span className={styles.eyebrow}>Stay sane with a lot of agents</span>
           <h2>
-            Every capability <span className={styles.headingStrong}>AI enablers</span> need to{' '}
-            <span className={styles.headingAccent}>orchestrate AI</span>
+            A <span className={styles.headingStrong}>command center</span> for{' '}
+            <span className={styles.headingAccent}>agent work</span>
           </h2>
         </div>
         {/* Desktop: same carousel grammar as the showcase above — tab pills,
@@ -1239,19 +1238,19 @@ export function LandingPage() {
       <section className={styles.controlSection} data-reveal>
         <div>
           <h2>
-            You’re <span className={styles.headingStrong}>using</span> AI
+            Bring AI to the <span className={styles.headingStrong}>whole team</span>
             <br />
-            Now make it{' '}
-            <span className={`${styles.headingAccent} ${styles.compoundWord}`}>compound</span>
+            with{' '}
+            <span className={`${styles.headingAccent} ${styles.compoundWord}`}>confidence</span>
           </h2>
           <p>
-            Agor is built for the{' '}
+            Agor gives your{' '}
             <Link href={AI_ENABLEMENT_POST_URL} target="_blank" rel="noopener noreferrer">
-              AI Enablement Engineer
-            </Link>
-            , acting as a force-multiplier for everyone around them. Give them the ideal platform to
-            make every win visible and shared, every pattern reusable, and let your AI leadership
-            watch as it compounds.
+              AI enablers
+            </Link>{' '}
+            a way to make useful work visible, bring colleagues into it, and turn it into workflows
+            everyone can use and improve. Along the way, you know what’s running, what it costs, and
+            who can do what.
           </p>
           <div className={styles.controlActions}>
             <button
@@ -1310,14 +1309,14 @@ export function LandingPage() {
         </div>
         <section className={styles.liveSection} data-reveal>
           <h2 className={styles.liveStatement}>
-            Set your team <span className={styles.headingStrong}>free</span> from{' '}
-            <span className={styles.headingAccent}>the terminal</span>
+            Work <span className={styles.headingStrong}>together</span>{' '}
+            <span className={styles.headingAccent}>again</span>
           </h2>
           <p className={styles.liveSub}>
             One shared board instead of ten private terminals.
             <br />
             <span className={styles.headingDim}>
-              Agor puts your whole team on one live,{' '}
+              Bring your team and agents together on one live,{' '}
               <span className={styles.headingAccent}>multiplayer canvas</span>.
             </span>
           </p>
@@ -1366,13 +1365,13 @@ export function LandingPage() {
           <div className={styles.sectionHeader}>
             <span className={styles.eyebrow}>Meet the Preset agent team</span>
             <h2>
-              Full agentic <span className={styles.headingAccent}>coverage</span> for{' '}
-              <span className={styles.headingStrong}>any</span> org
+              Teammates we <span className={styles.headingStrong}>raised</span>{' '}
+              <span className={styles.headingAccent}>together</span>
             </h2>
           </div>
           <p className={styles.rosterBody}>
-            These teammates are a few examples from our own Agor instance today. Each with a name, a
-            job, with its own memory and personality.
+            A few examples from our own Agor instance today. Each has a name, a job, its own memory,
+            and a team of people who teach it and keep it improving.
           </p>
           <p className={styles.rosterStatusLine}>
             <span className={styles.rosterStatusDot} aria-hidden="true" />
@@ -1414,7 +1413,7 @@ export function LandingPage() {
                 onMouseLeave={() => setHoveredMember(null)}
                 onFocus={() => setHoveredMember(index)}
                 onBlur={() => setHoveredMember(null)}
-                aria-label={`${member.name} — ${member.role}`}
+                aria-label={`${member.name}: ${member.role}`}
               >
                 <span className={styles.blipIcon}>
                   <member.icon size={19} aria-hidden />
@@ -1477,12 +1476,12 @@ export function LandingPage() {
       <section className={styles.finalCta} data-reveal>
         <div className={styles.ctaCard}>
           <h2>
-            Give your <span className={styles.headingAccent}>AI teammates</span> a place to{' '}
-            <span className={styles.headingStrong}>work</span>
+            Bring your <span className={styles.headingStrong}>team</span> and{' '}
+            <span className={styles.headingAccent}>agents</span> together
           </h2>
           <p>
-            Onboard your first AI teammate via the self-hosted build, or reach out to build at
-            enterprise-ready scale. Agor Cloud is opening to teams now.
+            Start on your own with the self-hosted build and bring colleagues in as you go, or talk
+            to us about rolling Agor out across your team. Agor Cloud is opening to teams now.
           </p>
           <div className={styles.heroActions}>
             <button
@@ -1513,7 +1512,7 @@ export function LandingPage() {
           <img src={`${basePath}${LOGO_MARK_PATH}`} alt="" width="44" height="44" />
           <div>
             <strong>agor</strong>
-            <p>The command center for AI enablement.</p>
+            <p>Multiplayer AI. Work together again.</p>
             <Link href="/blog/making-of-agor" className={styles.footerEtymology}>
               <span>AG</span>ent <span>OR</span>chestration
             </Link>
