@@ -4,24 +4,37 @@ export const TEAM_SIGNUP_STATUS_URL = `${CONSOLE_ORIGIN}/api/team-signup/status`
 
 export type TeamSignupStatus = 'available' | 'invite_required' | 'capacity_unavailable';
 
+/** Which button the visitor was shown; reported to analytics alongside the status. */
+export type CloudCtaVariant = 'console' | 'waitlist' | 'capacity' | 'hubspot_modal';
+
 export interface CloudCta {
   label: string;
   href: string;
+  variant: CloudCtaVariant;
 }
 
 const CTA_BY_STATUS: Record<TeamSignupStatus, CloudCta> = {
-  available: { label: 'Get Agor Cloud', href: `${CONSOLE_ORIGIN}/` },
+  available: { label: 'Get Agor Cloud', href: `${CONSOLE_ORIGIN}/`, variant: 'console' },
   invite_required: {
     label: 'Join the Agor Cloud waitlist',
     href: `${CONSOLE_ORIGIN}/request-invite`,
+    variant: 'waitlist',
   },
-  // The console root serves both sign-in and the waitlist, so it also covers
-  // the unknown-status case (the no-JS href; CloudCtaLink opens the HubSpot
-  // modal on click instead).
-  capacity_unavailable: { label: 'Sign up for Agor Cloud', href: `${CONSOLE_ORIGIN}/` },
+  capacity_unavailable: {
+    label: 'Sign up for Agor Cloud',
+    href: `${CONSOLE_ORIGIN}/`,
+    variant: 'capacity',
+  },
 };
 
-const FALLBACK_CLOUD_CTA = CTA_BY_STATUS.capacity_unavailable;
+// Unknown status (loading, failed, unexpected body): CloudCtaLink opens the
+// HubSpot modal on click. The console root is the no-JS href since it serves
+// both sign-in and the waitlist.
+const UNKNOWN_STATUS_CTA: CloudCta = {
+  label: 'Sign up for Agor Cloud',
+  href: `${CONSOLE_ORIGIN}/`,
+  variant: 'hubspot_modal',
+};
 
 const CTA_UTM_BASE = 'utm_source=agor.live&utm_medium=referral&utm_campaign=agor-cloud-cta';
 
@@ -31,9 +44,9 @@ export function isTeamSignupStatus(value: unknown): value is TeamSignupStatus {
 
 /** `placement` becomes utm_content, so each CTA spot is attributable in the console. */
 export function cloudCtaFor(status: TeamSignupStatus | null, placement: string): CloudCta {
-  const cta = status ? CTA_BY_STATUS[status] : FALLBACK_CLOUD_CTA;
+  const cta = status ? CTA_BY_STATUS[status] : UNKNOWN_STATUS_CTA;
   return {
-    label: cta.label,
+    ...cta,
     href: `${cta.href}?${CTA_UTM_BASE}&utm_content=${encodeURIComponent(placement)}`,
   };
 }

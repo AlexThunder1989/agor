@@ -13,34 +13,68 @@ import { HubSpotFormModal } from './HubSpotFormModal';
 
 const STATUS_TIMEOUT_MS = 4000;
 
+// 'pending' = request still in flight; 'unknown' = failed or unexpected body.
+type ReportedStatus = TeamSignupStatus | 'pending' | 'unknown';
+
+// Dev-only: ?cloud_status=available|invite_required|capacity_unavailable|error
+// forces a gate state, since the status API only allows agor.live origins.
+function devStatusOverride(): TeamSignupStatus | null | undefined {
+  if (process.env.NODE_ENV === 'production') return undefined;
+  const forced = new URLSearchParams(window.location.search).get('cloud_status');
+  if (forced === 'error') return null;
+  return isTeamSignupStatus(forced) ? forced : undefined;
+}
+
+// Status params ride on every later GA4 event (gtag 'set'); the one-off event
+// and dataLayer push record which button this page view showed.
+function reportStatus(status: TeamSignupStatus | null) {
+  const params = {
+    cloud_signup_status: status ?? 'unknown',
+    cloud_cta_variant: cloudCtaFor(status, '').variant,
+  };
+  window.gtag?.('set', params);
+  window.gtag?.('event', 'agor_cloud_cta_status', params);
+  window.dataLayer = window.dataLayer || [];
+  window.dataLayer.push({ event: 'agor_cloud_cta_status', ...params });
+}
+
 // One request per page load, shared by every CTA on the page.
 let statusRequest: Promise<TeamSignupStatus | null> | undefined;
 
 function fetchTeamSignupStatus(): Promise<TeamSignupStatus | null> {
-  statusRequest ??= fetch(TEAM_SIGNUP_STATUS_URL, {
-    signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
-  })
-    .then((response) => (response.ok ? response.json() : null))
-    .then((body) => (isTeamSignupStatus(body?.status) ? body.status : null))
-    .catch(() => null);
+  if (!statusRequest) {
+    const forced = devStatusOverride();
+    const request =
+      forced !== undefined
+        ? Promise.resolve(forced)
+        : fetch(TEAM_SIGNUP_STATUS_URL, { signal: AbortSignal.timeout(STATUS_TIMEOUT_MS) })
+            .then((response) => (response.ok ? response.json() : null))
+            .then((body) => (isTeamSignupStatus(body?.status) ? body.status : null))
+            .catch(() => null);
+    statusRequest = request.then((status) => {
+      reportStatus(status);
+      return status;
+    });
+  }
   return statusRequest;
 }
 
 /** Static export renders the fallback CTA; the live gate status swaps it in after hydration. */
-export function useCloudCta(placement: string): CloudCta & { status: TeamSignupStatus | null } {
-  const [status, setStatus] = useState<TeamSignupStatus | null>(null);
+export function useCloudCta(placement: string): CloudCta & { status: ReportedStatus } {
+  const [status, setStatus] = useState<ReportedStatus>('pending');
 
   useEffect(() => {
     let cancelled = false;
     fetchTeamSignupStatus().then((next) => {
-      if (!cancelled) setStatus(next);
+      if (!cancelled) setStatus(next ?? 'unknown');
     });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  return { ...cloudCtaFor(status, placement), status };
+  const known = status === 'pending' || status === 'unknown' ? null : status;
+  return { ...cloudCtaFor(known, placement), status };
 }
 
 interface CloudCtaLinkProps {
@@ -56,18 +90,19 @@ interface CloudCtaLinkProps {
  * HubSpot sign-up modal instead; the href stays as the no-JS fallback.
  */
 export function CloudCtaLink({ placement, className, suffix }: CloudCtaLinkProps) {
-  const { label, href, status } = useCloudCta(placement);
+  const { label, href, status, variant } = useCloudCta(placement);
   const [isFormOpen, setIsFormOpen] = useState(false);
 
   const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
-    const w = window as Window & { dataLayer?: unknown[] };
-    w.dataLayer = w.dataLayer || [];
-    w.dataLayer.push({
-      event: 'agor_cloud_cta_click',
+    const params = {
       source_page: placement,
-      signup_status: status ?? 'unknown',
-    });
-    if (status === null) {
+      cloud_signup_status: status,
+      cloud_cta_variant: variant,
+    };
+    window.gtag?.('event', 'agor_cloud_cta_click', params);
+    window.dataLayer = window.dataLayer || [];
+    window.dataLayer.push({ event: 'agor_cloud_cta_click', ...params });
+    if (variant === 'hubspot_modal') {
       event.preventDefault();
       setIsFormOpen(true);
     }
