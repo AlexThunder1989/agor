@@ -1,3 +1,13 @@
+// Marketing landing pages (hub-and-spoke off the homepage; see
+// components/landing/pages.ts): full-bleed, hidden from the sidebar.
+const landingPageMeta = {
+  type: 'page' as const,
+  display: 'hidden' as const,
+  theme: {
+    layout: 'full' as const,
+  },
+};
+
 export default {
   index: {
     title: 'Home',
@@ -30,6 +40,11 @@ export default {
       layout: 'full',
     },
   },
+  multiplayer: landingPageMeta,
+  board: landingPageMeta,
+  teammates: landingPageMeta,
+  'command-center': landingPageMeta,
+  governance: landingPageMeta,
   // Navbar links are separate from the content folders so Docs and Blog can
   // also remain in the shared root sidebar on every content surface.
   'docs-navbar': { title: 'Docs', type: 'page', href: '/guide' },

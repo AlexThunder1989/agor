@@ -2,6 +2,7 @@
 
 import { type MouseEvent, type ReactNode, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { trackEvent } from '../lib/analytics';
 import {
   type CloudCta,
   cloudCtaFor,
@@ -33,9 +34,7 @@ function reportStatus(status: TeamSignupStatus | null) {
     cloud_cta_variant: cloudCtaFor(status, '').variant,
   };
   window.gtag?.('set', params);
-  window.gtag?.('event', 'agor_cloud_cta_status', params);
-  window.dataLayer = window.dataLayer || [];
-  window.dataLayer.push({ event: 'agor_cloud_cta_status', ...params });
+  trackEvent('agor_cloud_cta_status', params);
 }
 
 // One request per page load, shared by every CTA on the page.
@@ -99,9 +98,7 @@ export function CloudCtaLink({ placement, className, suffix }: CloudCtaLinkProps
       cloud_signup_status: status,
       cloud_cta_variant: variant,
     };
-    window.gtag?.('event', 'agor_cloud_cta_click', params);
-    window.dataLayer = window.dataLayer || [];
-    window.dataLayer.push({ event: 'agor_cloud_cta_click', ...params });
+    trackEvent('agor_cloud_cta_click', params);
     if (variant === 'hubspot_modal') {
       event.preventDefault();
       setIsFormOpen(true);

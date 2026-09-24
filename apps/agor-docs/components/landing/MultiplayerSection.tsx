@@ -1,0 +1,102 @@
+'use client';
+
+import type { CSSProperties } from 'react';
+import Aurora from '../Aurora/Aurora';
+import styles from '../LandingPage.module.css';
+import { LearnMore } from './LandingLink';
+
+// Harnesses with an executor handler in packages/executor/src/sdk-handlers.
+// Logos mirror the in-app ToolIcon set (apps/agor-ui/src/assets/tools), copied
+// into this app's public/tools. Cursor is in beta and has no logo asset yet —
+// it falls back to its ⌘ glyph until one lands.
+const harnesses: Array<{ name: string; logo?: string; glyph?: string; beta?: boolean }> = [
+  { name: 'Claude Code', logo: '/tools/claude-code.png' },
+  { name: 'Codex', logo: '/tools/codex.png' },
+  { name: 'Gemini', logo: '/tools/gemini.png' },
+  { name: 'Copilot', logo: '/tools/copilot.png' },
+  { name: 'OpenCode', logo: '/tools/opencode.png' },
+  { name: 'Cursor', logo: '/tools/cursor.png', beta: true },
+];
+
+const revealDelay = (index: number): CSSProperties =>
+  ({ '--reveal-delay': `${index * 70}ms` }) as CSSProperties;
+
+// Multiplayer numbered cards (mockup design language, our copy)
+const liveCards = [
+  {
+    title: 'Live presence',
+    body: 'Cursors, comments, and reactions as work happens, all on the same board.',
+  },
+  {
+    title: 'Shared dev environments',
+    body: 'Engineers, reviewers, PMs, and QA rally around the same branches and builds. No more “spin up your own to see it.”',
+  },
+  {
+    title: 'Learn from each other',
+    body: 'Watch how teammates prompt, standardize the patterns that work, and build a shared knowledge base as you go.',
+  },
+];
+
+export function MultiplayerSection({ sampler = false }: { sampler?: boolean }) {
+  return (
+    <div className={styles.auroraBand}>
+      <div className={styles.bandAurora} aria-hidden="true">
+        {/* Warm ramp sampled from the demo board's background — ambient
+            edge-light echo of the hero video, TV-backlight style. */}
+        <Aurora colorStops={['#f12711', '#f5af19', '#ffd166']} amplitude={0.9} blend={1} />
+      </div>
+      <section className={styles.liveSection} data-reveal>
+        <h2 className={styles.liveStatement}>
+          Work <span className={styles.headingStrong}>together</span>{' '}
+          <span className={styles.headingAccent}>again</span>
+        </h2>
+        <p className={styles.liveSub}>
+          One shared board instead of ten private terminals.
+          <br />
+          <span className={styles.headingDim}>
+            Bring your team and agents together on one live,{' '}
+            <span className={styles.headingAccent}>multiplayer canvas</span>.
+          </span>
+        </p>
+        <div className={styles.liveGrid}>
+          {liveCards.map((card, index) => (
+            <article
+              className={styles.numberedCard}
+              key={card.title}
+              data-reveal
+              style={revealDelay(index)}
+            >
+              <h3>{card.title}</h3>
+              <p>{card.body}</p>
+            </article>
+          ))}
+        </div>
+        {sampler && <LearnMore page="multiplayer" />}
+      </section>
+
+      <section className={styles.harnessStrip} data-reveal>
+        <span className={styles.harnessLabel}>Built on the harnesses you already use</span>
+        <ul className={styles.harnessList}>
+          {harnesses.map((harness) => (
+            <li className={styles.harnessItem} key={harness.name}>
+              <span className={styles.harnessLogo}>
+                {harness.logo ? (
+                  // biome-ignore lint/performance/noImgElement: Static brand logo
+                  <img src={harness.logo} alt={`${harness.name} logo`} />
+                ) : (
+                  <span className={styles.harnessGlyph}>{harness.glyph}</span>
+                )}
+              </span>
+              <span className={styles.harnessName}>{harness.name}</span>
+              {harness.beta ? <span className={styles.harnessBeta}>Beta</span> : null}
+            </li>
+          ))}
+        </ul>
+        <p className={styles.harnessNote}>
+          Bring your own provider and subscription. Pick the best harness per session, no lock-in.
+          All in a web workspace that leaves the terminal behind.
+        </p>
+      </section>
+    </div>
+  );
+}

@@ -7,4 +7,5 @@ export { ContactLanding } from './ContactLanding';
 export { GifGallery } from './GifGallery';
 export { JoinBetaCTA } from './JoinBetaCTA';
 export { LandingPage } from './LandingPage';
+export { FeatureLanding } from './landing/FeatureLanding';
 export { YouTubeEmbed } from './YouTubeEmbed';

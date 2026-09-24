@@ -2656,3 +2656,99 @@
     max-height: max(300px, calc(100dvh - 438px));
   }
 }
+
+/* --- Hub-and-spoke navigation ---------------------------------------------
+ * Home-hero chips that fan out to each landing page, the "learn more"
+ * hand-off under each home sampler section, and the docs / sibling-page
+ * links at the foot of every landing page. */
+.heroHub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 26px;
+}
+
+.heroHubLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--landing-line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--landing-ink);
+  font-family: var(--font-mono-stack);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease;
+}
+
+.heroHubLink:hover {
+  border-color: rgba(52, 230, 196, 0.6);
+  background: rgba(52, 230, 196, 0.1);
+  color: var(--landing-teal);
+}
+
+.learnMore {
+  margin: 28px 0 0;
+  text-align: center;
+}
+
+.workspaceCopy .learnMore,
+.rosterCopy .learnMore,
+.controlSection .learnMore {
+  text-align: left;
+}
+
+.learnMoreLink,
+.problemLink,
+.pageLinksList a {
+  color: var(--landing-teal);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.learnMoreLink:hover,
+.problemLink:hover,
+.pageLinksList a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.problemLink {
+  display: inline-block;
+  margin-top: 12px;
+  font-size: 0.9rem;
+}
+
+.pageLinks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 40px;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 72px 28px 24px;
+}
+
+.pageLinksTitle {
+  margin: 0 0 16px;
+  color: var(--landing-ink);
+  font-family: var(--font-display-stack);
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.pageLinksList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pageLinksList li + li {
+  margin-top: 10px;
+}
