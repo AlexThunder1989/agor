@@ -231,17 +231,15 @@
   hyphens: none;
 }
 
-/* Hero A/B variant sub-headline — only rendered when a heroVariant prop is
- * passed (see heroVariants.tsx); the default "/" hero has no h2. Same
- * hairline-heading family as h1, one size down. */
+/* Hero sub-headline — same hairline-heading family as h1, one size down. */
 .heroCopy h2 {
   max-width: 44ch;
   margin: 14px auto 0;
   font-size: clamp(1.7rem, 3.2vw, 2.5rem);
 }
 
-/* Author-controlled line breaks for hero variant copy (\n in
- * heroVariants.tsx → <br/> from HighlightedText). Desktop-and-up only:
+/* Author-controlled line breaks for hero copy (\n in heroCopy.tsx → <br/>
+ * from HighlightedText). Desktop-and-up only:
  * nowrap makes each authored line exactly one line (no extra browser-
  * chosen wraps), with max-width lifted since the author is now doing the
  * wrapping. Below 640px we deliberately fall back to normal wrapping —

@@ -41,7 +41,7 @@ import { getBasePath, LOGO_MARK_PATH } from '../lib/siteMetadata';
 import Aurora from './Aurora/Aurora';
 import { HubSpotFormModal } from './HubSpotFormModal';
 import { HubSpotMeetingModal } from './HubSpotMeetingModal';
-import { HERO_VARIANTS, type HeroVariantKey, HighlightedText } from './heroVariants';
+import { HighlightedText, HOME_HERO } from './heroCopy';
 import styles from './LandingPage.module.css';
 import Orb from './Orb/Orb';
 import { useFitText } from './useFitText';
@@ -547,17 +547,9 @@ const liveCards = [
   },
 ];
 
-interface LandingPageProps {
-  /** Homepage hero A/B test arm — overrides headline/subhead/primary CTA
-   * only; every section below the hero (and "/" itself) stays identical so
-   * the test isolates the hero thesis. See heroVariants.tsx. */
-  heroVariant?: HeroVariantKey;
-}
-
-export function LandingPage({ heroVariant }: LandingPageProps = {}) {
-  const variant = heroVariant ? HERO_VARIANTS[heroVariant] : undefined;
-  const heroH1Ref = useFitText<HTMLHeadingElement>([variant?.headline]);
-  const heroH2Ref = useFitText<HTMLHeadingElement>([variant?.subheadline]);
+export function LandingPage() {
+  const heroH1Ref = useFitText<HTMLHeadingElement>([HOME_HERO.headline]);
+  const heroH2Ref = useFitText<HTMLHeadingElement>([HOME_HERO.subheadline]);
   const landingRef = useRef<HTMLElement>(null);
   const [isBetaFormOpen, setIsBetaFormOpen] = useState(false);
   // Which on-page CTA opened the (single, shared) beta form modal — stamped
@@ -774,30 +766,19 @@ export function LandingPage({ heroVariant }: LandingPageProps = {}) {
         <section className={styles.heroSection}>
           <div className={styles.heroCopy} data-reveal>
             <p className={styles.heroBadge}>The command center for AI enablement</p>
-            <h1 ref={heroH1Ref} className={variant ? styles.heroForcedBreak : undefined}>
-              {variant ? (
-                <HighlightedText text={variant.headline} />
-              ) : (
-                <>
-                  Empower your <span className={styles.headingStrong}>team</span> with{' '}
-                  <span className={styles.headingAccent}>AI teammates</span>
-                </>
-              )}
+            <h1 ref={heroH1Ref} className={styles.heroForcedBreak}>
+              <HighlightedText text={HOME_HERO.headline} />
             </h1>
-            {variant && (
-              <h2 ref={heroH2Ref} className={styles.heroForcedBreak}>
-                <HighlightedText text={variant.subheadline} />
-              </h2>
-            )}
+            <h2 ref={heroH2Ref} className={styles.heroForcedBreak}>
+              <HighlightedText text={HOME_HERO.subheadline} />
+            </h2>
             <div className={styles.heroActions}>
               <button
                 type="button"
                 className={styles.primaryButton}
-                onClick={() =>
-                  openBetaForm(variant ? `landing-hero-${heroVariant}` : 'landing-hero')
-                }
+                onClick={() => openBetaForm('landing-hero')}
               >
-                {variant ? variant.ctaLabel : 'Sign up for Agor Cloud'}
+                {HOME_HERO.ctaLabel}
               </button>
               <button
                 type="button"
