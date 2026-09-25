@@ -53,7 +53,7 @@ export const boardDetails: LandingDetail[] = [
       },
       {
         title: 'Cards beyond code',
-        body: 'Cards (beta) put tickets, leads, or content pieces on the same canvas, managed by an AI teammate.',
+        body: 'Cards put tickets, leads, or content pieces on the same canvas, managed by an AI teammate.',
       },
     ],
     media: {
