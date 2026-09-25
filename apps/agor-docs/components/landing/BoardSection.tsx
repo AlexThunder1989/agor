@@ -12,6 +12,7 @@ import { LearnMore } from './LandingLink';
 const showcaseSlides = [
   {
     label: 'Multiplayer presence',
+    anchor: 'presence',
     blurb:
       'Your team and its agents share one board: live cursors, shared sessions, queued follow-ups.',
     video: '/videos/showcase-multiplayer.mp4',
@@ -20,6 +21,7 @@ const showcaseSlides = [
   },
   {
     label: 'Spatial boards',
+    anchor: 'boards-and-zones',
     blurb: 'Arrange branches, zones, sessions, and teammates on one spatial canvas.',
     video: '/videos/showcase-boards.mp4',
     videoSmall: '/videos/showcase-boards-540.mp4',
@@ -27,6 +29,7 @@ const showcaseSlides = [
   },
   {
     label: 'Rich agent sessions',
+    anchor: 'sessions',
     blurb: 'Follow an agent’s tool calls, decisions, and handoffs, and bring a colleague in.',
     video: '/videos/showcase-sessions.mp4',
     videoSmall: '/videos/showcase-sessions-540.mp4',
@@ -34,6 +37,7 @@ const showcaseSlides = [
   },
   {
     label: 'Message gateway',
+    anchor: 'gateway',
     blurb:
       'Work with agents from Slack, GitHub, and the threads where your team already talks. No board required.',
     video: '/videos/showcase-gateway.mp4',
@@ -264,7 +268,13 @@ export function BoardSection({ sampler = false }: { sampler?: boolean }) {
           ))}
         </div>
       </div>
-      {sampler && <LearnMore page="board" />}
+      {sampler && (
+        <LearnMore
+          page="board"
+          anchor={showcaseSlides[activeShot].anchor}
+          label={`More on ${showcaseSlides[activeShot].label.toLowerCase()}`}
+        />
+      )}
     </section>
   );
 }

@@ -3,7 +3,7 @@
 import type { CSSProperties } from 'react';
 import Aurora from '../Aurora/Aurora';
 import styles from '../LandingPage.module.css';
-import { LearnMore } from './LandingLink';
+import { LandingLink, LearnMore } from './LandingLink';
 
 // Harnesses with an executor handler in packages/executor/src/sdk-handlers.
 // Logos mirror the in-app ToolIcon set (apps/agor-ui/src/assets/tools), copied
@@ -25,14 +25,17 @@ const revealDelay = (index: number): CSSProperties =>
 const liveCards = [
   {
     title: 'Live presence',
-    body: 'Cursors, comments, and reactions as work happens, all on the same board.',
+    anchor: 'live-presence',
+    body: 'Cursors, comments, and live sessions as work happens, all on the same board.',
   },
   {
     title: 'Shared dev environments',
+    anchor: 'shared-environments',
     body: 'Engineers, reviewers, PMs, and QA rally around the same branches and builds. No more “spin up your own to see it.”',
   },
   {
     title: 'Learn from each other',
+    anchor: 'learn-together',
     body: 'Watch how teammates prompt, standardize the patterns that work, and build a shared knowledge base as you go.',
   },
 ];
@@ -66,7 +69,16 @@ export function MultiplayerSection({ sampler = false }: { sampler?: boolean }) {
               data-reveal
               style={revealDelay(index)}
             >
-              <h3>{card.title}</h3>
+              <h3>
+                <LandingLink
+                  page="multiplayer"
+                  anchor={card.anchor}
+                  placement={sampler ? 'home-section' : 'multiplayer-page-cards'}
+                  className={styles.titleLink}
+                >
+                  {card.title}
+                </LandingLink>
+              </h3>
               <p>{card.body}</p>
             </article>
           ))}
@@ -75,7 +87,16 @@ export function MultiplayerSection({ sampler = false }: { sampler?: boolean }) {
       </section>
 
       <section className={styles.harnessStrip} data-reveal>
-        <span className={styles.harnessLabel}>Built on the harnesses you already use</span>
+        <span className={styles.harnessLabel}>
+          <LandingLink
+            page="multiplayer"
+            anchor="any-agent"
+            placement={sampler ? 'home-section' : 'multiplayer-page-harness'}
+            className={styles.titleLink}
+          >
+            Built on the harnesses you already use
+          </LandingLink>
+        </span>
         <ul className={styles.harnessList}>
           {harnesses.map((harness) => (
             <li className={styles.harnessItem} key={harness.name}>

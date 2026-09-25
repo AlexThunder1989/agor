@@ -1,10 +1,9 @@
 'use client';
 
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import Link from 'next/link';
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import styles from '../LandingPage.module.css';
-import { LearnMore } from './LandingLink';
+import { LandingLink, LearnMore } from './LandingLink';
 
 // Spatial boards, rich sessions, and the message gateway are deliberately
 // absent — the "See the work and shape it together" showcase already tells
@@ -14,37 +13,42 @@ const productPreviews = [
     title: 'Persistent teammates',
     body: 'Give long-lived helpers memory, skills, schedules, and team-wide reach beyond one-off prompts.',
     image: '/screenshots/teammates-list.png',
-    href: '/guide/teammates',
+    page: 'teammates' as const,
   },
   {
     title: 'Scheduler',
     body: 'Run standups, audits, digests, reports, and teammate heartbeats without waiting to be asked.',
     image: '/screenshots/scheduler-modal.png',
-    href: '/guide/scheduler',
+    page: 'teammates' as const,
+    anchor: 'schedules',
   },
   {
     title: 'Artifacts',
     body: 'Let agents render live dashboards, mockups, calculators, and tools directly on the board.',
     image: '/images/artifacts-hero.png',
-    href: '/guide/artifacts',
+    page: 'command-center' as const,
+    anchor: 'artifacts',
   },
   {
     title: 'Built-in knowledge base',
     body: 'Give your team and its agents one shared place for decisions, runbooks, prompts, memory, and reusable context.',
     image: '/images/knowledge-hero.png',
-    href: '/guide/knowledge',
+    page: 'command-center' as const,
+    anchor: 'knowledge',
   },
   {
     title: 'Branch environments',
     body: 'Start, stop, health-check, and inspect logs for every branch environment without port fights.',
     image: '/screenshots/env_configuration.png',
-    href: '/guide/environment-configuration',
+    page: 'command-center' as const,
+    anchor: 'environments',
   },
   {
     title: 'MCP-native control',
     body: 'Anything a user can do in Agor, an agent can do too: spawn peers, move work, schedule runs, and report back.',
     image: '/screenshots/mcp_environment.png',
-    href: '/guide/internal-mcp',
+    page: 'command-center' as const,
+    anchor: 'mcp',
   },
 ];
 
@@ -143,9 +147,14 @@ export function CommandCenterSection({ sampler = false }: { sampler?: boolean })
                       <h3>{preview.title}</h3>
                       <p>{preview.body}</p>
                     </div>
-                    <Link href={preview.href} className={styles.secondaryButton}>
+                    <LandingLink
+                      page={preview.page}
+                      anchor={'anchor' in preview ? preview.anchor : undefined}
+                      placement={sampler ? 'home-section' : 'command-center-page-carousel'}
+                      className={styles.secondaryButton}
+                    >
                       Learn more →
-                    </Link>
+                    </LandingLink>
                   </div>
                   <button
                     type="button"

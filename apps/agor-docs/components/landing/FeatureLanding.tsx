@@ -5,6 +5,8 @@ import type { ReactNode } from 'react';
 import styles from '../LandingPage.module.css';
 import { BoardSection } from './BoardSection';
 import { CommandCenterSection } from './CommandCenterSection';
+import { DetailNav, DetailSection } from './DetailSection';
+import { LANDING_DETAILS } from './details';
 import { GovernanceSection } from './GovernanceSection';
 import { LandingHero } from './LandingHero';
 import { LandingLink } from './LandingLink';
@@ -18,25 +20,35 @@ import { TeammatesSection } from './TeammatesSection';
 const PAGE_SECTIONS: Record<LandingPageId, ReactNode> = {
   multiplayer: <MultiplayerSection />,
   board: <BoardSection />,
-  teammates: (
-    <>
-      <TeammatesSection />
-      <RosterSection />
-    </>
-  ),
+  teammates: <TeammatesSection />,
   'command-center': <CommandCenterSection />,
   governance: <GovernanceSection />,
 };
 
-/** Spoke page: templated hero, the section in full, then docs and sibling pages. */
+// Proof that closes the story, after the detail blocks.
+const PAGE_PROOF: Partial<Record<LandingPageId, ReactNode>> = {
+  teammates: <RosterSection />,
+};
+
+/**
+ * Spoke page: templated hero with jump links, the home section in full, the
+ * detail blocks (deep-link targets), proof, then docs and sibling pages.
+ */
 export function FeatureLanding({ page }: { page: LandingPageId }) {
   const entry = landingPage(page);
+  const details = LANDING_DETAILS[page];
   const ctaPrefix = `${page}-page`;
 
   return (
     <LandingShell ctaPrefix={ctaPrefix}>
-      <LandingHero badge={entry.badge} copy={entry.hero} ctaPlacement={`${ctaPrefix}-hero`} />
+      <LandingHero badge={entry.badge} copy={entry.hero} ctaPlacement={`${ctaPrefix}-hero`}>
+        {details.length ? <DetailNav details={details} /> : null}
+      </LandingHero>
       {PAGE_SECTIONS[page]}
+      {details.map((detail) => (
+        <DetailSection key={detail.id} detail={detail} />
+      ))}
+      {PAGE_PROOF[page]}
       <section className={styles.pageLinks} data-reveal>
         <div>
           <h2 className={styles.pageLinksTitle}>Go deeper in the docs</h2>

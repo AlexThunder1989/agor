@@ -23,7 +23,8 @@ export const LANDING_PAGES: LandingPageEntry[] = [
     badge: 'Multiplayer AI',
     hero: {
       headline: 'Work together\n[again]',
-      subheadline: 'Bring your {team} and {agents} together, and build on what works.',
+      subheadline:
+        'Bring your {team} and {agents} together on one live board, and learn from how everyone works with AI.',
     },
     docs: [
       { label: 'Multiplayer & social features', href: '/guide/multiplayer-social' },
@@ -38,7 +39,8 @@ export const LANDING_PAGES: LandingPageEntry[] = [
     badge: 'Live spatial board',
     hero: {
       headline: 'See the work and\n[shape it together]',
-      subheadline: 'Every agent session, branch, and zone on one live {board}.',
+      subheadline:
+        'Follow every agent, see what needs you, and bring your {team} into the same view.',
     },
     docs: [
       { label: 'Boards & zones', href: '/guide/boards' },
@@ -85,7 +87,7 @@ export const LANDING_PAGES: LandingPageEntry[] = [
     badge: 'Governance & observability',
     hero: {
       headline: 'Know what’s [running]',
-      subheadline: 'And what it costs, and {who can do what}.',
+      subheadline: 'See what it costs and {who can do what}.',
     },
     docs: [
       { label: 'Security', href: '/security' },

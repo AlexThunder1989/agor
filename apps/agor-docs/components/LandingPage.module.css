@@ -2752,3 +2752,141 @@
 .pageLinksList li + li {
   margin-top: 10px;
 }
+
+/* --- Landing-page detail blocks --------------------------------------------
+ * Copy beside media, alternating sides down the page. Anchored by id so the
+ * home page can deep-link; scroll-margin clears the sticky navbar. */
+.detailNav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 40px 28px 0;
+}
+
+.detailSection {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: clamp(32px, 5vw, 72px);
+  align-items: center;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: clamp(64px, 9vh, 110px) 28px;
+  scroll-margin-top: 80px;
+}
+
+.detailSection:nth-of-type(even) .detailCopy {
+  order: 2;
+}
+
+.detailTextOnly {
+  grid-template-columns: minmax(0, 760px);
+  justify-content: center;
+}
+
+.detailTitle {
+  margin: 0;
+  color: var(--landing-ink);
+  font-family: var(--font-body-stack);
+  font-size: clamp(2rem, 3.6vw, 3rem);
+  font-weight: 300;
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+}
+
+.detailCopy p {
+  margin: 18px 0 0;
+  color: var(--landing-muted);
+  font-size: 1.05rem;
+  line-height: 1.65;
+}
+
+.detailPoints {
+  display: grid;
+  gap: 14px;
+  margin: 26px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.detailPoints li {
+  display: grid;
+  gap: 4px;
+  padding-left: 16px;
+  border-left: 2px solid rgba(52, 230, 196, 0.45);
+}
+
+.detailPoints strong {
+  color: var(--landing-ink);
+  font-weight: 600;
+}
+
+.detailPoints span {
+  color: var(--landing-muted);
+  line-height: 1.55;
+}
+
+.detailCopy .detailLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  margin-top: 24px;
+}
+
+.detailLinks a {
+  color: var(--landing-teal);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.detailLinks a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.detailMediaFrame {
+  overflow: hidden;
+  border: 1px solid var(--landing-line);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.03);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+}
+
+.detailMedia {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+@media (max-width: 860px) {
+  .detailSection {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .detailSection:nth-of-type(even) .detailCopy {
+    order: 0;
+  }
+}
+
+.heroCopy .detailNav {
+  padding: 26px 0 0;
+}
+
+/* Card/item titles that double as deep links: keep the heading look, reveal
+ * the link on hover. */
+.titleLink {
+  color: inherit;
+  text-decoration: none;
+}
+
+.titleLink:hover {
+  color: var(--landing-teal);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.rosterSection {
+  scroll-margin-top: 80px;
+}

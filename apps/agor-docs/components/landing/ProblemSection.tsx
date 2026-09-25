@@ -14,12 +14,14 @@ const problemCards: Array<{
   icon: LucideIcon;
   title: string;
   page: LandingPageId;
+  anchor: string;
   body: ReactNode;
 }> = [
   {
     icon: UserX,
     title: 'Everyone’s figuring it out alone',
     page: 'multiplayer',
+    anchor: 'learn-together',
     body: (
       <>
         Each person experiments behind <strong>their own screen</strong>. Good techniques stay
@@ -31,6 +33,7 @@ const problemCards: Array<{
     icon: Boxes,
     title: 'Too many agents to track',
     page: 'command-center',
+    anchor: 'zones-and-prompts',
     body: (
       <>
         More agents and conversations mean more coordination. Which one is <strong>blocked</strong>?
@@ -42,6 +45,7 @@ const problemCards: Array<{
     icon: Repeat,
     title: 'Starting over every time',
     page: 'teammates',
+    anchor: 'memory',
     body: (
       <>
         Good context gets buried in old conversations, so every recurring task needs the{' '}
@@ -53,6 +57,7 @@ const problemCards: Array<{
     icon: Unlink,
     title: 'Workflows only one person can run',
     page: 'teammates',
+    anchor: 'shared-ownership',
     body: (
       <>
         That useful PR reviewer lives in <strong>one person’s setup</strong>. Nobody else can
@@ -64,6 +69,7 @@ const problemCards: Array<{
     icon: DatabaseZap,
     title: 'Context scattered everywhere',
     page: 'command-center',
+    anchor: 'knowledge',
     body: (
       <>
         Knowledge is <strong>spread</strong> across repos, docs, and DMs, so agents answer without
@@ -75,6 +81,7 @@ const problemCards: Array<{
     icon: EyeOff,
     title: 'New tools, same old habits',
     page: 'multiplayer',
+    anchor: 'enablers',
     body: (
       <>
         Handing out AI accounts doesn’t create <strong>shared practices</strong>. Individual wins
@@ -194,7 +201,12 @@ export function ProblemSection() {
               </span>
               <h3>{card.title}</h3>
               <p>{card.body}</p>
-              <LandingLink page={card.page} placement="home-problem" className={styles.problemLink}>
+              <LandingLink
+                page={card.page}
+                anchor={card.anchor}
+                placement="home-problem"
+                className={styles.problemLink}
+              >
                 See how Agor helps <span aria-hidden="true">→</span>
               </LandingLink>
             </article>

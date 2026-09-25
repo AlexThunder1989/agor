@@ -176,7 +176,7 @@ export function RosterSection({ sampler = false }: { sampler?: boolean }) {
   }, []);
 
   return (
-    <section className={styles.rosterSection} data-reveal>
+    <section id="roster" className={styles.rosterSection} data-reveal>
       <div className={styles.rosterCopy}>
         <div className={styles.sectionHeader}>
           <span className={styles.eyebrow}>Meet the Preset agent team</span>
@@ -196,7 +196,9 @@ export function RosterSection({ sampler = false }: { sampler?: boolean }) {
             <span className={styles.tapWord}>Tap</span> to meet them
           </span>
         </p>
-        {sampler && <LearnMore page="teammates" />}
+        {sampler && (
+          <LearnMore page="teammates" anchor="roster" label="Meet the team behind them" />
+        )}
       </div>
       <div className={styles.radarScope} ref={radarScopeRef}>
         <svg className={styles.radarSvg} viewBox="0 0 560 560" aria-hidden="true">

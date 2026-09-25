@@ -6,7 +6,8 @@ import { AI_ENABLEMENT_POST_URL } from '../../lib/links';
 import { CloudCtaLink } from '../CloudCtaLink';
 import styles from '../LandingPage.module.css';
 import { DemoButton } from './DemoButton';
-import { LearnMore } from './LandingLink';
+import { LandingLink, LearnMore } from './LandingLink';
+import type { LandingPageId } from './pages';
 
 // The "Compound Amplifying Bus": six trust items on a vertical mint spine —
 // the deliberate counterpoint to the six amber problem cards piled up in the
@@ -17,6 +18,8 @@ import { LearnMore } from './LandingLink';
 // spread each node's rings evenly across the shared 3s loop.
 const busItems: Array<{
   title: string;
+  page: LandingPageId;
+  anchor: string;
   desc: string;
   beta?: boolean;
   rippleSize: number;
@@ -24,36 +27,48 @@ const busItems: Array<{
 }> = [
   {
     title: 'Self-hosted & source-available',
+    page: 'governance',
+    anchor: 'self-hosted',
     desc: 'Your repos, your database, your infrastructure. Production use is permitted under BSL 1.1.',
     rippleSize: 10,
     rippleDelays: [0, 1500],
   },
   {
     title: 'No frontier lock-in',
+    page: 'governance',
+    anchor: 'model-choice',
     desc: 'Claude Code, Codex, Gemini, Copilot, OpenCode. Pick the best harness per session, and switch the day something better ships.',
     rippleSize: 13,
     rippleDelays: [0, 1000, 2000],
   },
   {
     title: 'Governance & visibility',
+    page: 'governance',
+    anchor: 'visibility',
     desc: 'Every session and prompt on one board, with usage tracked along the way. Know what’s running and what it costs.',
     rippleSize: 17,
     rippleDelays: [0, 750, 1500, 2250],
   },
   {
     title: 'MCP-native',
+    page: 'command-center',
+    anchor: 'mcp',
     desc: 'Anything you can do, an agent can do too, over Agor’s own MCP server: spawn peers, move work, schedule runs.',
     rippleSize: 20,
     rippleDelays: [0, 600, 1200, 1800, 2400],
   },
   {
     title: 'Execution isolation',
+    page: 'governance',
+    anchor: 'isolation',
     desc: 'Application RBAC paired with fail-closed local sandboxing or a reviewed delegated runtime.',
     rippleSize: 24,
     rippleDelays: [0, 600, 1200, 1800, 2400],
   },
   {
     title: 'Agor Cloud is coming',
+    page: 'governance',
+    anchor: 'cloud',
     desc: 'Managed hosting for teams who’d rather not run it themselves. ',
     beta: true,
     rippleSize: 27,
@@ -104,7 +119,16 @@ export function GovernanceSection({ sampler = false }: { sampler?: boolean }) {
               ))}
               <i className={styles.busNodeDot} />
             </span>
-            <h3 className={styles.busTitle}>{item.title}</h3>
+            <h3 className={styles.busTitle}>
+              <LandingLink
+                page={item.page}
+                anchor={item.anchor}
+                placement={sampler ? 'home-section' : 'governance-page-bus'}
+                className={styles.titleLink}
+              >
+                {item.title}
+              </LandingLink>
+            </h3>
             <div className={styles.busDesc}>
               {item.desc}
               {item.beta && (

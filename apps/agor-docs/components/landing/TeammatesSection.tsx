@@ -14,61 +14,56 @@ import { useState } from 'react';
 import { AI_ENABLEMENT_POST_URL } from '../../lib/links';
 import styles from '../LandingPage.module.css';
 import Orb from '../Orb/Orb';
-import { LearnMore } from './LandingLink';
+import { LandingLink, LearnMore } from './LandingLink';
 
 const featureCards: Array<{
   title: string;
   body: string;
-  href: string;
-  linkLabel: string;
+  /** Detail block on /teammates. */
+  anchor: string;
   icon: LucideIcon;
 }> = [
   {
     title: 'Shared memory',
     icon: Brain,
     body: 'Each teammate gets a namespace in the knowledge base: semantically searchable, durable, and shared with the team.',
-    href: '/guide/knowledge',
-    linkLabel: 'Explore Knowledge',
+    anchor: 'memory',
   },
   {
     title: 'Skills + MCP',
     icon: Blocks,
     body: 'Package repeatable workflows as skills and connect teammates to the MCP servers your team already trusts.',
-    href: '/guide/internal-mcp',
-    linkLabel: 'See MCP control',
+    anchor: 'skills-and-mcp',
   },
   {
     title: 'Conversational onboarding',
     icon: MessagesSquare,
     body: 'Teach a teammate by talking to it. Anyone on the team can refine it, and the useful parts become reusable context.',
-    href: '/guide/teammates',
-    linkLabel: 'Read about Teammates',
+    anchor: 'onboarding',
   },
   {
     title: 'Where your team works',
     icon: Hash,
     body: 'Reach teammates from Slack, GitHub, or wherever work already happens through gateway channels.',
-    href: '/guide/message-gateway',
-    linkLabel: 'Open Message Gateway',
+    anchor: 'channels',
   },
   {
     title: 'Scheduled agency',
     icon: CalendarClock,
     body: 'Run heartbeats, daily standups, audits, digests, or longer workflows without waiting for a prompt.',
-    href: '/guide/scheduler',
-    linkLabel: 'Explore Scheduler',
+    anchor: 'schedules',
   },
   {
     title: 'Identity + boundaries',
     icon: SlidersHorizontal,
     body: 'Define each teammate’s purpose, voice, and level of agency, so it knows how bold to be and when to ask first.',
-    href: '/blog/agent-modeling-101',
-    linkLabel: 'Agent modeling 101',
+    anchor: 'identity',
   },
 ];
 
 export function TeammatesSection({ sampler = false }: { sampler?: boolean }) {
   const [activeFeature, setActiveFeature] = useState(0);
+  const placement = sampler ? 'home-section' : 'teammates-page-ring';
 
   return (
     <section className={styles.workspaceSection} data-reveal>
@@ -128,9 +123,14 @@ export function TeammatesSection({ sampler = false }: { sampler?: boolean }) {
           <div className={styles.ringHub}>
             <div className={styles.ringHubInner} key={activeFeature}>
               <p>{featureCards[activeFeature].body}</p>
-              <Link href={featureCards[activeFeature].href} className={styles.ringButton}>
-                {featureCards[activeFeature].linkLabel} <span aria-hidden="true">→</span>
-              </Link>
+              <LandingLink
+                page="teammates"
+                anchor={featureCards[activeFeature].anchor}
+                placement={placement}
+                className={styles.ringButton}
+              >
+                Learn more <span aria-hidden="true">→</span>
+              </LandingLink>
             </div>
           </div>
         </div>
@@ -147,9 +147,14 @@ export function TeammatesSection({ sampler = false }: { sampler?: boolean }) {
             <div>
               <h3>{feature.title}</h3>
               <p>{feature.body}</p>
-              <Link href={feature.href} className={styles.featureListLink}>
-                {feature.linkLabel} <span aria-hidden="true">→</span>
-              </Link>
+              <LandingLink
+                page="teammates"
+                anchor={feature.anchor}
+                placement={placement}
+                className={styles.featureListLink}
+              >
+                Learn more <span aria-hidden="true">→</span>
+              </LandingLink>
             </div>
           </article>
         ))}
