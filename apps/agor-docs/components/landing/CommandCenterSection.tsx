@@ -6,49 +6,51 @@ import styles from '../LandingPage.module.css';
 import { LandingLink, LearnMore } from './LandingLink';
 import { SectionHeroActions } from './SectionHeroActions';
 
-// Spatial boards, rich sessions, and the message gateway are deliberately
-// absent — the "See the work and shape it together" showcase already tells
-// those stories with video.
+// The builder's working surface, in the order a run of many agents needs it:
+// organize, branch, fan out, share context, then build and run. Boards,
+// sessions, and the gateway are the /board story; teammates and schedules are
+// the /teammates story. Each slide's anchor is its detail block on this page.
 const productPreviews = [
   {
-    title: 'Persistent teammates',
-    body: 'Give long-lived helpers memory, skills, schedules, and team-wide reach beyond one-off prompts.',
-    image: '/screenshots/teammates-list.png',
-    page: 'teammates' as const,
+    title: 'Zones & prompts',
+    body: 'Drop a branch into a zone to trigger its reusable prompt, so a review or release check starts the same way every time.',
+    image: '/screenshots/zone-trigger.png',
+    anchor: 'zones-and-prompts',
   },
   {
-    title: 'Scheduler',
-    body: 'Run standups, audits, digests, reports, and teammate heartbeats without waiting to be asked.',
-    image: '/screenshots/scheduler-modal.png',
-    page: 'teammates' as const,
-    anchor: 'schedules',
+    title: 'Session trees',
+    body: 'Fork to try an alternative, or spawn focused child sessions, and keep the whole thread in one tree.',
+    image: '/screenshots/security-review-fanout.png',
+    anchor: 'session-trees',
   },
   {
-    title: 'Artifacts',
-    body: 'Let agents render live dashboards, mockups, calculators, and tools directly on the board.',
-    image: '/images/artifacts-hero.png',
-    page: 'command-center' as const,
-    anchor: 'artifacts',
+    title: 'Parallel agents',
+    body: 'Fan work out to several agents at once, then review the results together on the same branch card.',
+    image: '/screenshots/parallel-board-5-sessions.png',
+    anchor: 'parallel-agents',
   },
   {
-    title: 'Built-in knowledge base',
-    body: 'Give your team and its agents one shared place for decisions, runbooks, prompts, memory, and reusable context.',
+    title: 'Knowledge base',
+    body: 'Give your team and its agents one shared place for decisions, runbooks, prompts, and reusable context.',
     image: '/images/knowledge-hero.png',
-    page: 'command-center' as const,
     anchor: 'knowledge',
   },
   {
     title: 'Branch environments',
-    body: 'Start, stop, health-check, and inspect logs for every branch environment without port fights.',
+    body: 'Start, stop, health-check, and read logs for every branch environment without port fights.',
     image: '/screenshots/env_configuration.png',
-    page: 'command-center' as const,
     anchor: 'environments',
   },
   {
-    title: 'MCP-native control',
-    body: 'Anything a user can do in Agor, an agent can do too: spawn peers, move work, schedule runs, and report back.',
+    title: 'Artifacts',
+    body: 'Let agents render live dashboards, mockups, and tools right on the board.',
+    image: '/images/artifacts-hero.png',
+    anchor: 'artifacts',
+  },
+  {
+    title: 'Agor MCP',
+    body: 'Anything you can do in Agor, an agent can do too: spawn peers, move work, schedule runs, and report back.',
     image: '/screenshots/mcp_environment.png',
-    page: 'command-center' as const,
     anchor: 'mcp',
   },
 ];
@@ -161,8 +163,8 @@ export function CommandCenterSection({
                       <p>{preview.body}</p>
                     </div>
                     <LandingLink
-                      page={preview.page}
-                      anchor={'anchor' in preview ? preview.anchor : undefined}
+                      page="command-center"
+                      anchor={preview.anchor}
                       placement={sampler ? 'home-section' : 'command-center-page-carousel'}
                       className={styles.secondaryButton}
                     >

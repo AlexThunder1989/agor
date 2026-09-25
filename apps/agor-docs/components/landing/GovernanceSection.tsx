@@ -94,20 +94,39 @@ export function GovernanceSection({
       data-reveal
     >
       <div>
-        <Heading>
-          Bring AI to the <span className={styles.headingStrong}>whole team</span>
-          <br />
-          with <span className={`${styles.headingAccent} ${styles.compoundWord}`}>confidence</span>
-        </Heading>
-        <p>
-          Agor gives your{' '}
-          <Link href={AI_ENABLEMENT_POST_URL} target="_blank" rel="noopener noreferrer">
-            AI enablers
-          </Link>{' '}
-          a way to make useful work visible, bring colleagues into it, and turn it into workflows
-          everyone can use and improve. Along the way, you know what’s running, what it costs, and
-          who can do what.
-        </p>
+        {hero ? (
+          <>
+            <Heading>
+              Know what’s <span className={styles.headingStrong}>running</span>
+              <br />
+              and who can do{' '}
+              <span className={`${styles.headingAccent} ${styles.compoundWord}`}>what</span>
+            </Heading>
+            <p>
+              See every agent session and what it costs, decide who can view, collaborate on, or
+              manage each board and branch, and choose where it runs: on your own infrastructure or
+              ours. Controls that help your team work together, not a way to watch over it.
+            </p>
+          </>
+        ) : (
+          <>
+            <Heading>
+              Bring AI to the <span className={styles.headingStrong}>whole team</span>
+              <br />
+              with{' '}
+              <span className={`${styles.headingAccent} ${styles.compoundWord}`}>confidence</span>
+            </Heading>
+            <p>
+              Agor gives your{' '}
+              <Link href={AI_ENABLEMENT_POST_URL} target="_blank" rel="noopener noreferrer">
+                AI enablers
+              </Link>{' '}
+              a way to make useful work visible, bring colleagues into it, and turn it into
+              workflows everyone can use and improve. Along the way, you know what’s running, what
+              it costs, and who can do what.
+            </p>
+          </>
+        )}
         {hero ? (
           <SectionHeroActions page="governance" align="start" />
         ) : (
