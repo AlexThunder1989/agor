@@ -81,7 +81,7 @@ export function LandingShell({ ctaPrefix, children }: LandingShellProps) {
             <span className={styles.headingAccent}>agents</span> together
           </h2>
           <p>
-            Start on your own with the self-hosted build and bring colleagues in as you go, or talk
+            Start on your own with Agor Community Edition and bring colleagues in as you go, or talk
             to us about rolling Agor out across your team. Agor Cloud is opening to teams now.
           </p>
           <div className={styles.heroActions}>

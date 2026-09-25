@@ -27,10 +27,10 @@ const busItems: Array<{
   rippleDelays: number[];
 }> = [
   {
-    title: 'Self-hosted & source-available',
+    title: 'Community Edition, self-hosted',
     page: 'governance',
     anchor: 'self-hosted',
-    desc: 'Your repos, your database, your infrastructure. Production use is permitted under BSL 1.1.',
+    desc: 'Your repos, your database, your infrastructure. Source-available under BSL 1.1, with production use permitted.',
     rippleSize: 10,
     rippleDelays: [0, 1500],
   },

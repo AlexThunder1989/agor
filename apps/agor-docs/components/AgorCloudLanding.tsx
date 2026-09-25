@@ -178,7 +178,7 @@ const deployments: Array<{
 const security: Array<{ title: string; body: string }> = [
   {
     title: 'Hardened by default',
-    body: 'The self-hosted flags that widen attack surface (shared dev boxes, broad bypass modes) are off in Cloud. We know which knobs belong in which position because we run it ourselves.',
+    body: 'The Community Edition flags that widen attack surface (shared dev boxes, broad bypass modes) are off in Cloud. We know which knobs belong in which position because we run it ourselves.',
   },
   {
     title: 'Substrate isolation',
@@ -371,7 +371,7 @@ export function AgorCloudLanding() {
             Everything running, <span className={styles.headingAccent}>nothing to babysit</span>
           </h2>
           <p className={styles.lead}>
-            The same platform you know from the self-hosted build, operated for you with the rigor
+            The same platform you know from Agor Community Edition, operated for you with the rigor
             Preset brings to Preset Cloud.
           </p>
         </div>
@@ -682,7 +682,7 @@ export function AgorCloudLanding() {
               Announcement
             </Link>
             <Link href="/guide/getting-started" className={styles.footerLink}>
-              Self-host
+              Community Edition
             </Link>
             <Link
               href={GITHUB_REPO_URL}

@@ -120,11 +120,11 @@ export const governanceDetails: LandingDetail[] = [
   },
   {
     id: 'self-hosted',
-    navLabel: 'Self-hosted',
-    eyebrow: 'Your infrastructure',
+    navLabel: 'Community Edition',
+    eyebrow: 'Agor Community Edition',
     title: 'Run it {yourself}, on your terms',
     body: [
-      'Agor is source-available under BSL 1.1, and production use is permitted. Your repos, your database, and your infrastructure stay yours.',
+      'Agor Community Edition installs from npm and runs on your own infrastructure. It is source-available under BSL 1.1, production use is permitted, and your repos, database, and infrastructure stay yours.',
       'Stored credentials are encrypted at rest under a master secret you provision, and agents run in separate executor processes that receive API keys just in time instead of reading the database.',
     ],
     points: [
@@ -143,7 +143,7 @@ export const governanceDetails: LandingDetail[] = [
       alt: 'Edit User dialog showing per-user Anthropic, OpenAI, and Gemini API key fields, noted as encrypted at rest',
     },
     links: [
-      { label: 'Install Agor', href: '/guide/getting-started' },
+      { label: 'Install Community Edition', href: '/guide/getting-started' },
       { label: 'Deployment guidance', href: '/security' },
       { label: 'Containerized execution', href: '/guide/containerized-execution' },
     ],

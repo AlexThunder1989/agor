@@ -102,7 +102,7 @@ export const teammatesDetails: LandingDetail[] = [
     eyebrow: 'Where your team works',
     title: 'Bring it where your team [already talks]',
     body: [
-      'Not everyone needs to live on the board. Mention a teammate in Slack, Discord, or Microsoft Teams, or tag it on a GitHub PR or Shortcut story, and Agor starts a session on the right branch and replies where you asked.',
+      'Not everyone needs to live on the board. Mention a teammate in Slack or Discord, or tag it on a GitHub PR or Shortcut story, and Agor starts a session on the right branch and replies where you asked. Microsoft Teams is coming soon to Agor Cloud.',
       'When a sender is matched to an Agor user, the session runs as that person, with their access and their name on the record. Each channel sets its own permission mode, model, and tools.',
     ],
     points: [

@@ -175,7 +175,7 @@ export const boardDetails: LandingDetail[] = [
     points: [
       {
         title: 'Where your team talks',
-        body: 'Slack, Discord, GitHub, Shortcut, and Microsoft Teams are supported today.',
+        body: 'Slack, Discord, GitHub, and Shortcut today, with Microsoft Teams coming soon to Agor Cloud.',
       },
       {
         title: 'Runs as the right person',
