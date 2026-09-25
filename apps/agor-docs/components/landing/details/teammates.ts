@@ -175,11 +175,6 @@ export const teammatesDetails: LandingDetail[] = [
         body: 'Scope its tools and Knowledge to the job, not to everything the company has.',
       },
     ],
-    media: {
-      type: 'image',
-      src: '/screenshots/teammates-list.png',
-      alt: 'Chat listing the teammates in an Agor instance, each with a name and a one-line job, such as a coding orchestrator, a deal desk expert, and a legal redlines expert',
-    },
     links: [{ label: 'Agent modeling 101', href: '/blog/agent-modeling-101' }],
   },
   {

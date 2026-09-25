@@ -2928,3 +2928,37 @@
   padding-top: 66px;
   align-items: start;
 }
+
+/* /multiplayer hero: statement beside the live-presence loop. */
+.liveHeroGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: clamp(32px, 4vw, 64px);
+  align-items: center;
+}
+
+.liveHeroMedia {
+  overflow: hidden;
+  border: 1px solid var(--landing-line);
+  border-radius: 20px;
+  background: center / cover no-repeat;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+}
+
+.liveHeroMedia video {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liveHeroMedia video {
+    display: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .liveHeroGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

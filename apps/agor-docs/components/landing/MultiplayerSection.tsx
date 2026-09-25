@@ -61,19 +61,62 @@ export function MultiplayerSection({
         className={hero ? `${styles.liveSection} ${styles.sectionHero}` : styles.liveSection}
         data-reveal
       >
-        <Heading className={styles.liveStatement}>
-          Work <span className={styles.headingStrong}>together</span>{' '}
-          <span className={styles.headingAccent}>again</span>
-        </Heading>
-        <p className={styles.liveSub}>
-          One shared board instead of ten private terminals.
-          <br />
-          <span className={styles.headingDim}>
-            Bring your team and agents together on one live,{' '}
-            <span className={styles.headingAccent}>multiplayer canvas</span>.
-          </span>
-        </p>
-        {hero && <SectionHeroActions page="multiplayer" align="start" />}
+        {hero ? (
+          // Hero: the statement beside the live-presence loop, cards below.
+          <div className={styles.liveHeroGrid}>
+            <div>
+              <Heading className={styles.liveStatement}>
+                Work <span className={styles.headingStrong}>together</span>{' '}
+                <span className={styles.headingAccent}>again</span>
+              </Heading>
+              <p className={styles.liveSub}>
+                One shared board instead of ten private terminals.
+                <br />
+                <span className={styles.headingDim}>
+                  Bring your team and agents together on one live,{' '}
+                  <span className={styles.headingAccent}>multiplayer canvas</span>.
+                </span>
+              </p>
+              {hero && <SectionHeroActions page="multiplayer" align="start" />}
+            </div>
+            <div
+              className={styles.liveHeroMedia}
+              style={{ backgroundImage: 'url(/videos/showcase-multiplayer-poster.jpg)' }}
+            >
+              <video
+                autoPlay
+                muted
+                loop
+                playsInline
+                poster="/videos/showcase-multiplayer-poster.jpg"
+                aria-label="Teammates and agents working on the same Agor board, with live cursors"
+              >
+                <source
+                  src="/videos/showcase-multiplayer-540.mp4"
+                  type="video/mp4"
+                  media="(max-width: 720px)"
+                />
+                <source src="/videos/showcase-multiplayer.mp4" type="video/mp4" />
+              </video>
+            </div>
+          </div>
+        ) : (
+          <>
+            <Heading className={styles.liveStatement}>
+              Work <span className={styles.headingStrong}>together</span>{' '}
+              <span className={styles.headingAccent}>again</span>
+            </Heading>
+            <p className={styles.liveSub}>
+              One shared board instead of ten private terminals.
+              <br />
+              <span className={styles.headingDim}>
+                Bring your team and agents together on one live,{' '}
+                <span className={styles.headingAccent}>multiplayer canvas</span>.
+              </span>
+            </p>
+            {hero && <SectionHeroActions page="multiplayer" align="start" />}
+          </>
+        )}
         <div className={styles.liveGrid}>
           {liveCards.map((card, index) => (
             <article
