@@ -7,6 +7,7 @@ import { CloudCtaLink } from '../CloudCtaLink';
 import { type HeroCopy, HighlightedText } from '../heroCopy';
 import styles from '../LandingPage.module.css';
 import { useFitText } from '../useFitText';
+import { DemoButton } from './DemoButton';
 
 function GitHubIcon() {
   return (
@@ -53,6 +54,7 @@ export function LandingHero({ badge, copy, ctaPlacement, children }: LandingHero
           </h2>
           <div className={styles.heroActions}>
             <CloudCtaLink placement={ctaPlacement} className={styles.primaryButton} />
+            <DemoButton className={styles.secondaryButton}>Book a demo</DemoButton>
             <Link href="/guide/getting-started" className={styles.secondaryButton}>
               Install locally
             </Link>
