@@ -40,16 +40,17 @@ interface LearnMoreProps {
   page: LandingPageId;
   anchor?: string;
   label?: string;
+  placement?: string;
 }
 
 /** Hand-off link from a home-page sampler section to its landing page. */
-export function LearnMore({ page, anchor, label }: LearnMoreProps) {
+export function LearnMore({ page, anchor, label, placement = 'home-section' }: LearnMoreProps) {
   return (
     <div className={styles.learnMore}>
       <LandingLink
         page={page}
         anchor={anchor}
-        placement="home-section"
+        placement={placement}
         className={styles.learnMoreLink}
       >
         {label ?? `Explore ${landingPage(page).navLabel}`} <span aria-hidden="true">→</span>

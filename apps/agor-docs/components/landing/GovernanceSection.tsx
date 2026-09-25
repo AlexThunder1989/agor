@@ -8,6 +8,7 @@ import styles from '../LandingPage.module.css';
 import { DemoButton } from './DemoButton';
 import { LandingLink, LearnMore } from './LandingLink';
 import type { LandingPageId } from './pages';
+import { SectionHeroActions } from './SectionHeroActions';
 
 // The "Compound Amplifying Bus": six trust items on a vertical mint spine —
 // the deliberate counterpoint to the six amber problem cards piled up in the
@@ -78,15 +79,26 @@ const busItems: Array<{
 
 // Story beat: the problem section's six amber cards in a chaotic pile → six
 // mint items on a calm straight line here. The "Compound Amplifying Bus".
-export function GovernanceSection({ sampler = false }: { sampler?: boolean }) {
+export function GovernanceSection({
+  sampler = false,
+  hero = false,
+}: {
+  sampler?: boolean;
+  /** Render as its landing page's hero: h1 heading, CTA row, first-screen height. */
+  hero?: boolean;
+}) {
+  const Heading = hero ? 'h1' : 'h2';
   return (
-    <section className={styles.controlSection} data-reveal>
+    <section
+      className={hero ? `${styles.controlSection} ${styles.sectionHero}` : styles.controlSection}
+      data-reveal
+    >
       <div>
-        <h2>
+        <Heading>
           Bring AI to the <span className={styles.headingStrong}>whole team</span>
           <br />
           with <span className={`${styles.headingAccent} ${styles.compoundWord}`}>confidence</span>
-        </h2>
+        </Heading>
         <p>
           Agor gives your{' '}
           <Link href={AI_ENABLEMENT_POST_URL} target="_blank" rel="noopener noreferrer">
@@ -96,9 +108,13 @@ export function GovernanceSection({ sampler = false }: { sampler?: boolean }) {
           everyone can use and improve. Along the way, you know what’s running, what it costs, and
           who can do what.
         </p>
-        <div className={styles.controlActions}>
-          <DemoButton className={styles.secondaryButton}>Book an Agor demo</DemoButton>
-        </div>
+        {hero ? (
+          <SectionHeroActions page="governance" align="start" />
+        ) : (
+          <div className={styles.controlActions}>
+            <DemoButton className={styles.secondaryButton}>Book an Agor demo</DemoButton>
+          </div>
+        )}
         {sampler && <LearnMore page="governance" />}
       </div>
       <ul className={styles.busList}>

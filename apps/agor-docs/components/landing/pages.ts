@@ -1,5 +1,3 @@
-import type { HeroCopy } from '../heroCopy';
-
 export type LandingPageId = 'multiplayer' | 'board' | 'teammates' | 'command-center' | 'governance';
 
 export interface LandingPageEntry {
@@ -7,8 +5,6 @@ export interface LandingPageEntry {
   href: `/${string}`;
   /** Home-hero hub button and "learn more" link text. */
   navLabel: string;
-  badge: string;
-  hero: HeroCopy;
   docs: Array<{ label: string; href: string }>;
 }
 
@@ -20,12 +16,6 @@ export const LANDING_PAGES: LandingPageEntry[] = [
     id: 'multiplayer',
     href: '/multiplayer',
     navLabel: 'Multiplayer AI',
-    badge: 'Multiplayer AI',
-    hero: {
-      headline: 'Work together\n[again]',
-      subheadline:
-        'Bring your {team} and {agents} together on one live board, and learn from how everyone works with AI.',
-    },
     docs: [
       { label: 'Multiplayer & social features', href: '/guide/multiplayer-social' },
       { label: 'Branches & shared environments', href: '/guide/branches' },
@@ -36,12 +26,6 @@ export const LANDING_PAGES: LandingPageEntry[] = [
     id: 'board',
     href: '/board',
     navLabel: 'Live board',
-    badge: 'Live spatial board',
-    hero: {
-      headline: 'See the work and\n[shape it together]',
-      subheadline:
-        'Follow every agent, see what needs you, and bring your {team} into the same view.',
-    },
     docs: [
       { label: 'Boards & zones', href: '/guide/boards' },
       { label: 'Sessions & trees', href: '/guide/sessions' },
@@ -52,11 +36,6 @@ export const LANDING_PAGES: LandingPageEntry[] = [
     id: 'teammates',
     href: '/teammates',
     navLabel: 'AI teammates',
-    badge: 'AI teammates',
-    hero: {
-      headline: 'Raise [AI teammates]\nyour team can teach',
-      subheadline: 'Give them {memory}, teach them {skills}, and bring them where your team works.',
-    },
     docs: [
       { label: 'Teammates', href: '/guide/teammates' },
       { label: 'Knowledge', href: '/guide/knowledge' },
@@ -68,11 +47,6 @@ export const LANDING_PAGES: LandingPageEntry[] = [
     id: 'command-center',
     href: '/command-center',
     navLabel: 'Command center',
-    badge: 'For builders',
-    hero: {
-      headline: 'Stay sane with\n[a lot of agents]',
-      subheadline: 'A {command center} for agent work, with the context and tools close by.',
-    },
     docs: [
       { label: 'Feature map', href: '/guide/features-overview' },
       { label: 'Artifacts', href: '/guide/artifacts' },
@@ -84,11 +58,6 @@ export const LANDING_PAGES: LandingPageEntry[] = [
     id: 'governance',
     href: '/governance',
     navLabel: 'Governance',
-    badge: 'Governance & observability',
-    hero: {
-      headline: 'Know what’s [running]',
-      subheadline: 'See what it costs and {who can do what}.',
-    },
     docs: [
       { label: 'Security', href: '/security' },
       { label: 'RBAC & isolation', href: '/guide/multiplayer-unix-isolation' },

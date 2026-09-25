@@ -5,6 +5,7 @@ import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import Aurora from '../Aurora/Aurora';
 import styles from '../LandingPage.module.css';
 import { LearnMore } from './LandingLink';
+import { SectionHeroActions } from './SectionHeroActions';
 
 // "See the work and shape it together" carousel. Each slide is a short loop-perfect
 // demo video rendered by the demo-videos pipeline (apps/agor-docs/demo-videos);
@@ -46,7 +47,15 @@ const showcaseSlides = [
   },
 ];
 
-export function BoardSection({ sampler = false }: { sampler?: boolean }) {
+export function BoardSection({
+  sampler = false,
+  hero = false,
+}: {
+  sampler?: boolean;
+  /** Render as its landing page's hero: h1 heading, CTA row, first-screen height. */
+  hero?: boolean;
+}) {
+  const Heading = hero ? 'h1' : 'h2';
   const [activeShot, setActiveShot] = useState(0);
   const showcaseViewportRef = useRef<HTMLDivElement>(null);
   const slideVideoRefs = useRef<Array<HTMLVideoElement | null>>([]);
@@ -118,7 +127,10 @@ export function BoardSection({ sampler = false }: { sampler?: boolean }) {
   }, [activeShot]);
 
   return (
-    <section className={styles.showcaseSection} data-reveal>
+    <section
+      className={hero ? `${styles.showcaseSection} ${styles.sectionHero}` : styles.showcaseSection}
+      data-reveal
+    >
       {/* Section divider: the docs pages' mint aurora as a thin curtain
           hanging from the seam with the problem section. */}
       <div className={styles.showcaseDivider} aria-hidden="true">
@@ -136,10 +148,11 @@ export function BoardSection({ sampler = false }: { sampler?: boolean }) {
       <div className={styles.showcaseSticky}>
         <div className={styles.showcaseHeader}>
           <div className={styles.sectionHeader}>
-            <h2>
+            <Heading>
               See the work and <span className={styles.headingStrong}>shape</span> it{' '}
               <span className={styles.headingAccent}>together</span>
-            </h2>
+            </Heading>
+            {hero && <SectionHeroActions page="board" align="start" />}
           </div>
           <div className={styles.showcaseTabs}>
             {showcaseSlides.map((slide, index) => (
@@ -268,9 +281,10 @@ export function BoardSection({ sampler = false }: { sampler?: boolean }) {
           ))}
         </div>
       </div>
-      {sampler && (
+      {(sampler || hero) && (
         <LearnMore
           page="board"
+          placement={hero ? 'board-page-hero' : 'home-section'}
           anchor={showcaseSlides[activeShot].anchor}
           label={`More on ${showcaseSlides[activeShot].label.toLowerCase()}`}
         />

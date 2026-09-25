@@ -15,6 +15,7 @@ import { AI_ENABLEMENT_POST_URL } from '../../lib/links';
 import styles from '../LandingPage.module.css';
 import Orb from '../Orb/Orb';
 import { LandingLink, LearnMore } from './LandingLink';
+import { SectionHeroActions } from './SectionHeroActions';
 
 const featureCards: Array<{
   title: string;
@@ -26,7 +27,7 @@ const featureCards: Array<{
   {
     title: 'Shared memory',
     icon: Brain,
-    body: 'Each teammate gets a namespace in the knowledge base: semantically searchable, durable, and shared with the team.',
+    body: 'Teammates keep durable notes in your team’s shared knowledge base, where people and agents can search and build on them.',
     anchor: 'memory',
   },
   {
@@ -61,18 +62,31 @@ const featureCards: Array<{
   },
 ];
 
-export function TeammatesSection({ sampler = false }: { sampler?: boolean }) {
+export function TeammatesSection({
+  sampler = false,
+  hero = false,
+}: {
+  sampler?: boolean;
+  /** Render as its landing page's hero: h1 heading, CTA row, first-screen height. */
+  hero?: boolean;
+}) {
+  const Heading = hero ? 'h1' : 'h2';
   const [activeFeature, setActiveFeature] = useState(0);
   const placement = sampler ? 'home-section' : 'teammates-page-ring';
 
   return (
-    <section className={styles.workspaceSection} data-reveal>
+    <section
+      className={
+        hero ? `${styles.workspaceSection} ${styles.sectionHero}` : styles.workspaceSection
+      }
+      data-reveal
+    >
       <div className={styles.workspaceCopy}>
         <span className={styles.eyebrow}>Build on what your team teaches them</span>
-        <h2>
+        <Heading>
           Raise <span className={styles.headingAccent}>AI teammates</span> your whole{' '}
           <span className={styles.headingStrong}>team</span> can teach
-        </h2>
+        </Heading>
         <p>
           You shouldn’t have to start over every time. Give teammates memory, teach them skills,
           connect them to your tools, and bring them where your team works. People decide their
@@ -83,6 +97,7 @@ export function TeammatesSection({ sampler = false }: { sampler?: boolean }) {
           </Link>{' '}
           figure out becomes something the whole team can build on.
         </p>
+        {hero && <SectionHeroActions page="teammates" align="start" />}
         {sampler && <LearnMore page="teammates" />}
       </div>
       <div className={styles.featureRing} data-reveal>

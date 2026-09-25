@@ -8,7 +8,6 @@ import { CommandCenterSection } from './CommandCenterSection';
 import { DetailNav, DetailSection } from './DetailSection';
 import { LANDING_DETAILS } from './details';
 import { GovernanceSection } from './GovernanceSection';
-import { LandingHero } from './LandingHero';
 import { LandingLink } from './LandingLink';
 import { LandingShell } from './LandingShell';
 import { MultiplayerSection } from './MultiplayerSection';
@@ -16,13 +15,14 @@ import { LANDING_PAGES, type LandingPageId, landingPage } from './pages';
 import { RosterSection } from './RosterSection';
 import { TeammatesSection } from './TeammatesSection';
 
-// The home-page section each landing page grows out of, in its full form.
-const PAGE_SECTIONS: Record<LandingPageId, ReactNode> = {
-  multiplayer: <MultiplayerSection />,
-  board: <BoardSection />,
-  teammates: <TeammatesSection />,
-  'command-center': <CommandCenterSection />,
-  governance: <GovernanceSection />,
+// Each landing page's hero is its home-page section, promoted: h1 heading,
+// CTA row, first-screen height (see the sections' `hero` prop).
+const PAGE_HEROES: Record<LandingPageId, ReactNode> = {
+  multiplayer: <MultiplayerSection hero />,
+  board: <BoardSection hero />,
+  teammates: <TeammatesSection hero />,
+  'command-center': <CommandCenterSection hero />,
+  governance: <GovernanceSection hero />,
 };
 
 // Proof that closes the story, after the detail blocks.
@@ -31,8 +31,8 @@ const PAGE_PROOF: Partial<Record<LandingPageId, ReactNode>> = {
 };
 
 /**
- * Spoke page: templated hero with jump links, the home section in full, the
- * detail blocks (deep-link targets), proof, then docs and sibling pages.
+ * Spoke page: its section as the hero, jump links, the detail blocks
+ * (deep-link targets), proof, then docs and sibling pages.
  */
 export function FeatureLanding({ page }: { page: LandingPageId }) {
   const entry = landingPage(page);
@@ -41,10 +41,8 @@ export function FeatureLanding({ page }: { page: LandingPageId }) {
 
   return (
     <LandingShell ctaPrefix={ctaPrefix}>
-      <LandingHero badge={entry.badge} copy={entry.hero} ctaPlacement={`${ctaPrefix}-hero`}>
-        {details.length ? <DetailNav details={details} /> : null}
-      </LandingHero>
-      {PAGE_SECTIONS[page]}
+      {PAGE_HEROES[page]}
+      {details.length ? <DetailNav details={details} /> : null}
       {details.map((detail) => (
         <DetailSection key={detail.id} detail={detail} />
       ))}

@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import styles from '../LandingPage.module.css';
 import { LandingLink, LearnMore } from './LandingLink';
+import { SectionHeroActions } from './SectionHeroActions';
 
 // Spatial boards, rich sessions, and the message gateway are deliberately
 // absent — the "See the work and shape it together" showcase already tells
@@ -52,7 +53,15 @@ const productPreviews = [
   },
 ];
 
-export function CommandCenterSection({ sampler = false }: { sampler?: boolean }) {
+export function CommandCenterSection({
+  sampler = false,
+  hero = false,
+}: {
+  sampler?: boolean;
+  /** Render as its landing page's hero: h1 heading, CTA row, first-screen height. */
+  hero?: boolean;
+}) {
+  const Heading = hero ? 'h1' : 'h2';
   const [activeSurface, setActiveSurface] = useState(0);
   const [scrollySurface, setScrollySurface] = useState(0);
   const scrollyTrackRef = useRef<HTMLDivElement>(null);
@@ -94,13 +103,17 @@ export function CommandCenterSection({ sampler = false }: { sampler?: boolean })
   }, []);
 
   return (
-    <section className={styles.productShowcase} data-reveal>
+    <section
+      className={hero ? `${styles.productShowcase} ${styles.sectionHero}` : styles.productShowcase}
+      data-reveal
+    >
       <div className={styles.sectionHeader}>
         <span className={styles.eyebrow}>Stay sane with a lot of agents</span>
-        <h2>
+        <Heading>
           A <span className={styles.headingStrong}>command center</span> for{' '}
           <span className={styles.headingAccent}>agent work</span>
-        </h2>
+        </Heading>
+        {hero && <SectionHeroActions page="command-center" align="start" />}
       </div>
       {/* Desktop: same carousel grammar as the showcase above — tab pills,
           chrome frame, sliding track, arrows, click-the-shot-to-advance.

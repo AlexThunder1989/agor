@@ -209,7 +209,10 @@
 .sectionHeader h2,
 .workspaceCopy h2,
 .controlSection h2,
-.finalCta h2 {
+.finalCta h2,
+.sectionHeader h1,
+.workspaceCopy h1,
+.controlSection h1 {
   margin: 0;
   color: var(--landing-ink);
   /* Hairline (100) headers use the body grotesque — Space Grotesk floors at 300. */
@@ -480,7 +483,10 @@
 .sectionHeader h2,
 .workspaceCopy h2,
 .controlSection h2,
-.finalCta h2 {
+.finalCta h2,
+.sectionHeader h1,
+.workspaceCopy h1,
+.controlSection h1 {
   font-size: clamp(2.45rem, 4vw, 4.05rem);
 }
 
@@ -848,7 +854,8 @@
 }
 
 .controlSection h2,
-.controlSection p {
+.controlSection p,
+.controlSection h1 {
   color: white;
 }
 
@@ -2335,7 +2342,10 @@
   .sectionHeader h2,
   .workspaceCopy h2,
   .controlSection h2,
-  .finalCta h2 {
+  .finalCta h2,
+  .sectionHeader h1,
+  .workspaceCopy h1,
+  .controlSection h1 {
     font-size: clamp(2.25rem, 10.5vw, 3.65rem);
   }
 
@@ -2889,4 +2899,32 @@
 
 .rosterSection {
   scroll-margin-top: 80px;
+}
+
+/* A home section promoted to its landing page's hero: fills the first
+ * screen below the navbar and clears it at the top. */
+.sectionHero {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: calc(100vh - 64px);
+  padding-top: clamp(96px, 12vh, 140px);
+}
+
+.workspaceSection.sectionHero,
+.controlSection.sectionHero {
+  display: grid;
+}
+
+.sectionHeroActionsStart {
+  justify-content: flex-start;
+}
+
+/* The governance card is its own panel: keep it clear of the navbar instead
+ * of stretching it to the full first screen. */
+.controlSection.sectionHero {
+  min-height: 0;
+  margin-top: clamp(88px, 11vh, 120px);
+  padding-top: 66px;
+  align-items: start;
 }

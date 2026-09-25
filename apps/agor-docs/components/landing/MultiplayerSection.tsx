@@ -4,6 +4,7 @@ import type { CSSProperties } from 'react';
 import Aurora from '../Aurora/Aurora';
 import styles from '../LandingPage.module.css';
 import { LandingLink, LearnMore } from './LandingLink';
+import { SectionHeroActions } from './SectionHeroActions';
 
 // Harnesses with an executor handler in packages/executor/src/sdk-handlers.
 // Logos mirror the in-app ToolIcon set (apps/agor-ui/src/assets/tools), copied
@@ -40,7 +41,15 @@ const liveCards = [
   },
 ];
 
-export function MultiplayerSection({ sampler = false }: { sampler?: boolean }) {
+export function MultiplayerSection({
+  sampler = false,
+  hero = false,
+}: {
+  sampler?: boolean;
+  /** Render as its landing page's hero: h1 heading, CTA row, first-screen height. */
+  hero?: boolean;
+}) {
+  const Heading = hero ? 'h1' : 'h2';
   return (
     <div className={styles.auroraBand}>
       <div className={styles.bandAurora} aria-hidden="true">
@@ -48,11 +57,14 @@ export function MultiplayerSection({ sampler = false }: { sampler?: boolean }) {
             edge-light echo of the hero video, TV-backlight style. */}
         <Aurora colorStops={['#f12711', '#f5af19', '#ffd166']} amplitude={0.9} blend={1} />
       </div>
-      <section className={styles.liveSection} data-reveal>
-        <h2 className={styles.liveStatement}>
+      <section
+        className={hero ? `${styles.liveSection} ${styles.sectionHero}` : styles.liveSection}
+        data-reveal
+      >
+        <Heading className={styles.liveStatement}>
           Work <span className={styles.headingStrong}>together</span>{' '}
           <span className={styles.headingAccent}>again</span>
-        </h2>
+        </Heading>
         <p className={styles.liveSub}>
           One shared board instead of ten private terminals.
           <br />
@@ -61,6 +73,7 @@ export function MultiplayerSection({ sampler = false }: { sampler?: boolean }) {
             <span className={styles.headingAccent}>multiplayer canvas</span>.
           </span>
         </p>
+        {hero && <SectionHeroActions page="multiplayer" align="start" />}
         <div className={styles.liveGrid}>
           {liveCards.map((card, index) => (
             <article
