@@ -711,6 +711,10 @@ export function AgorCloudLanding() {
             <CloudCtaLink placement="cloud-page-footer" className={styles.footerLink} />
           </div>
         </div>
+        <p className={styles.footerTrademarks}>
+          Agor is not affiliated with or endorsed by the companies mentioned on this site. All
+          product names, logos, and brands are property of their respective owners.
+        </p>
       </footer>
 
       <HubSpotMeetingModal isOpen={isDemoOpen} onClose={() => setIsDemoOpen(false)} />

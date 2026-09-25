@@ -7,7 +7,7 @@ export const boardDetails: LandingDetail[] = [
     eyebrow: 'One shared view',
     title: 'Everyone on the [same board]',
     body: [
-      'Agent work usually happens in private terminals, so the only way to see it is a screenshot or a status message. On an Agor board, your team and its agents share one live canvas.',
+      'Agent work usually happens in private terminals, so the only way to see it is a screenshot or a status message. On an Agor board, your team and its agents share one live canvas. If you’ve worked in Figma, you already know how this feels.',
       'Live cursors show where each person is working, and the facepile shows who is online. When you see a colleague hovering over a session, you can jump in instead of asking for an update.',
     ],
     points: [

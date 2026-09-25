@@ -2962,3 +2962,13 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Third-party trademark notice: the site names and pictures other products
+ * (agent harnesses, chat tools, a Figma comparison). */
+.footerTrademarks {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #5b7b76;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}

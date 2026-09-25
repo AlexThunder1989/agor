@@ -156,6 +156,10 @@ export function LandingShell({ ctaPrefix, children }: LandingShellProps) {
             Preset, Inc.
           </Link>
         </p>
+        <p className={styles.footerTrademarks}>
+          Agor is not affiliated with or endorsed by the companies mentioned on this site. All
+          product names, logos, and brands are property of their respective owners.
+        </p>
       </footer>
     </main>
   );
