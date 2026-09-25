@@ -46,7 +46,23 @@ export default {
   'command-center': landingPageMeta,
   governance: landingPageMeta,
   // Navbar links are separate from the content folders so Docs and Blog can
-  // also remain in the shared root sidebar on every content surface.
+  // also remain in the shared root sidebar on every content surface. The
+  // Product menu mirrors components/landing/pages.ts.
+  'product-navbar': {
+    title: 'Product',
+    type: 'menu',
+    items: {
+      multiplayer: { title: 'Multiplayer AI', href: '/multiplayer' },
+      board: { title: 'Live board', href: '/board' },
+      teammates: { title: 'AI teammates', href: '/teammates' },
+      'command-center': { title: 'Command center', href: '/command-center' },
+      governance: { title: 'Governance', href: '/governance' },
+      security: { title: 'Security', href: '/security' },
+      // Also the only phone-width route to /cloud: the navbar's Agor Cloud
+      // link is hidden below 768px.
+      cloud: { title: 'Agor Cloud', href: '/cloud' },
+    },
+  },
   'docs-navbar': { title: 'Docs', type: 'page', href: '/guide' },
   'blog-navbar': { title: 'Blog', type: 'page', href: '/blog' },
   guide: 'Docs',

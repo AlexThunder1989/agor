@@ -7,6 +7,8 @@ import { getBasePath, LOGO_MARK_PATH } from '../../lib/siteMetadata';
 import { CloudCtaLink } from '../CloudCtaLink';
 import styles from '../LandingPage.module.css';
 import { DemoButton } from './DemoButton';
+import { LandingLink } from './LandingLink';
+import { LANDING_PAGES } from './pages';
 
 const basePath = getBasePath();
 
@@ -108,16 +110,20 @@ export function LandingShell({ ctaPrefix, children }: LandingShellProps) {
         <div className={styles.footerLinks}>
           <div>
             <h3>Product</h3>
-            <Link href="/guide/boards">Boards</Link>
-            <Link href="/guide/sessions">Sessions</Link>
-            <Link href="/guide/teammates">Teammates</Link>
-            <Link href="/guide/internal-mcp">MCP control</Link>
+            {LANDING_PAGES.map((page) => (
+              <LandingLink key={page.id} page={page.id} placement={`${ctaPrefix}-footer`}>
+                {page.navLabel}
+              </LandingLink>
+            ))}
+            <Link href="/cloud">Agor Cloud</Link>
+            <Link href="/security">Security</Link>
           </div>
           <div>
             <h3>Resources</h3>
             <Link href="/guide/getting-started">Get started</Link>
             <Link href="/guide">Documentation</Link>
-            <Link href="/blog/agor-cloud">Agor Cloud</Link>
+            <Link href="/blog">Blog</Link>
+            <Link href="/faq">FAQ</Link>
           </div>
           <div>
             <h3>Community</h3>
