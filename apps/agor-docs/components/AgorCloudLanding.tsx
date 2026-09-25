@@ -185,8 +185,8 @@ const security: Array<{ title: string; body: string }> = [
     body: 'Sessions and workspaces are routed through tenant-scoped runtime and storage boundaries rather than host-user impersonation.',
   },
   {
-    title: 'Independently reviewed',
-    body: 'Built against a documented threat model, with independent security review and penetration testing as part of how the service is operated.',
+    title: 'Independent testing underway',
+    body: 'Built against a documented threat model, with an independent security review and penetration test underway ahead of general availability.',
   },
   {
     title: 'SOC 2 Type II in progress',
