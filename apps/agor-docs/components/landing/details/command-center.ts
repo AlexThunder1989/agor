@@ -121,7 +121,7 @@ export const commandCenterDetails: LandingDetail[] = [
     id: 'mcp',
     navLabel: 'MCP',
     eyebrow: 'Connect the tools',
-    title: 'Anything you can do in Agor, an [agent] can do too',
+    title: 'Agents drive Agor through the [same API] as you',
     body: [
       'Every session gets its own scoped credentials for Agor’s built-in MCP server, so an agent knows which branch and board it is on and can act there: spawn peers, move cards, start an environment, file knowledge, or report back.',
       'For the rest of your stack, attach external MCP servers to a session, either from the reviewed Catalog or from servers you configure yourself.',

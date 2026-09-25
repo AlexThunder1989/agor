@@ -49,7 +49,7 @@ const productPreviews = [
   },
   {
     title: 'Agor MCP',
-    body: 'Anything you can do in Agor, an agent can do too: spawn peers, move work, schedule runs, and report back.',
+    body: 'Agents drive Agor through the same API as the UI: spawn peers, move work, run environments, schedule runs, and report back.',
     image: '/screenshots/mcp_environment.png',
     anchor: 'mcp',
   },

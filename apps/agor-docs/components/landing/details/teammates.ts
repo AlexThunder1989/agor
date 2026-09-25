@@ -83,7 +83,7 @@ export const teammatesDetails: LandingDetail[] = [
       },
       {
         title: 'Agor’s own MCP',
-        body: 'Anything you can do in Agor, a teammate can do too, like spawning a session or moving a branch.',
+        body: 'Through Agor’s built-in MCP server, a teammate works with the same API you do: spawning sessions, moving branches, scheduling runs, all within your permissions.',
       },
     ],
     media: {
