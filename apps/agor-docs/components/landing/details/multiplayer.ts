@@ -67,6 +67,27 @@ export const multiplayerDetails: LandingDetail[] = [
     links: [{ label: 'Multiplayer & social', href: '/guide/multiplayer-social' }],
   },
   {
+    id: 'shared-terminals',
+    navLabel: 'Shared terminals',
+    eyebrow: 'Hands on the same keyboard',
+    title: 'Work in the [same terminal]',
+    body: [
+      'Open a branch’s terminal and anyone else on that branch sees the same session live: every keystroke, every output. Pair on a fix, walk a new teammate through a setup, or explore a branch together during review.',
+    ],
+    points: [
+      {
+        title: 'Branch-scoped',
+        body: 'Each branch gets its own shared terminal, open to teammates who have access to it.',
+      },
+    ],
+    media: {
+      type: 'image',
+      src: '/screenshots/tmux.png',
+      alt: 'Shared tmux terminal on an Agor branch, split into panes showing commands and output from the same session',
+    },
+    links: [{ label: 'Terminal trust boundaries', href: '/security' }],
+  },
+  {
     id: 'comments',
     navLabel: 'Comments',
     eyebrow: 'Spatial comments',
