@@ -1509,6 +1509,7 @@ export function registerBranchTools(server: McpServer, ctx: McpContext): void {
             sessionId?: string;
             queued?: boolean;
             queue_position?: number;
+            mcp_defaults_skipped?: number;
             note: string;
           }
         | undefined;
@@ -1599,10 +1600,16 @@ export function registerBranchTools(server: McpServer, ctx: McpContext): void {
           });
           const agenticTool = newSession.agentic_tool;
           console.log(`✅ Auto-created session ${shortId(newSession.session_id)} (${agenticTool})`);
+          const mcpWarningNote = newSession.mcp_defaults_skipped
+            ? ` Warning: ${newSession.mcp_defaults_skipped} unavailable default MCP server(s) were skipped. Review branch MCP Servers or your user defaults.`
+            : '';
           promptResult = {
             taskId: task.task_id,
             sessionId: newSession.session_id,
-            note: `always_new trigger: created session ${shortId(newSession.session_id)} (${agenticTool}) and sent prompt`,
+            note: `always_new trigger: created session ${shortId(newSession.session_id)} (${agenticTool}) and sent prompt${mcpWarningNote}`,
+            ...(newSession.mcp_defaults_skipped && {
+              mcp_defaults_skipped: newSession.mcp_defaults_skipped,
+            }),
           };
           console.log(`✅ Zone trigger executed: task ${shortId(task.task_id)}`);
         } catch (error) {
@@ -1738,7 +1745,7 @@ export function registerBranchTools(server: McpServer, ctx: McpContext): void {
     'agor_branches_unarchive',
     {
       description:
-        'Restore a previously archived branch. Optionally place it back on a board. Also unarchives all sessions that were archived as part of the branch archival.',
+        'Request asynchronous restoration of an archived branch, optionally onto a board. Unarchives branch-archived sessions. Acceptance is not filesystem readiness: use agor_branches_wait_for_ready before starting work.',
       inputSchema: z.object({
         branchId: mcpRequiredId(
           'branchId',
@@ -1765,7 +1772,8 @@ export function registerBranchTools(server: McpServer, ctx: McpContext): void {
       return textResult({
         success: true,
         branch: result,
-        message: 'Branch unarchived successfully.',
+        message:
+          'Unarchive accepted. Wait for filesystem_status ready before starting work; acceptance is not readiness.',
       });
     }
   );
@@ -1872,23 +1880,16 @@ export function registerBranchTools(server: McpServer, ctx: McpContext): void {
   );
 
   // Tool: agor_branches_retry_provisioning
-  // Explicit, non-destructive repair for a branch whose filesystem provisioning
-  // landed in 'failed'. Wraps the exact same `reposService.retryBranchProvisioning`
-  // implementation used by the REST route and the UI, so all three surfaces share
-  // one code path. Only `failed → creating` is retryable; the transition is an
-  // atomic claim, so concurrent calls can never dispatch two materializers.
+  // Shared attempt-fenced recovery for failed provisioning and stale active archive states.
   server.registerTool(
     'agor_branches_retry_provisioning',
     {
       description:
-        'Repair a branch whose git working directory failed to materialize ' +
-        "(filesystem_status 'failed') by re-dispatching provisioning. Also recovers a branch " +
-        "left 'creating' by a daemon restart. Requires branch control ('all' permission, branch " +
-        "owner, or admin). Not retryable otherwise: 'ready' is returned unchanged, a " +
-        "still-in-flight 'creating' attempt is rejected as a conflict, and " +
-        "archived/'preserved'/'cleaned'/'deleted' branches must use the restore/unarchive flow " +
-        'instead. Non-destructive — never deletes refs or directories. ' +
-        'Returns the updated branch with its new filesystem_status.',
+        'Retry failed provisioning or recover an active branch with stale preserved/cleaned/deleted filesystem status. ' +
+        'Requires branch Manager authority and filesystem write access. The executor validates existing files; ' +
+        'invalid Git linkage fails without overwriting them. Missing local teammate homes require personal backup restoration. ' +
+        'Archived branches must use unarchive. Ready is a no-op; creating is always a conflict, including after a restart. ' +
+        'Returns admission state, not proof of completion; wait for ready before creating sessions.',
       inputSchema: z.object({
         branchId: mcpRequiredId('branchId', 'Branch'),
       }),

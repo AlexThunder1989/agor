@@ -57,6 +57,7 @@ import { MCPCatalogModalProvider } from './contexts/MCPCatalogModalContext';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import { setPrimaryAgenticToolIfUnset } from './domain/primaryAgenticTool';
 import {
+  getSessionCreationWarning,
   type NewSessionConfig,
   runSessionCreationStages,
   type SessionCreationResult,
@@ -83,6 +84,7 @@ import {
   useOnboardingLifecycle,
 } from './hooks/useOnboardingLifecycle';
 import { useSurfaceBranding } from './hooks/useSurfaceBranding';
+import { useUnarchiveBranch } from './hooks/useUnarchiveBranch';
 import { sessionCreated } from './store/agorRealtimeActions';
 import { agorStore, useAgorStore } from './store/agorStore';
 import { DeviceRouter } from './surfaces/DeviceRouter';
@@ -90,6 +92,7 @@ import { SharedUserSettingsModal } from './surfaces/SharedUserSettingsModal';
 import type { RouteSurfaceId } from './surfaces/surfaceRegistry';
 import {
   ARTIFACT_FULLSCREEN_ROUTE_PATHS,
+  CLI_LOGIN_ROUTE_PATHS,
   KNOWLEDGE_ROUTE_PATHS,
   MCP_CONNECT_ROUTE_PATHS,
   MCP_RECOVERY_ROUTE_PATHS,
@@ -224,6 +227,11 @@ const loadMcpConnectPage = cacheRouteLoader(
   () => import('./pages/MCPOAuthConnectPage'),
   (module) => ({ default: module.MCPOAuthConnectPage })
 );
+const loadCliLoginPage = cacheRouteLoader(
+  'cli-login',
+  () => import('./pages/CLILoginPage'),
+  (module) => ({ default: module.CLILoginPage })
+);
 const loadMobileApp = cacheRouteLoader(
   'mobile',
   () => import('./components/mobile/MobileApp'),
@@ -257,6 +265,7 @@ const KnowledgePage = lazy(loadKnowledgePage);
 const ArtifactFullscreenPage = lazy(loadArtifactFullscreenPage);
 const MCPSlackRecoveryPage = lazy(loadMcpRecoveryPage);
 const MCPOAuthConnectPage = lazy(loadMcpConnectPage);
+const CLILoginPage = lazy(loadCliLoginPage);
 const MobileApp = lazy(loadMobileApp);
 const StreamdownDemoPage = lazy(loadStreamdownDemoPage);
 
@@ -266,6 +275,7 @@ const routeModuleLoaders = {
   'artifact-fullscreen': loadArtifactFullscreenPage,
   'mcp-recovery': loadMcpRecoveryPage,
   'mcp-connect': loadMcpConnectPage,
+  'cli-login': loadCliLoginPage,
   demo: loadStreamdownDemoPage,
   mobile: loadMobileApp,
 } satisfies Record<RouteModuleKey, () => Promise<unknown>>;
@@ -370,6 +380,7 @@ function AppContent() {
     authorityGeneration: authenticationGeneration,
   });
   const startEnvironmentWithConfirmation = useEnvironmentStart(client);
+  const handleUnarchiveBranch = useUnarchiveBranch(client);
   const appAuthorityGuard = useAuthorityOperationGuard(
     user?.user_id && user.role && client && connected && !connecting
       ? [user.user_id, user.role, client, authGeneration]
@@ -1232,7 +1243,9 @@ function AppContent() {
       createSession: () => createSession({ ...sessionConfig, branch_id }),
       onSessionCreated: (session) => {
         sessionCreated(session);
-        showSuccess('Session created!');
+        const warning = getSessionCreationWarning(session);
+        if (warning) showWarning(warning, { duration: 10 });
+        else showSuccess('Session created!');
       },
       initialPrompt: config.initialPrompt ?? '',
       preparePrompt: attachmentFiles?.length
@@ -1671,23 +1684,6 @@ function AppContent() {
     }
   };
 
-  const handleUnarchiveBranch = async (branchId: string, options?: { boardId?: string }) => {
-    if (!client) {
-      throw new Error('Not connected to daemon');
-    }
-    try {
-      showLoading('Unarchiving branch...', { key: 'unarchive' });
-      await client.service(`branches/${branchId}/unarchive`).create(options || {});
-      showSuccess('Branch unarchived successfully!', { key: 'unarchive' });
-    } catch (error) {
-      showError(
-        `Failed to unarchive branch: ${error instanceof Error ? error.message : String(error)}`,
-        { key: 'unarchive' }
-      );
-      throw error;
-    }
-  };
-
   const handleUpdateBranch = async (
     branchId: string,
     updates: BranchUpdate,
@@ -2083,6 +2079,14 @@ function AppContent() {
 
   const mcpConnectElement = <MCPOAuthConnectPage client={client} />;
 
+  const cliLoginElement = (
+    <CLILoginPage
+      client={client}
+      currentUserId={currentUser?.user_id ?? null}
+      currentUserEmail={currentUser?.email ?? null}
+    />
+  );
+
   // The post-onboarding connect-AI / integrations banners. Shared verbatim by
   // both shells so the mobile Home surfaces "AI not connected" proactively
   // (desktop already shows it above its app content).
@@ -2345,6 +2349,10 @@ function AppContent() {
 
             {MCP_CONNECT_ROUTE_PATHS.map((path) => (
               <Route key={path} path={path} element={mcpConnectElement} />
+            ))}
+
+            {CLI_LOGIN_ROUTE_PATHS.map((path) => (
+              <Route key={path} path={path} element={cliLoginElement} />
             ))}
 
             {/* Lightweight artifact fullscreen surface. Uses the shared auth shell,
