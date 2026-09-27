@@ -58,8 +58,8 @@ export class ApiKeyStrategy extends AuthenticationBaseStrategy {
       throw new NotAuthenticated('Invalid API key');
     }
 
-    // Update last_used_at (non-blocking)
-    this.apiKeysRepo.updateLastUsed(keyRow.id).catch((err: unknown) => {
+    // Best effort, but finish before the request's tenant transaction closes.
+    await this.apiKeysRepo.updateLastUsed(keyRow.id).catch((err: unknown) => {
       console.warn('Failed to update API key last_used_at:', err);
     });
 

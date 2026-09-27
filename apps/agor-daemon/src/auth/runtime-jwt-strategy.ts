@@ -11,7 +11,7 @@ import type { UserAuthorityCheck } from './user-authority.js';
  */
 
 import type { ResolvedMultiTenancyConfig } from '@agor/core/config';
-import { JWTStrategy, NotAuthenticated } from '@agor/core/feathers';
+import { JWTStrategy, NotAuthenticated, NotFound } from '@agor/core/feathers';
 import type { Params, TenantContext, UserAuthMetadata } from '@agor/core/types';
 import {
   fingerprintExecutorSessionToken,
@@ -159,7 +159,12 @@ export class RuntimeJWTStrategy extends JWTStrategy {
     );
 
     markAuthenticationUserLookup(params);
-    return super.getEntity(id, params);
+    try {
+      return await super.getEntity(id, params);
+    } catch (error) {
+      if (error instanceof NotFound) throw new NotAuthenticated('Invalid authentication');
+      throw error;
+    }
   }
 
   /** The reserved subject is not authority unless the verified type is service. */

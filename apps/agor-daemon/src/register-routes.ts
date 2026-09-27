@@ -136,6 +136,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
+import { hasPersonalApiKeyAuthentication } from './auth/api-key-host-tenant.js';
 import {
   gatewaySlackUploadExecutorCommandId,
   uploadMaterializeExecutorCommandId,
@@ -1202,7 +1203,21 @@ export async function registerRoutes(ctx: RegisterRoutesContext): Promise<void> 
   // Rate limiting is enforced by express-rate-limit middleware mounted on
   // `/authentication` above — by the time we reach this hook the limiter
   // has already 429'd any over-quota request.
+  const apiKeyAuthenticationScope = createTenantDatabaseScopeAroundHook({ db, config, jwtSecret });
   authService.hooks({
+    around: {
+      create: [
+        async (context: HookContext, next: () => Promise<void>) => {
+          // Opaque keys need tenant routing before their first repository read.
+          // JWT/local strategies establish identity through their own user lookup.
+          if (hasPersonalApiKeyAuthentication(context.data)) {
+            await apiKeyAuthenticationScope(context, next);
+          } else {
+            await next();
+          }
+        },
+      ],
+    },
     after: {
       create: [
         createIssueBrowserTokensHook({
