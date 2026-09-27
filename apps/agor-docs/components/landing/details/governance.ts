@@ -16,8 +16,8 @@ export const governanceDetails: LandingDetail[] = [
         body: 'Input, output, and cache tokens with an estimated dollar cost, inline in the conversation. Coverage depends on what each agent’s SDK reports.',
       },
       {
-        title: 'Per-user analytics',
-        body: 'Settings → Analytics gives a cost picture across the people on your team.',
+        title: 'Usage analytics',
+        body: 'Settings → Analytics shows how agents are being used across the workspace.',
       },
       {
         title: 'A record of agent work',
