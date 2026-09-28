@@ -1963,6 +1963,14 @@ describe('BranchesService managed environment control authorization', () => {
     expect(getSpy).not.toHaveBeenCalled();
   });
 
+  it('denies non-owner members before requesting source Sync', async () => {
+    const { service, getSpy } = createAuthHarness('session');
+    await expect(
+      service.syncEnvironment(branchId, 'a'.repeat(40), paramsFor(otherId, 'member'))
+    ).rejects.toThrow(/'all' branch permission or admin access/);
+    expect(getSpy).not.toHaveBeenCalled();
+  });
+
   it('allows users with effective all permission through the control gate', async () => {
     const { service } = createAuthHarness('all');
 
