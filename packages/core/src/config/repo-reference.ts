@@ -102,18 +102,31 @@ export function extractSlugFromUrl(url: string): RepoSlug {
 }
 
 /**
- * Derive a credential-free GitHub `owner/repository` identity from a
- * `github.com` git remote.
+ * Derive a GitHub `owner/repository` identity from a github.com git remote.
  *
- * Provider integrations must not treat a same-shaped GitLab/Bitbucket path as
- * a GitHub repository. Only the validated path components are returned, so
- * legacy HTTP userinfo can never enter a rendered lifecycle command.
+ * Unlike {@link extractSlugFromUrl}, this deliberately validates the remote
+ * host before returning anything. Provider integrations must not accidentally
+ * treat a GitLab/Bitbucket path as a same-named GitHub repository. The return
+ * value contains only path components, so HTTP userinfo or other credentials
+ * from a legacy remote URL can never enter rendered commands.
+ *
+ * Supported forms include HTTPS, `ssh://`, `git://`, and scp-style SSH:
+ *
+ * @example
+ * extractGitHubSlugFromUrl('https://github.com/preset-io/agor.git')
+ * // => 'preset-io/agor'
+ *
+ * @example
+ * extractGitHubSlugFromUrl('git@github.com:preset-io/agor.git')
+ * // => 'preset-io/agor'
  */
 export function extractGitHubSlugFromUrl(url: string): RepoSlug | undefined {
   const value = url.trim();
   if (!value) return undefined;
 
   let remotePath: string | undefined;
+
+  // Git's scp-style syntax is not understood by the WHATWG URL parser.
   const scpMatch = value.match(/^(?:[^@\s/:]+@)?github\.com:([^?#]+)$/i);
   if (scpMatch) {
     remotePath = scpMatch[1];
@@ -124,6 +137,7 @@ export function extractGitHubSlugFromUrl(url: string): RepoSlug | undefined {
     } catch {
       return undefined;
     }
+
     if (
       parsed.hostname.toLowerCase() !== 'github.com' ||
       !['http:', 'https:', 'ssh:', 'git:'].includes(parsed.protocol) ||

@@ -1,12 +1,12 @@
 // biome-ignore-all lint/plugin/noHardcodedColorLiteral: intentional dark-glass first-run surface — bespoke gradient/particle/glass values with no semantic-token equivalent; semantic text/primary/border already use theme tokens
 /**
- * OnboardingWizard — redesigned 4-step first-run flow.
+ * OnboardingWizard — 5-step first-run flow.
  *
- * Steps: goals → workspace (name + template gallery) → llm → done
+ * Steps: goals → workspace (name + template gallery) → llm → tools → done
  *
- * The in-wizard recommendations step was removed; goal-tailored tools still
- * feed the first-session prompt with their real Agor setup routes, so the
- * teammate can propose them accurately in-session.
+ * Tools use the existing Catalog controller and secure drawer in context.
+ * Explicit Connect saves only the MCP connection, without provisioning a workspace;
+ * ordinary Back/Skip never create resources or discard completed connections.
  */
 
 import { TOOL_API_KEY_NAMES } from '@agor/agentic-tools';
@@ -41,6 +41,7 @@ import {
   ONBOARDING_GOALS,
   type OnboardingIntegrationRecommendation,
 } from '../../utils/onboardingGoals';
+import type { OnboardingSlackGatewayIntent } from '../../utils/onboardingSlack';
 import {
   BLANK_TEMPLATE_ID,
   getTeammateTemplate,
@@ -48,11 +49,16 @@ import {
   resolveTemplateSourceRemoteUrl,
   type TeammateGalleryCardId,
 } from '../../utils/teammateTemplates';
-import { CLAUDE_OAUTH_STORAGE_DESCRIPTION, ClaudeOAuthSignIn } from '../ClaudeAuth';
+import {
+  CLAUDE_BACKEND_OAUTH_STORAGE_DESCRIPTION,
+  CLAUDE_OAUTH_STORAGE_DESCRIPTION,
+  ClaudeOAuthSignIn,
+} from '../ClaudeAuth';
 import { type CodexAuthFallback, CodexDeviceSignIn, CodexImportAuthJson } from '../CodexAuth';
 import { GlassPanelHighlights } from '../GlassSurface/GlassPanel';
 import { ToolIcon } from '../ToolIcon';
 import { OnboardingTeammateGalleryStep } from './OnboardingTeammateGalleryStep';
+import { OnboardingToolsStep } from './OnboardingToolsStep';
 
 const { Text, Title, Paragraph } = Typography;
 const { useToken } = theme;
@@ -60,7 +66,7 @@ const openCodeOnboarding = getAgenticToolUIIntegration('opencode').onboardingOpt
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-export type WizardStep = 'goals' | 'workspace' | 'llm' | 'done';
+export type WizardStep = 'goals' | 'workspace' | 'llm' | 'tools' | 'done';
 type AuthMethod =
   | 'api-key'
   | 'claude-oauth'
@@ -102,13 +108,14 @@ const AUTH_METHOD_OPTIONS: Partial<
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const STEPS: WizardStep[] = ['goals', 'workspace', 'llm', 'done'];
+const STEPS: WizardStep[] = ['goals', 'workspace', 'llm', 'tools', 'done'];
 
 const STEP_META: Record<WizardStep, { number: number; label: string; skippable: boolean }> = {
   goals: { number: 1, label: 'Goals', skippable: true },
   workspace: { number: 2, label: 'Teammate', skippable: true },
   llm: { number: 3, label: 'AI', skippable: true },
-  done: { number: 4, label: "You're ready", skippable: false },
+  tools: { number: 4, label: 'Tools', skippable: true },
+  done: { number: 5, label: "You're ready", skippable: false },
 };
 
 const GOALS = ONBOARDING_GOALS;
@@ -146,6 +153,7 @@ const LLM_OPTIONS: LlmOption[] = [
     placeholder: 'sk-proj-…',
     keyLink: 'https://platform.openai.com/api-keys',
     keyLinkLabel: 'platform.openai.com/api-keys',
+    recommended: true,
   },
   {
     id: 'gemini',
@@ -207,7 +215,10 @@ function validateLlmKeyPattern(agent: AgenticToolName, key: string): string | nu
 }
 
 function hasManagedClaudeLogin(user: User | null | undefined): boolean {
-  return user?.agentic_credential_sources?.['claude-code'] === 'managed_file';
+  return (
+    user?.agentic_credential_sources?.['claude-code'] === 'managed_file' ||
+    user?.agentic_credential_sources?.['claude-code'] === 'managed_oauth'
+  );
 }
 
 function hasUsableClaudeCredential(
@@ -384,6 +395,8 @@ export interface OnboardingCompletionResult {
   agent?: AgenticToolName | null;
   /** Goal-tailored tools/connections with their real Agor setup surface. */
   suggestedIntegrations?: OnboardingIntegrationRecommendation[];
+  slackGatewayIntent?: OnboardingSlackGatewayIntent;
+  connectedMcpServerIds?: string[];
   /** Goal ids chosen in step 1 (order-preserving, primary first; [] if
    * skipped), threaded straight through so the completion handler never has
    * to wait on the async preference save. */
@@ -417,6 +430,7 @@ export interface OnboardingWizardProps {
 
   /** Deployment capability for daemon-driven Claude OAuth. Fail-closed by default. */
   allowClaudeOAuthSignIn?: boolean;
+  claudeOAuthCapability?: import('@agor/core/types').ClaudeOAuthCapability;
 
   /** Re-open wizard starting at a specific step (used by tests / future callers). */
   initialStep?: WizardStep;
@@ -476,6 +490,7 @@ export function OnboardingWizard({
   onUpdateUser,
   onCheckAuth,
   allowClaudeOAuthSignIn = false,
+  claudeOAuthCapability,
   initialStep,
   completionSlowThresholdMs = ONBOARDING_COMPLETION_SLOW_THRESHOLD_MS,
 }: OnboardingWizardProps) {
@@ -515,6 +530,24 @@ export function OnboardingWizard({
     });
   }, []);
 
+  // Selection is not authorization or a connection. Catalog owns policy and secrets.
+  const [deselectedToolIds, setDeselectedToolIds] = useState<Set<string>>(new Set());
+  const [toolsSkipped, setToolsSkipped] = useState(false);
+  const [toolsConfirmed, setToolsConfirmed] = useState(false);
+  const [slackGatewayIntent, setSlackGatewayIntent] =
+    useState<OnboardingSlackGatewayIntent>('prefer-existing');
+  const [connectedMcpServerIds, setConnectedMcpServerIds] = useState<string[]>([]);
+  const createdBoardIdRef = useRef<string | null>(null);
+  const toggleTool = useCallback((id: string) => {
+    setToolsSkipped(false);
+    setDeselectedToolIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   // ── Step 3: LLM ─────────────────────────────────────────────────────────
   const [selectedAgent, setSelectedAgent] = useState<AgenticToolName | null>(null);
   const [apiKey, setApiKey] = useState('');
@@ -542,9 +575,7 @@ export function OnboardingWizard({
   // avatar and the teammate's framework source branch — never the name.
   const [selectedTemplateId, setSelectedTemplateId] = useState<TeammateGalleryCardId | null>(null);
   const [invalidSavedTemplateId, setInvalidSavedTemplateId] = useState<string | null>(null);
-  // The teammate's board is created ONLY at completion (the `done` handler) — a
-  // fresh board named after the teammate, never before, so an abandoned run
-  // leaves no orphan board. Errors from that final creation surface on step 4.
+  // Final completion owns the resumable board saga. Connecting tools creates no workspace.
   const [boardError, setBoardError] = useState<string | null>(null);
   const [createdBoardId, setCreatedBoardId] = useState<string | null>(null);
   const boardCreationConfirmedRef = useRef(false);
@@ -564,6 +595,12 @@ export function OnboardingWizard({
     if (!open) return;
     setCurrentStep(initialStep || 'goals');
     setSelectedGoals([]);
+    setDeselectedToolIds(new Set());
+    setToolsSkipped(false);
+    setToolsConfirmed(false);
+    setSlackGatewayIntent('prefer-existing');
+    setConnectedMcpServerIds([]);
+    createdBoardIdRef.current = null;
     setSelectedAgent(null);
     setApiKey('');
     setAuthMethod('api-key');
@@ -601,6 +638,8 @@ export function OnboardingWizard({
     const seedKey = `${user?.user_id ?? '__no_user__'}:${savedBoardId ?? ''}`;
     if (userSeedRef.current === seedKey) return;
     userSeedRef.current = seedKey;
+    // Our own progress writes must not reseed an open wizard onto Ready.
+    if (createdBoardId && createdBoardId === savedBoardId) return;
     // Pre-select LLM if user already has one configured
     if (hasAnyLlmKey(user, managedClaudeLoginAvailable)) {
       const codex = user?.agentic_tools?.codex;
@@ -628,6 +667,7 @@ export function OnboardingWizard({
       setSelectedTemplateId(savedTemplate?.id ?? null);
       setInvalidSavedTemplateId(savedTemplateId && !savedTemplate ? savedTemplateId : null);
       setCreatedBoardId(savedBoardId);
+      createdBoardIdRef.current = savedBoardId;
       boardCreationConfirmedRef.current = !!savedBoard;
       if (!initialStep) setCurrentStep('done');
     } else {
@@ -641,6 +681,7 @@ export function OnboardingWizard({
     savedOnboarding,
     initialStep,
     managedClaudeLoginAvailable,
+    createdBoardId,
   ]);
 
   // ─── Derived values ──────────────────────────────────────────────────────
@@ -677,16 +718,27 @@ export function OnboardingWizard({
     [managedClaudeLoginAvailable, user]
   );
 
+  const agentHasUsableStoredKey = useCallback(
+    (agent: AgenticToolName) =>
+      agentHasKey(agent) &&
+      !(
+        agent === 'claude-code' &&
+        user?.agentic_credential_sources?.['claude-code'] === 'managed_oauth' &&
+        llmAuthVerified['claude-code'] !== true
+      ),
+    [agentHasKey, user?.agentic_credential_sources?.['claude-code'], llmAuthVerified]
+  );
+
   const agentIsVerifiedConnected = useCallback(
     (agent: AgenticToolName): boolean => {
-      if (!agentHasKey(agent)) return false;
+      if (!agentHasUsableStoredKey(agent)) return false;
       // No auth checker available — trust the stored key
       if (!onCheckAuth) return true;
       const verified = llmAuthVerified[agent];
       if (verified === undefined) return false;
       return verified;
     },
-    [agentHasKey, llmAuthVerified, onCheckAuth]
+    [agentHasUsableStoredKey, llmAuthVerified, onCheckAuth]
   );
 
   // Verify stored keys when entering the LLM step.
@@ -710,7 +762,10 @@ export function OnboardingWizard({
           if (result.status === 'unknown') {
             const hasVerifiedSubscription =
               (agent === 'codex' && user?.agentic_auth_methods?.codex === 'subscription') ||
-              (agent === 'claude-code' && managedClaudeLoginAvailable);
+              (agent === 'claude-code' &&
+                managedClaudeLoginAvailable &&
+                (user?.agentic_credential_sources?.['claude-code'] !== 'managed_oauth' ||
+                  (result.managedOAuth?.saved === true && result.managedOAuth.usable)));
             if (hasVerifiedSubscription) {
               setLlmAuthVerified((prev) =>
                 prev[agent] === true ? prev : { ...prev, [agent]: true }
@@ -734,6 +789,7 @@ export function OnboardingWizard({
     agentHasKey,
     user?.agentic_auth_methods?.codex,
     managedClaudeLoginAvailable,
+    user?.agentic_credential_sources?.['claude-code'],
   ]);
 
   const primaryEnabled = useMemo(() => {
@@ -756,7 +812,8 @@ export function OnboardingWizard({
           return allowClaudeOAuthSignIn && llmAuthVerified['claude-code'] === true;
         }
         // Key stored, check still in progress — keep enabled so user isn't stuck
-        if (agentHasKey(selectedAgent) && llmAuthVerified[selectedAgent] === undefined) return true;
+        if (agentHasUsableStoredKey(selectedAgent) && llmAuthVerified[selectedAgent] === undefined)
+          return true;
         // Require a new key with valid format (stored key absent or broken)
         if (!sanitizeSecretValue(apiKey)) return false;
         // Subscription tokens have no fixed format — any non-empty string is
@@ -767,6 +824,9 @@ export function OnboardingWizard({
       case 'workspace':
         // A teammate name is required — it names the new board we always create.
         return teammateName.trim().length > 0;
+      case 'tools':
+        // Curating tools is optional; Continue is always available.
+        return true;
       case 'done':
         return true;
     }
@@ -775,7 +835,7 @@ export function OnboardingWizard({
     selectedGoals,
     selectedAgent,
     agentIsVerifiedConnected,
-    agentHasKey,
+    agentHasUsableStoredKey,
     llmAuthVerified,
     apiKey,
     effectiveAuthMethod,
@@ -804,7 +864,8 @@ export function OnboardingWizard({
             ? null
             : 'Complete Claude sign-in to continue';
         }
-        if (agentHasKey(selectedAgent) && llmAuthVerified[selectedAgent] === undefined) return null;
+        if (agentHasUsableStoredKey(selectedAgent) && llmAuthVerified[selectedAgent] === undefined)
+          return null;
         if (!sanitizeSecretValue(apiKey)) {
           return 'Enter your API key to continue';
         }
@@ -821,7 +882,7 @@ export function OnboardingWizard({
     selectedGoals,
     selectedAgent,
     agentIsVerifiedConnected,
-    agentHasKey,
+    agentHasUsableStoredKey,
     llmAuthVerified,
     apiKey,
     effectiveAuthMethod,
@@ -838,7 +899,7 @@ export function OnboardingWizard({
       case 'llm': {
         if (
           selectedAgent &&
-          agentHasKey(selectedAgent) &&
+          agentHasUsableStoredKey(selectedAgent) &&
           llmAuthVerified[selectedAgent] === undefined
         )
           return 'Checking…';
@@ -852,6 +913,8 @@ export function OnboardingWizard({
         return 'Connect →';
       }
       case 'workspace':
+        return 'Continue →';
+      case 'tools':
         return 'Continue →';
       case 'done': {
         const name = teammateName.trim();
@@ -867,7 +930,7 @@ export function OnboardingWizard({
     completing,
     completionSlow,
     selectedAgent,
-    agentHasKey,
+    agentHasUsableStoredKey,
     llmAuthVerified,
     agentIsVerifiedConnected,
     effectiveAuthMethod,
@@ -901,6 +964,65 @@ export function OnboardingWizard({
     [client, isCurrent, onUpdateUser, user]
   );
 
+  const ensureBoard = useCallback(async () => {
+    const name = teammateName.trim();
+    if (!client || !isCurrent()) throw new Error('Reconnect to continue setup.');
+    // This is a small resumable saga. Persist the client-generated id
+    // BEFORE issuing create: a reload after a committed response was lost
+    // must discover the same board instead of allocating another id.
+    let boardId = createdBoardIdRef.current ?? createdBoardId ?? '';
+    if (!boardId) {
+      boardId = generateId();
+      setCreatedBoardId(boardId);
+      createdBoardIdRef.current = boardId;
+    }
+    const progressSaved = await saveOnboardingProgress({
+      path: 'teammate',
+      boardId,
+      goals: selectedGoals,
+      teammateDisplayName: name || undefined,
+      teammateEmoji: name ? teammateEmoji : undefined,
+      teammateTemplateId: name ? (selectedTemplateId ?? undefined) : undefined,
+    });
+    if (!progressSaved || !isCurrent()) throw new Error('Setup was cancelled.');
+    if (!boardCreationConfirmedRef.current) {
+      let board: Board | undefined;
+      try {
+        board = await client.service('boards').create({
+          board_id: boardId,
+          name: name || (user?.name ? `${user.name}'s board` : 'My board'),
+          icon: teammateEmoji,
+        });
+      } catch (createError) {
+        // The response can fail after the server committed. Resolve the
+        // client-generated ID before offering retry, so an ambiguous
+        // transport failure cannot create a second board.
+        try {
+          board = await client.service('boards').get(boardId);
+        } catch {
+          throw createError;
+        }
+      }
+      if (!isCurrent()) throw new Error('Setup was cancelled.');
+      if (board?.board_id !== boardId) {
+        throw new Error('Board creation returned an unexpected ID - try again.');
+      }
+      boardCreationConfirmedRef.current = true;
+    }
+    if (!isCurrent()) throw new Error('Setup was cancelled.');
+    return boardId;
+  }, [
+    client,
+    isCurrent,
+    createdBoardId,
+    saveOnboardingProgress,
+    selectedGoals,
+    teammateName,
+    teammateEmoji,
+    selectedTemplateId,
+    user,
+  ]);
+
   const goToStep = useCallback((step: WizardStep) => {
     setCurrentStep(step);
   }, []);
@@ -927,7 +1049,7 @@ export function OnboardingWizard({
   // marking codex verified so the primary button advances to the next step.
   const handleCodexImported = useCallback(() => {
     setLlmAuthVerified((prev) => (prev.codex === true ? prev : { ...prev, codex: true }));
-    goToStep('done');
+    goToStep('tools');
   }, [goToStep]);
 
   const handleBack = useCallback(() => {
@@ -939,6 +1061,11 @@ export function OnboardingWizard({
     // Skip means "decide later", even if the user experimented with a card
     // first. Do not silently submit a selection they explicitly skipped.
     if (currentStep === 'goals') setSelectedGoals([]);
+    if (currentStep === 'tools') {
+      setDeselectedToolIds(new Set(mergeGoalIntegrationRecs(selectedGoals).map((rec) => rec.id)));
+      setToolsSkipped(true);
+      setSlackGatewayIntent('prefer-existing');
+    }
     // The teammate step is optional. Skip is authoritative: do not carry a
     // typed name or an experimental template into completion after the user
     // explicitly chose to continue without creating a teammate.
@@ -952,13 +1079,13 @@ export function OnboardingWizard({
     // and completion reads a non-null agent as "there is a model to run on" —
     // which would bootstrap the teammate's first session with no credentials.
     // Clear it unless the provider is genuinely configured.
-    if (currentStep === 'llm' && selectedAgent && !agentHasKey(selectedAgent)) {
+    if (currentStep === 'llm' && selectedAgent && !agentHasUsableStoredKey(selectedAgent)) {
       setSelectedAgent(null);
       setApiKey('');
       setLlmError(null);
     }
     goToStep(STEPS[stepIndex + 1]);
-  }, [currentStep, stepIndex, goToStep, selectedAgent, agentHasKey]);
+  }, [currentStep, stepIndex, goToStep, selectedAgent, agentHasUsableStoredKey, selectedGoals]);
 
   const handleDismiss = useCallback(() => {
     if (!onDismiss) return;
@@ -988,7 +1115,7 @@ export function OnboardingWizard({
       case 'llm': {
         if (!selectedAgent) return;
         if (agentIsVerifiedConnected(selectedAgent)) {
-          goToStep('done');
+          goToStep('tools');
           return;
         }
         // Device sign-in and login-file import both complete inside their own
@@ -998,16 +1125,19 @@ export function OnboardingWizard({
           selectedAgent === 'codex' &&
           (effectiveAuthMethod === 'codex-device-auth' || effectiveAuthMethod === 'codex-auth-json')
         ) {
-          if (llmAuthVerified.codex === true) goToStep('done');
+          if (llmAuthVerified.codex === true) goToStep('tools');
           return;
         }
         if (selectedAgent === 'claude-code' && effectiveAuthMethod === 'claude-oauth') {
-          if (allowClaudeOAuthSignIn && llmAuthVerified['claude-code'] === true) goToStep('done');
+          if (allowClaudeOAuthSignIn && llmAuthVerified['claude-code'] === true) goToStep('tools');
           return;
         }
         // Key stored, auth check still running — proceed optimistically
-        if (agentHasKey(selectedAgent) && llmAuthVerified[selectedAgent] === undefined) {
-          goToStep('done');
+        if (
+          agentHasUsableStoredKey(selectedAgent) &&
+          llmAuthVerified[selectedAgent] === undefined
+        ) {
+          goToStep('tools');
           return;
         }
         if (!user || !sanitizeSecretValue(apiKey)) return;
@@ -1049,7 +1179,7 @@ export function OnboardingWizard({
             } as UpdateUserInput['agentic_tools'],
           });
           if (!isCurrent()) return;
-          goToStep('done');
+          goToStep('tools');
         } catch (err) {
           if (isCurrent()) {
             setLlmError(
@@ -1062,11 +1192,15 @@ export function OnboardingWizard({
         break;
       }
       case 'workspace': {
-        // Step 2 no longer creates the board — that happens ONLY at completion
-        // (the `done` case below), so an abandoned run never leaves an orphan
-        // board. Continue requires a name; Skip remains the explicit no-teammate
-        // path. When present, the name is also what the board is named after.
+        // Naming and Catalog Connect do not provision a workspace. Final completion
+        // owns provisioning. Skip remains the no-teammate path.
         goToStep('llm');
+        break;
+      }
+      case 'tools': {
+        setToolsConfirmed(true);
+        // Suggestions are separate from connections already made in the drawer.
+        goToStep('done');
         break;
       }
       case 'done': {
@@ -1083,10 +1217,12 @@ export function OnboardingWizard({
             isCurrent() && completionAttemptGenerationRef.current === attemptGeneration,
         };
         const name = teammateName.trim();
-        // Merged MCP integrations for the chosen goals, threaded into the
-        // teammate's bootstrap prompt. The in-wizard MCP step was removed, but
-        // this still powers the teammate proposing connections in its first session.
-        const suggestedIntegrations = mergeGoalIntegrationRecs(selectedGoals);
+        const suggestedIntegrations =
+          !toolsConfirmed || toolsSkipped
+            ? []
+            : mergeGoalIntegrationRecs(selectedGoals).filter(
+                (rec) => !deselectedToolIds.has(rec.id)
+              );
         // Keep the modal up in a loading state until creation + navigation
         // finish (onComplete may run async), then it closes from the parent.
         setCompleting(true);
@@ -1096,49 +1232,8 @@ export function OnboardingWizard({
           if (!isCurrent()) return;
           if (!client) throw new Error('Not connected - try again when Agor reconnects.');
 
-          // This is a small resumable saga. Persist the client-generated id
-          // BEFORE issuing create: a reload after a committed response was lost
-          // must discover the same board instead of allocating another id.
-          let boardId = createdBoardId ?? '';
-          if (!boardId) {
-            boardId = generateId();
-            setCreatedBoardId(boardId);
-          }
-          const progressSaved = await saveOnboardingProgress({
-            path: 'teammate',
-            boardId,
-            goals: selectedGoals,
-            teammateDisplayName: name || undefined,
-            teammateEmoji: name ? teammateEmoji : undefined,
-            teammateTemplateId: name ? (selectedTemplateId ?? undefined) : undefined,
-          });
-          if (!progressSaved || !completionAttempt.isCurrent()) return;
-          if (!boardCreationConfirmedRef.current) {
-            let board: Board | undefined;
-            try {
-              board = await client.service('boards').create({
-                board_id: boardId,
-                name: name || (user?.name ? `${user.name}'s board` : 'My board'),
-                icon: teammateEmoji,
-              });
-            } catch (createError) {
-              // The response can fail after the server committed. Resolve the
-              // client-generated ID before offering retry, so an ambiguous
-              // transport failure cannot create a second board.
-              try {
-                board = await client.service('boards').get(boardId);
-              } catch {
-                throw createError;
-              }
-            }
-            if (!isCurrent()) return;
-            if (board?.board_id !== boardId) {
-              setBoardError('Board creation returned an unexpected ID - try again.');
-              return;
-            }
-            boardCreationConfirmedRef.current = true;
-          }
-          if (!isCurrent()) return;
+          const boardId = await ensureBoard();
+          if (!completionAttempt.isCurrent()) return;
           await observeSlowCompletion(
             Promise.resolve(
               onComplete(
@@ -1157,6 +1252,13 @@ export function OnboardingWizard({
                   templateId: selectedTemplateId,
                   agent: selectedAgent,
                   suggestedIntegrations,
+                  connectedMcpServerIds,
+                  slackGatewayIntent:
+                    toolsConfirmed &&
+                    !toolsSkipped &&
+                    suggestedIntegrations.some((rec) => rec.id === 'slack')
+                      ? slackGatewayIntent
+                      : undefined,
                   goals: selectedGoals,
                 },
                 completionAttempt
@@ -1194,9 +1296,15 @@ export function OnboardingWizard({
     currentStep,
     isCurrent,
     selectedGoals,
+    deselectedToolIds,
+    toolsSkipped,
+    toolsConfirmed,
+    slackGatewayIntent,
+    connectedMcpServerIds,
+    ensureBoard,
     selectedAgent,
     agentIsVerifiedConnected,
-    agentHasKey,
+    agentHasUsableStoredKey,
     llmAuthVerified,
     user,
     apiKey,
@@ -1209,8 +1317,6 @@ export function OnboardingWizard({
     teammateEmoji,
     selectedTemplateId,
     invalidSavedTemplateId,
-    createdBoardId,
-    saveOnboardingProgress,
     onComplete,
     completionSlowThresholdMs,
     goToStep,
@@ -1733,9 +1839,12 @@ export function OnboardingWizard({
                     {authPane === 'claude-oauth' && (
                       <div>
                         <Text style={{ color: TEXT_SECONDARY, display: 'block', marginBottom: 10 }}>
-                          {CLAUDE_OAUTH_STORAGE_DESCRIPTION}
+                          {claudeOAuthCapability?.storage === 'backend'
+                            ? CLAUDE_BACKEND_OAUTH_STORAGE_DESCRIPTION
+                            : CLAUDE_OAUTH_STORAGE_DESCRIPTION}
                         </Text>
                         <ClaudeOAuthSignIn
+                          storage={claudeOAuthCapability?.storage ?? 'local_file'}
                           client={client}
                           operationScope={onboardingAuthority.operationScope}
                           connected={managedClaudeLoginAvailable}
@@ -1862,6 +1971,26 @@ export function OnboardingWizard({
       onTeammateEmojiChange={setTeammateEmoji}
       headingRef={stepHeadingRef}
     />
+  );
+
+  const renderTools = () => (
+    <div>
+      {renderStepBadge('Choose your tools')}
+      <OnboardingToolsStep
+        client={client}
+        user={user}
+        connected={onboardingAuthority.connectionReady && isCurrent()}
+        authGeneration={onboardingAuthority.authGeneration}
+        kit={mergeGoalIntegrationRecs(selectedGoals)}
+        isSelected={(id) => !toolsSkipped && !deselectedToolIds.has(id)}
+        onToggle={toggleTool}
+        onConnected={(serverId) =>
+          setConnectedMcpServerIds((ids) => (ids.includes(serverId) ? ids : [...ids, serverId]))
+        }
+        gatewayIntent={slackGatewayIntent}
+        onGatewayIntent={setSlackGatewayIntent}
+      />
+    </div>
   );
 
   const renderDone = () => {
@@ -2031,6 +2160,8 @@ export function OnboardingWizard({
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: token.marginXS,
         padding: '14px clamp(16px, 4.4vw, 32px)',
         boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07)',
         position: 'relative',
@@ -2050,7 +2181,7 @@ export function OnboardingWizard({
           </Button>
         )}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: token.marginXS }}>
         {isSkippable && (
           <Button
             type="link"
@@ -2135,8 +2266,8 @@ export function OnboardingWizard({
               icon={<CloseOutlined style={{ fontSize: 12 }} />}
               style={{
                 position: 'absolute',
-                top: 16,
-                right: 16,
+                top: 0,
+                right: 0,
                 zIndex: 10,
                 background:
                   'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
@@ -2146,6 +2277,7 @@ export function OnboardingWizard({
                 borderRadius: 8,
                 width: 30,
                 height: 30,
+                paddingLeft: 0,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -2199,6 +2331,7 @@ export function OnboardingWizard({
             {currentStep === 'goals' && renderGoals()}
             {currentStep === 'llm' && renderLlm()}
             {currentStep === 'workspace' && renderWorkspace()}
+            {currentStep === 'tools' && renderTools()}
             {currentStep === 'done' && renderDone()}
           </div>
 

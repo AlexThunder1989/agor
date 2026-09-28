@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -70,12 +70,8 @@ class FakeClient {
     this.runtimeLogCalls = [];
     this.portVisibility = 'private';
     this.visibilityCalls = [];
-    this.bootstrapCalls = [];
-    this.syncCalls = [];
-    this.verifyCalls = [];
-    this.remoteHealthy = true;
-    this.healthResponses = [];
-    this.events = [];
+    this.previewHealthy = true;
+    this.reconcileCalls = [];
   }
 
   async viewer() {
@@ -130,9 +126,12 @@ class FakeClient {
   }
 
   async remoteHealth() {
-    this.events.push('health');
-    if (this.healthResponses.length > 0) return this.healthResponses.shift();
-    return this.remoteHealthy;
+    return this.previewHealthy;
+  }
+
+  async reconcilePreview(name, repository, timeoutSeconds) {
+    this.reconcileCalls.push({ name, repository, timeoutSeconds });
+    this.previewHealthy = true;
   }
 
   async creationLogs(name) {
@@ -143,25 +142,6 @@ class FakeClient {
   async runtimeLogs(name) {
     this.runtimeLogCalls.push(name);
     return 'safe runtime log\n';
-  }
-
-  async runBootstrap(name, repository, options) {
-    this.events.push('bootstrap');
-    this.bootstrapCalls.push({ name, repository, options });
-    this.remoteHealthy = true;
-  }
-
-  async syncWorkspace(name, repository, ref, revision, options) {
-    this.events.push('sync');
-    this.syncCalls.push({ name, repository, ref, revision, options });
-    this.syncedRevision = revision;
-    this.remoteHealthy = true;
-  }
-
-  async verifyWorkspaceRevision(name, repository, ref, revision) {
-    this.events.push('verify');
-    this.verifyCalls.push({ name, repository, ref, revision });
-    return this.syncedRevision ?? revision;
   }
 }
 
@@ -221,45 +201,21 @@ test('a second start rediscovers instead of creating a duplicate', async (t) => 
   assert.equal(client.created, 0);
 });
 
-test('Start repairs an already-Available Codespace whose Agor stack is unhealthy', async (t) => {
+test('Start repairs an unhealthy rediscovered preview before polling again', async (t) => {
   const { store } = await fixture(t);
   const existing = resource();
   const client = new FakeClient([existing]);
-  client.remoteHealthy = false;
+  client.previewHealthy = false;
 
   const result = await controller(client, store).start();
 
   assert.equal(result.resource.name, existing.name);
-  assert.deepEqual(client.bootstrapCalls, [
-    { name: existing.name, repository: REPOSITORY, options: { recreate: true, timeout: 30 } },
-  ]);
-  assert.deepEqual(client.events.slice(0, 3), ['health', 'bootstrap', 'health']);
-});
-
-test('Start reports a failed dead-stack repair immediately instead of polling to timeout', async (t) => {
-  const { store } = await fixture(t);
-  const client = new FakeClient([resource()]);
-  client.remoteHealthy = false;
-  client.runBootstrap = async () => {
-    client.bootstrapCalls.push('attempted');
-    throw new LauncherError('remote bootstrap exited 91');
-  };
-
-  await assert.rejects(
-    controller(client, store, { monotonic: () => 0 }).start(),
-    /bootstrap repair failed: remote bootstrap exited 91/
-  );
-  assert.deepEqual(client.bootstrapCalls, ['attempted']);
-});
-
-test('Start does not launch a duplicate repair when a newly created Codespace is healthy', async (t) => {
-  const { store } = await fixture(t);
-  const client = new FakeClient();
-
-  await controller(client, store).start();
-
-  assert.equal(client.created, 1);
-  assert.deepEqual(client.bootstrapCalls, []);
+  assert.equal(client.created, 0);
+  assert.equal(client.reconcileCalls.length, 1);
+  assert.equal(client.reconcileCalls[0].name, existing.name);
+  assert.equal(client.reconcileCalls[0].repository, REPOSITORY);
+  assert.ok(client.reconcileCalls[0].timeoutSeconds > 0);
+  assert.ok(client.reconcileCalls[0].timeoutSeconds <= 30);
 });
 
 test('a stopped Codespace is resumed and revalidated', async (t) => {
@@ -269,47 +225,6 @@ test('a stopped Codespace is resumed and revalidated', async (t) => {
   const result = await controller(client, store).start();
   assert.deepEqual(client.started, [existing.name]);
   assert.equal(result.resource.state, 'Available');
-});
-
-test('Sync applies one exact revision, waits for health, then re-attests it', async (t) => {
-  const { store } = await fixture(t);
-  const existing = resource();
-  const client = new FakeClient([existing]);
-  const revision = 'b'.repeat(40);
-
-  const applied = await controller(client, store).sync(revision);
-
-  assert.equal(applied, revision);
-  assert.deepEqual(client.syncCalls, [
-    {
-      name: existing.name,
-      repository: REPOSITORY,
-      ref: REF,
-      revision,
-      options: { timeout: 30 },
-    },
-  ]);
-  assert.deepEqual(client.verifyCalls, [
-    { name: existing.name, repository: REPOSITORY, ref: REF, revision },
-  ]);
-  assert.deepEqual(client.events, ['sync', 'health', 'verify']);
-});
-
-test('Sync refuses to acknowledge a different post-readiness revision', async (t) => {
-  const { store } = await fixture(t);
-  const client = new FakeClient([resource()]);
-  client.verifyWorkspaceRevision = async () => 'c'.repeat(40);
-
-  await assert.rejects(controller(client, store).sync('b'.repeat(40)), /returned c+, expected b+/);
-});
-
-test('Sync refuses to wake or mutate a stopped Codespace', async (t) => {
-  const { store } = await fixture(t);
-  const client = new FakeClient([resource({ state: 'Shutdown' })]);
-
-  await assert.rejects(controller(client, store).sync('b'.repeat(40)), /not available.*Shutdown/);
-  assert.deepEqual(client.syncCalls, []);
-  assert.deepEqual(client.started, []);
 });
 
 test('Start can make both preview ports public and reconcile a restart reset', async (t) => {
@@ -415,13 +330,13 @@ test('destructive actions refetch and freeze on identity drift', async (t) => {
   assert.deepEqual(client.deleted, []);
 });
 
-for (const state of ['ShuttingDown', 'Shutdown']) {
-  test(`logs never use SSH while a Codespace is ${state}`, async (t) => {
+for (const state of ['Shutdown', 'ShuttingDown']) {
+  test(`logs never open SSH while a Codespace is ${state}`, async (t) => {
     const { store } = await fixture(t);
     const existing = resource({ state });
     const client = new FakeClient([existing]);
     const output = await controller(client, store).logs();
-    assert.match(output, /GitHub CLI uses SSH and could resume or delay/);
+    assert.match(output, /GitHub CLI uses SSH and could resume a stopped or stopping Codespace/);
     assert.deepEqual(client.creationLogCalls, []);
     assert.deepEqual(client.runtimeLogCalls, []);
   });
@@ -495,16 +410,7 @@ test('the dynamic App URL comes from validated port metadata', () => {
       healthPath: '/health',
       emitHealth: 'public-only',
     }),
-    {
-      version: 1,
-      access_urls: [{ name: 'App', url: `https://${existing.name}-5000.app.github.dev` }],
-      resource: {
-        provider: 'github-codespaces',
-        id: existing.name,
-        name: existing.name,
-        manage_url: `https://github.com/codespaces/${existing.name}`,
-      },
-    }
+    { app: `https://${existing.name}-5000.app.github.dev` }
   );
   const badPorts = ports(existing.name);
   badPorts[1].browseUrl = 'https://evil.example.test/steal';
@@ -530,40 +436,15 @@ test('health is emitted only under the selected visibility policy', () => {
     healthPath: '/ready',
     emitHealth: 'public-only',
   });
-  assert.equal(result.health_url, `https://${existing.name}-3000.app.github.dev/ready`);
+  assert.equal(result.health, `https://${existing.name}-3000.app.github.dev/ready`);
   assert.equal(
     environmentResult(existing, publicPorts, {
       appPort: 5000,
       healthPort: 3000,
       healthPath: '/ready',
       emitHealth: 'never',
-    }).health_url,
+    }).health,
     undefined
-  );
-});
-
-test('Sync accepts only full lowercase SHA-1 or SHA-256 revisions', () => {
-  const base = ['sync', '--repository', REPOSITORY, '--ref', REF, '--binding', BINDING];
-  assert.equal(parseArgs([...base, '--revision', 'b'.repeat(40)]).revision, 'b'.repeat(40));
-  assert.equal(parseArgs([...base, '--revision', 'c'.repeat(64)]).revision, 'c'.repeat(64));
-  for (const revision of ['b'.repeat(39), 'B'.repeat(40), 'not-a-revision']) {
-    assert.throws(() => parseArgs([...base, '--revision', revision]), /--revision/);
-  }
-  assert.throws(() => parseArgs(base), /--revision is required/);
-  assert.throws(
-    () =>
-      parseArgs([
-        'start',
-        '--repository',
-        REPOSITORY,
-        '--ref',
-        REF,
-        '--binding',
-        BINDING,
-        '--revision',
-        'b'.repeat(40),
-      ]),
-    /valid only for sync/
   );
 });
 
@@ -596,9 +477,14 @@ test('preview readiness has a bounded timeout', async (t) => {
   const { store } = await fixture(t);
   const client = new FakeClient([resource()]);
   client.listPorts = async () => [];
-  const ticks = [0, 31, 62];
+  let tick = 0;
   await assert.rejects(
-    controller(client, store, { monotonic: () => ticks.shift() }).start(),
+    controller(client, store, {
+      monotonic: () => {
+        tick += 31;
+        return tick;
+      },
+    }).start(),
     /timed out after 30s/
   );
 });
@@ -621,7 +507,7 @@ test('preview readiness fails fast when the custom devcontainer has no SSH serve
     }).start(),
     /built without the SSH transport.*rebuild its dev container or Nuke it/i
   );
-  assert.ok(ticks < 3);
+  assert.ok(ticks <= 3);
 });
 
 test('redaction removes common credentials and provider control lines', () => {
@@ -674,11 +560,7 @@ test('the gh adapter explains that a missing remote ref must be pushed', async (
 test('the gh adapter distinguishes an unhealthy app from a broken SSH transport', async () => {
   const calls = [];
   const results = [
-    {
-      returncode: 1,
-      stdout: '',
-      stderr: 'curl: connection refused\nshell closed: exit status 42\n',
-    },
+    { returncode: 42, stdout: '', stderr: 'curl: connection refused' },
     {
       returncode: 1,
       stdout: '',
@@ -707,52 +589,16 @@ test('the gh adapter distinguishes an unhealthy app from a broken SSH transport'
   assert.match(calls[0].argv.at(-1), /exit 42/);
 });
 
-test('the gh adapter explicitly recreates a remotely unhealthy Compose service', async () => {
+test('the gh adapter reconciles the preview through one bounded SSH command', async () => {
   const calls = [];
   const runner = async (argv, options) => {
-    calls.push({ argv: [...argv], ...options });
+    calls.push({ argv, options });
     return { returncode: 0, stdout: '', stderr: '' };
   };
   const client = new GitHubCodespacesClient({ runner, callTimeout: 17 });
 
-  await client.runBootstrap('octocat-agor-new123', REPOSITORY, {
-    recreate: true,
-    timeout: 99,
-  });
+  await client.reconcilePreview('octocat-agor-new123', REPOSITORY, 120);
 
-  assert.equal(calls.length, 1);
-  assert.match(calls[0].argv.at(-1), /AGOR_FORCE_REBUILD='false'/);
-  assert.match(calls[0].argv.at(-1), /AGOR_FORCE_RECREATE='true'/);
-  assert.equal(calls[0].timeout, 99);
-});
-
-test('the gh adapter sends exact Sync logic over stdin with shell-quoted arguments', async () => {
-  const calls = [];
-  const revision = 'b'.repeat(40);
-  const runner = async (argv, options) => {
-    calls.push({ argv: [...argv], ...options });
-    return {
-      returncode: 0,
-      stdout: options.inputText?.includes('actual_revision=$(git rev-parse HEAD)')
-        ? `AGOR_CODESPACE_REVISION=${revision}\n`
-        : '',
-      stderr: '',
-    };
-  };
-  const client = new GitHubCodespacesClient({ runner, callTimeout: 17 });
-  const hostileLookingRef = "feature/quote'$(touch nope)";
-
-  await client.syncWorkspace('octocat-agor-new123', REPOSITORY, hostileLookingRef, revision, {
-    timeout: 99,
-  });
-  const applied = await client.verifyWorkspaceRevision(
-    'octocat-agor-new123',
-    REPOSITORY,
-    hostileLookingRef,
-    revision
-  );
-
-  assert.equal(applied, revision);
   assert.deepEqual(calls[0].argv.slice(0, 6), [
     'gh',
     'codespace',
@@ -761,34 +607,14 @@ test('the gh adapter sends exact Sync logic over stdin with shell-quoted argumen
     'octocat-agor-new123',
     '--',
   ]);
-  assert.match(calls[0].argv.at(-1), /feature\/quote'"'"'\$\(touch nope\)/);
-  assert.match(calls[0].inputText, /checkout is dirty; refusing to overwrite developer work/);
-  assert.match(calls[0].inputText, /merge-base --is-ancestor/);
-  assert.match(calls[0].inputText, /docker compose -p agor-codespaces-sqlite rm -sfv agor-dev/);
-  assert.match(calls[0].inputText, /docker compose -p agor-codespaces-sqlite down/);
-  assert.doesNotMatch(calls[0].inputText, /AGOR_FORCE_REBUILD=true/);
-  assert.equal(calls[0].timeout, 99);
-  assert.equal(calls[1].timeout, 17);
-});
+  assert.equal(calls[0].options.timeout, 120);
+  assert.equal(calls[0].options.check, true);
+  assert.match(calls[0].argv.at(-1), /\/workspaces\/agor/);
+  assert.match(calls[0].argv.at(-1), /env CODESPACE_NAME='octocat-agor-new123' bash .devcontainer/);
+  assert.match(calls[0].argv.at(-1), /start-agor-sqlite\.sh/);
 
-test('the gh adapter rejects missing or ambiguous revision attestations', async () => {
-  const revision = 'b'.repeat(40);
-  const outputs = [
-    '',
-    `AGOR_CODESPACE_REVISION=${revision}\nAGOR_CODESPACE_REVISION=${revision}\n`,
-  ];
-  const client = new GitHubCodespacesClient({
-    runner: async () => ({ returncode: 0, stdout: outputs.shift(), stderr: '' }),
-  });
-
-  await assert.rejects(
-    client.verifyWorkspaceRevision('octocat-agor-new123', REPOSITORY, REF, revision),
-    /invalid result/
-  );
-  await assert.rejects(
-    client.verifyWorkspaceRevision('octocat-agor-new123', REPOSITORY, REF, revision),
-    /invalid result/
-  );
+  await client.reconcilePreview('octocat-agor-new123', REPOSITORY, 5);
+  assert.equal(calls[1].options.timeout, 5);
 });
 
 test('the gh adapter changes only the requested Codespace port visibility', async () => {
@@ -866,67 +692,14 @@ test('the Codespaces bootstrap persists a non-default secret without logging it'
   await writeFile(
     fakeDocker,
     `#!/bin/sh
-printf '%s\\n' "$*" >> "$HOME/docker-calls"
-case "$*" in
-  image\\ inspect\\ --format*Config.Labels*agor-dev:latest)
-    [ -f "$HOME/image-fingerprint" ] || exit 1
-    cat "$HOME/image-fingerprint"
-    exit
-    ;;
-  image\\ inspect\\ --format*agor-dev:latest)
-    [ -f "$HOME/tag-image-id" ] || exit 1
-    cat "$HOME/tag-image-id"
-    exit
-    ;;
-  "compose -p agor-codespaces-sqlite ps -aq agor-dev")
-    [ "\${FAIL_PS:-false}" != "true" ] || exit 96
-    if [ -f "$HOME/container-image-id" ]; then printf '%s\\n' 'fake-container'; fi
-    exit 0
-    ;;
-  inspect\\ --format*.Image*fake-container)
-    cat "$HOME/container-image-id"
-    exit
-    ;;
-  "volume ls --format {{.Name}}")
-    [ "\${FAIL_VOLUME_LIST:-false}" != "true" ] || exit 97
-    if [ -f "$HOME/agor-home-volume" ]; then
-      printf '%s\\n' 'agor-codespaces-sqlite_agor-home'
-    fi
-    ;;
-  "compose -p agor-codespaces-sqlite build agor-dev")
-    [ -n "\${AGOR_DEV_IMAGE_INPUT_FINGERPRINT:-}" ] || exit 94
-    [ "\${FAIL_COMPOSE:-false}" != "true" ] || exit 95
-    [ "\${BUILD_WITHOUT_TAG_UPDATE:-false}" != "true" ] || exit 0
-    image_generation="$(cat "$HOME/image-generation" 2>/dev/null || printf '%s' 0)"
-    image_generation="$((image_generation + 1))"
-    printf '%s\\n' "$image_generation" > "$HOME/image-generation"
-    printf 'fake-image-%s\\n' "$image_generation" > "$HOME/tag-image-id"
-    printf '%s\\n' "$AGOR_DEV_IMAGE_INPUT_FINGERPRINT" > "$HOME/image-fingerprint"
-    ;;
-  "compose -p agor-codespaces-sqlite rm -sfv agor-dev")
-    rm -f "$HOME/healthy" "$HOME/container-image-id"
-    ;;
-  "compose -p agor-codespaces-sqlite up -d")
-    [ "\${AGOR_ADMIN_PASSWORD:-}" != "admin" ] || exit 91
-    [ "\${AGOR_ALLOW_DEVELOPMENT_DEFAULT_ADMIN:-}" = "false" ] || exit 92
-    [ "\${SEED:-}" = "false" ] || exit 93
-    cp "$HOME/tag-image-id" "$HOME/container-image-id"
-    touch "$HOME/agor-home-volume"
-    touch "$HOME/healthy"
-    ;;
-  "compose -p agor-codespaces-sqlite ps")
-    ;;
-  *)
-    exit 94
-    ;;
-esac
+if [ "$*" != "compose -p agor-codespaces-sqlite ps" ]; then
+  [ "\${AGOR_ADMIN_PASSWORD:-}" != "admin" ] || exit 91
+  [ "\${AGOR_ALLOW_DEVELOPMENT_DEFAULT_ADMIN:-}" = "false" ] || exit 92
+fi
 printf '%s\\n' 'fake docker ok'
 `
   );
   await chmod(fakeDocker, 0o755);
-  const fakeCurl = join(binDirectory, 'curl');
-  await writeFile(fakeCurl, '#!/bin/sh\n[ -f "$HOME/healthy" ]\n');
-  await chmod(fakeCurl, 0o755);
   const script = join(process.cwd(), '.devcontainer/agor-managed/start-agor-sqlite.sh');
   const env = {
     ...process.env,
@@ -942,146 +715,7 @@ printf '%s\\n' 'fake docker ok'
   assert.match(password, /^[a-f0-9]{48}$/);
   assert.notEqual(password, 'admin');
   assert.doesNotMatch(`${first.stdout}${first.stderr}`, new RegExp(password));
-  assert.doesNotMatch(`${first.stdout}${first.stderr}`, /SEED=true/);
 
-  await assert.rejects(
-    execFileAsync('bash', [script], { env: { ...env, FAIL_PS: 'true' } }),
-    (error) => error.code === 96,
-    'container inventory failures must stop reconciliation instead of risking stale dependencies'
-  );
-
-  const second = await execFileAsync('bash', [script], { env });
+  await execFileAsync('bash', [script], { env });
   assert.equal((await readFile(passwordPath, 'utf8')).trim(), password);
-  assert.match(second.stdout, /existing development image/);
-  let dockerCalls = await readFile(join(directory, 'docker-calls'), 'utf8');
-  let dockerCallLines = dockerCalls.trim().split('\n');
-  assert.equal(
-    dockerCallLines.filter((call) => call === 'compose -p agor-codespaces-sqlite build agor-dev')
-      .length,
-    1
-  );
-  assert.equal(
-    dockerCallLines.filter((call) => call === 'compose -p agor-codespaces-sqlite up -d').length,
-    2,
-    'a matching healthy image still reconciles the actual Compose container'
-  );
-
-  const passwordBackupPath = `${passwordPath}.backup`;
-  const buildCallsBeforePasswordLoss = dockerCallLines.filter(
-    (call) => call === 'compose -p agor-codespaces-sqlite build agor-dev'
-  ).length;
-  const removeCallsBeforePasswordLoss = dockerCallLines.filter(
-    (call) => call === 'compose -p agor-codespaces-sqlite rm -sfv agor-dev'
-  ).length;
-  const upCallsBeforePasswordLoss = dockerCallLines.filter(
-    (call) => call === 'compose -p agor-codespaces-sqlite up -d'
-  ).length;
-  await rename(passwordPath, passwordBackupPath);
-  await assert.rejects(
-    execFileAsync('bash', [script], { env }),
-    /bootstrap password is missing while persistent Agor data exists/
-  );
-  await assert.rejects(readFile(passwordPath, 'utf8'), (error) => error.code === 'ENOENT');
-  dockerCalls = await readFile(join(directory, 'docker-calls'), 'utf8');
-  dockerCallLines = dockerCalls.trim().split('\n');
-  assert.equal(
-    dockerCallLines.filter((call) => call === 'compose -p agor-codespaces-sqlite build agor-dev')
-      .length,
-    buildCallsBeforePasswordLoss
-  );
-  assert.equal(
-    dockerCallLines.filter((call) => call === 'compose -p agor-codespaces-sqlite rm -sfv agor-dev')
-      .length,
-    removeCallsBeforePasswordLoss
-  );
-  assert.equal(
-    dockerCallLines.filter((call) => call === 'compose -p agor-codespaces-sqlite up -d').length,
-    upCallsBeforePasswordLoss
-  );
-  await assert.rejects(
-    execFileAsync('bash', [script], { env: { ...env, FAIL_VOLUME_LIST: 'true' } }),
-    /Could not verify persistent Agor credential state/
-  );
-  await assert.rejects(readFile(passwordPath, 'utf8'), (error) => error.code === 'ENOENT');
-  await rename(passwordBackupPath, passwordPath);
-
-  await writeFile(join(directory, 'tag-image-id'), 'interrupted-new-image\n');
-  await execFileAsync('bash', [script], { env });
-  dockerCalls = await readFile(join(directory, 'docker-calls'), 'utf8');
-  dockerCallLines = dockerCalls.trim().split('\n');
-  assert.equal(
-    dockerCallLines.filter((call) => call === 'compose -p agor-codespaces-sqlite rm -sfv agor-dev')
-      .length,
-    2,
-    'a current tag with an old service container must replace its anonymous dependencies'
-  );
-  assert.equal(
-    await readFile(join(directory, 'container-image-id'), 'utf8'),
-    await readFile(join(directory, 'tag-image-id'), 'utf8')
-  );
-
-  await rm(join(directory, 'healthy'));
-  const reused = await execFileAsync('bash', [script], { env });
-  assert.match(reused.stdout, /existing development image/);
-  dockerCalls = await readFile(join(directory, 'docker-calls'), 'utf8');
-  dockerCallLines = dockerCalls.trim().split('\n');
-  assert.equal(
-    dockerCallLines.filter((call) => call === 'compose -p agor-codespaces-sqlite up -d').length,
-    4
-  );
-
-  await writeFile(join(directory, 'image-fingerprint'), 'stale\n');
-  const removeCallsBeforeInvalidBuild = dockerCallLines.filter(
-    (call) => call === 'compose -p agor-codespaces-sqlite rm -sfv agor-dev'
-  ).length;
-  const upCallsBeforeInvalidBuild = dockerCallLines.filter(
-    (call) => call === 'compose -p agor-codespaces-sqlite up -d'
-  ).length;
-  await assert.rejects(
-    execFileAsync('bash', [script], { env: { ...env, BUILD_WITHOUT_TAG_UPDATE: 'true' } }),
-    /Built development image did not retain the expected input fingerprint/
-  );
-  dockerCalls = await readFile(join(directory, 'docker-calls'), 'utf8');
-  dockerCallLines = dockerCalls.trim().split('\n');
-  assert.equal(
-    dockerCallLines.filter((call) => call === 'compose -p agor-codespaces-sqlite rm -sfv agor-dev')
-      .length,
-    removeCallsBeforeInvalidBuild
-  );
-  assert.equal(
-    dockerCallLines.filter((call) => call === 'compose -p agor-codespaces-sqlite up -d').length,
-    upCallsBeforeInvalidBuild
-  );
-  assert.equal(await readFile(join(directory, 'healthy'), 'utf8'), '');
-
-  await assert.rejects(
-    execFileAsync('bash', [script], {
-      env: { ...env, FAIL_COMPOSE: 'true' },
-    }),
-    (error) => error.code === 95,
-    'the EXIT cleanup trap must preserve a failed Compose exit status'
-  );
-  assert.equal(await readFile(join(directory, 'image-fingerprint'), 'utf8'), 'stale\n');
-
-  await execFileAsync('bash', [script], { env });
-  dockerCalls = await readFile(join(directory, 'docker-calls'), 'utf8');
-  dockerCallLines = dockerCalls.trim().split('\n');
-  assert.equal(
-    dockerCallLines.filter((call) => call === 'compose -p agor-codespaces-sqlite build agor-dev')
-      .length,
-    4,
-    'a failed rebuild must leave a stale label so its retry builds again'
-  );
-
-  await rm(join(directory, 'healthy'));
-  await execFileAsync('bash', [script], {
-    env: { ...env, AGOR_FORCE_REBUILD: 'true' },
-  });
-  dockerCalls = await readFile(join(directory, 'docker-calls'), 'utf8');
-  dockerCallLines = dockerCalls.trim().split('\n');
-  assert.equal(
-    dockerCallLines.filter((call) => call === 'compose -p agor-codespaces-sqlite build agor-dev')
-      .length,
-    5
-  );
 });

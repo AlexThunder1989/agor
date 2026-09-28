@@ -2,7 +2,12 @@ import { act, cleanup, configure, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import { checkBrowserSanity } from '../../test/browserSanity';
-import { CatalogHarness, makeCatalogClient } from './MCPCatalogModal.test-fixtures';
+import {
+  CatalogHarness,
+  catalogEntry,
+  catalogOverview,
+  makeCatalogClient,
+} from './MCPCatalogModal.test-fixtures';
 
 checkBrowserSanity();
 // Native Playwright input must commit mousedown before focus/mouseup. Wrapping
@@ -95,7 +100,11 @@ describe('MCP Catalog real Chromium flows', () => {
     const browse = await screen.findByRole('button', {
       name: 'Browse the MCP Catalog for all available MCPs',
     });
-    // The no-results action remains in the native keyboard tab order.
+    // Tab reaches the catalog action even when Select portals before its input.
+    await userEvent.tab();
+    expect(browse).toHaveFocus();
+    await userEvent.tab({ shift: true });
+    expect(within(disclosure).getByRole('combobox')).toHaveFocus();
     await userEvent.tab();
     expect(browse).toHaveFocus();
     await userEvent.keyboard('{Enter}');
@@ -114,6 +123,15 @@ describe('MCP Catalog real Chromium flows', () => {
     const card = await screen.findByRole('button', { name: 'Open DeepWiki' });
     await userEvent.click(card);
     const drawer = await screen.findByRole('dialog', { name: /DeepWiki/ });
+    const wrapper = drawer.closest('.ant-drawer-content-wrapper');
+    if (!wrapper) throw new Error('Drawer content wrapper not found');
+    // Let the real slide-in motion finish before interacting with the drawer.
+    await waitFor(() => {
+      expect(drawer.getBoundingClientRect().right).toBeCloseTo(window.innerWidth, 1);
+      expect(wrapper.getAnimations().some((animation) => animation.playState === 'running')).toBe(
+        false
+      );
+    });
     // This flow tests the handoff, not pointer hit-testing during drawer entry.
     const consent = within(drawer).getByRole('checkbox', { name: /I understand/ });
     act(() => consent.focus());
@@ -165,4 +183,45 @@ describe('MCP Catalog real Chromium flows', () => {
       expect(api.overviewRead).not.toHaveBeenCalled();
     }
   );
+});
+
+it('excludes hidden cards, searches, and counts but retains saved connections', async () => {
+  const hiddenNames = [
+    'com.figma.mcp/mcp',
+    'com.vercel/vercel-mcp',
+    'com.intercom/mcp',
+    'com.squareup/mcp',
+    'com.canva/mcp',
+    'com.dropbox/mcp',
+    'com.newrelic/mcp-server',
+  ];
+  const api = makeCatalogClient([
+    catalogEntry,
+    ...hiddenNames.map((name) => ({ ...catalogEntry, name, title: name, hidden: true })),
+  ]);
+  api.overviewRead.mockResolvedValue({
+    ...catalogOverview,
+    servers: catalogOverview.servers.map((server) => ({
+      ...server,
+      name: 'vercel',
+      display_name: 'Saved Vercel',
+      catalog_entry_name: 'com.vercel/vercel-mcp',
+    })),
+  });
+  render(<CatalogHarness client={api.client} />);
+  const trigger = screen.getByRole('button', { name: 'Open MCP Catalog' });
+  trigger.scrollIntoView();
+  await userEvent.click(trigger);
+  const modal = await findCatalogModal();
+  await screen.findByRole('button', { name: 'Open DeepWiki' });
+  for (const name of hiddenNames) expect(screen.queryByText(name)).not.toBeInTheDocument();
+  const search = within(modal).getByPlaceholderText(/Search/);
+  await userEvent.fill(search, 'vercel');
+  await screen.findByText(/No.*match/i);
+  expect(screen.getByText('0 of 1 servers match')).toBeInTheDocument();
+  await userEvent.clear(search);
+  await screen.findByRole('button', { name: 'Open DeepWiki' });
+  await activateTab(/My Servers/);
+  await screen.findByText('Saved Vercel');
+  expect(api.connect).not.toHaveBeenCalled();
 });

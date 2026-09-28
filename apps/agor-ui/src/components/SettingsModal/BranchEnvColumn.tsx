@@ -12,12 +12,13 @@ import {
   MinusCircleOutlined,
   PlayCircleOutlined,
   PoweroffOutlined,
+  QuestionCircleOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
 import type { GlobalToken } from 'antd';
-import { Badge, Button, Space, Tooltip } from 'antd';
+import { Button, Space, Tooltip } from 'antd';
 import { getEffectiveEnv } from '../../utils/environmentConfig';
-import { getEnvironmentHealthUrl } from '../../utils/environmentUrl';
+import { getEnvironmentHealthUrl } from '../../utils/environmentHealthUrl';
 
 /** Render environment status icon for a branch */
 export function renderEnvStatusIcon(branch: Branch, token: GlobalToken) {
@@ -68,8 +69,8 @@ export function renderEnvStatusIcon(branch: Branch, token: GlobalToken) {
       );
     }
     return (
-      <Tooltip title="Running">
-        <Badge status="processing" />
+      <Tooltip title="Started; health unavailable">
+        <QuestionCircleOutlined style={{ color: token.colorInfo }} />
       </Tooltip>
     );
   }
@@ -95,8 +96,9 @@ export function renderEnvCell(
   const isRunningOrHealthy =
     status === 'running' || status === 'starting' || healthStatus === 'healthy';
 
-  // Use the same static → typed → legacy precedence and validation as the
-  // daemon instead of ignoring provider-discovered runtime health URLs.
+  // Prefer the current runtime's provider-reported health URL, falling back
+  // to the branch's static health URL. Treat either as an untrusted external
+  // destination when opening it.
   const healthUrl = getEnvironmentHealthUrl(branch);
 
   return (
@@ -129,7 +131,6 @@ export function renderEnvCell(
             <Button
               type="text"
               size="small"
-              aria-label="Open environment health"
               icon={<GlobalOutlined />}
               onClick={(e) => {
                 e.stopPropagation();

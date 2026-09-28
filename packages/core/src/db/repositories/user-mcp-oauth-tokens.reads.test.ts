@@ -27,7 +27,12 @@ dbTest(
       clientSecret: 'secret',
       expiresAt: new Date('2030-01-01T00:00:00Z'),
     });
-    await repo.saveToken(null, server.mcp_server_id, { accessToken: 'shared', expiresAt: null });
+    await repo.saveToken(
+      null,
+      server.mcp_server_id,
+      { accessToken: 'shared', expiresAt: null },
+      owner
+    );
     const [personal, shared] = await Promise.all([repo.listForUser(owner), repo.listShared()]);
     expect(personal).toHaveLength(1);
     expect(personal[0]).toMatchObject({
@@ -73,5 +78,44 @@ dbTest(
     await expect(repo.listForUser(owner)).resolves.toEqual([]);
     await expect(repo.getCatalogGrantAuthority(owner, server.mcp_server_id)).resolves.toBeNull();
     await expect(repo.getToken(null, server.mcp_server_id)).resolves.toEqual(shared[0]);
+  }
+);
+
+dbTest(
+  'SQLite renewable status uses token presence without returning token material',
+  async ({ db }) => {
+    const owner = await ensureTestUser(db, generateId() as UserID);
+    const other = await ensureTestUser(db, generateId() as UserID);
+    const server = await new MCPServerRepository(db).create({
+      name: 'renewable-status-fixture',
+      transport: 'http',
+      url: 'https://example.test/mcp',
+      scope: 'global',
+      enabled: true,
+      source: 'user',
+      owner_user_id: owner,
+    });
+    const repo = new UserMCPOAuthTokenRepository(db);
+    await repo.saveToken(owner, server.mcp_server_id, {
+      accessToken: 'expired-fictional-access',
+      refreshToken: 'fictional-refresh',
+      expiresAt: new Date('2000-01-01T00:00:00Z'),
+    });
+    await repo.saveToken(
+      null,
+      server.mcp_server_id,
+      {
+        accessToken: 'expired-shared-access',
+        expiresAt: new Date('2000-01-01T00:00:00Z'),
+      },
+      owner
+    );
+    const status = await repo.listStatusForSubject(owner);
+    expect(status).toHaveLength(1);
+    expect(status[0]).toMatchObject({ has_refresh_token: true });
+    expect(status[0]).not.toHaveProperty('oauth_access_token');
+    expect(status[0]).not.toHaveProperty('oauth_refresh_token');
+    await expect(repo.listStatusForSubject(other)).resolves.toEqual([]);
+    await expect(repo.listStatusForSubject(null)).resolves.toEqual([]);
   }
 );

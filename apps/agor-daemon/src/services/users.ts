@@ -48,6 +48,7 @@ import {
   isNull,
   isPostgresDatabaseHandle,
   jsonExtract,
+  jsonSetString,
   runWithTenantDatabaseTransaction,
   select,
   sessionEnvSelections,
@@ -1212,9 +1213,9 @@ export class UsersService {
       const requestedClaudeSource = data.agentic_credential_sources?.['claude-code'];
       if (
         requestedClaudeSource !== undefined &&
-        !(['api_key', 'subscription_token', 'managed_file', 'none'] as const).includes(
-          requestedClaudeSource
-        )
+        !(
+          ['api_key', 'subscription_token', 'managed_file', 'managed_oauth', 'none'] as const
+        ).includes(requestedClaudeSource)
       ) {
         throw new BadRequest('Invalid Claude credential source');
       }
@@ -1251,7 +1252,7 @@ export class UsersService {
 
       const claudeSource = nextAgenticCredentialSources['claude-code'];
       if (
-        requestedClaudeSource === 'managed_file' &&
+        (requestedClaudeSource === 'managed_file' || requestedClaudeSource === 'managed_oauth') &&
         getTrustedUserMutationPurpose(params) !== 'claude-auth'
       ) {
         throw new Forbidden('Managed Claude credential sources can only be set by Claude sign-in');
@@ -1261,7 +1262,7 @@ export class UsersService {
           throw new BadRequest('A pasted Claude subscription source requires a stored token');
         }
         nextAgenticAuthMethods['claude-code'] = 'subscription';
-      } else if (claudeSource === 'managed_file') {
+      } else if (claudeSource === 'managed_file' || claudeSource === 'managed_oauth') {
         nextAgenticAuthMethods['claude-code'] = 'subscription';
       } else if (claudeSource === 'api_key') {
         if (
@@ -1571,6 +1572,9 @@ export class UsersService {
     }
 
     const authorityActorPredicate = this.actorStillCurrentPredicate(authority.actor, params);
+    // Immediate consenting-user FKs retire local shared MCP OAuth grants here,
+    // including direct DB deletes. No MCP lock acquisition: callback persistence
+    // orders user KEY SHARE before grant writes to match this cascade order.
     const removed = await deleteFrom(this.db, users)
       .where(
         withTenantPredicate(
@@ -1732,12 +1736,17 @@ export class UsersService {
    * that would immediately resolve back to null.
    */
   async setPrimaryTeammate(
-    data: { branchId: string; expectedUserId: UserID },
+    data: { branchId: string | null; expectedUserId: UserID },
     params?: Params
   ): Promise<Branch | null> {
     const userId = this.requirePrimaryTeammateMember(params);
     if (data?.expectedUserId !== userId) {
       throw new Forbidden(USER_AUTHORITY_DENIED);
+    }
+    if (data.branchId === null) {
+      await new UserPrimaryTeammateRepository(this.db).clearPrimaryTeammate(userId);
+      await this.emitUserPreferencePatched(userId, params);
+      return null;
     }
     const branchId = data?.branchId as BranchID | undefined;
     if (!branchId) {
@@ -1841,7 +1850,7 @@ export class UsersService {
     const updatedRow = await update(this.db, users)
       .set({
         updated_at: new Date(),
-        data: { ...currentData, primary_agentic_tool: tool },
+        data: jsonSetString(this.db, users.data, 'primary_agentic_tool', tool),
       })
       .where(
         and(

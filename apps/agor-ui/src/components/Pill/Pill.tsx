@@ -17,7 +17,6 @@ import {
   IdcardOutlined,
   LinkOutlined,
   MessageOutlined,
-  PercentageOutlined,
   RobotOutlined,
   SlackOutlined,
   ThunderboltOutlined,
@@ -25,8 +24,9 @@ import {
   UnorderedListOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import { Badge, Collapse, Popover, Tooltip, theme } from 'antd';
+import { Badge, Button, Collapse, Popover, Tooltip, theme } from 'antd';
 import type React from 'react';
+import { useRef, useState } from 'react';
 import { copyToClipboard } from '../../utils/clipboard';
 import { resolveContextWindowPercentage } from '../../utils/contextWindow';
 import { parseGitStateSha } from '../../utils/gitState';
@@ -236,7 +236,8 @@ const ContextWindowPopoverContent: React.FC<{
   limit: number;
   percentage: number;
   taskMetadata?: ContextWindowPillProps['taskMetadata'];
-}> = ({ used, limit, percentage, taskMetadata }) => {
+  onEscape: () => void;
+}> = ({ used, limit, percentage, taskMetadata, onEscape }) => {
   const { token } = theme.useToken();
 
   // Build collapsible items for advanced sections
@@ -344,7 +345,14 @@ const ContextWindowPopoverContent: React.FC<{
   }
 
   return (
-    <div style={{ width: 400, maxWidth: '90vw' }}>
+    <div
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return;
+        event.stopPropagation();
+        onEscape();
+      }}
+      style={{ width: 400, maxWidth: '90vw' }}
+    >
       {/* Primary info - always visible */}
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontWeight: 600, fontSize: '1.05em', marginBottom: 8 }}>
@@ -427,6 +435,13 @@ export const ContextWindowPill: React.FC<ContextWindowPillProps> = ({
   taskMetadata,
   style,
 }) => {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // Restore focus only for keyboard dismissal, never for hover or outside clicks.
+  const closeWithKeyboard = () => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
   // Prefer the executor-supplied snapshot — its totalTokens/maxTokens are
   // authoritative (agent-reported), and its `percentage` matches the agent's
   // own "Context XX% used" display (e.g. Codex applies a baseline subtraction
@@ -449,7 +464,7 @@ export const ContextWindowPill: React.FC<ContextWindowPillProps> = ({
   };
 
   const pill = (
-    <Tag icon={<PercentageOutlined />} color={getColor()} style={style}>
+    <Tag color={getColor()} style={{ ...style, marginInlineEnd: 0 }}>
       {hasLimit ? `${percentage}%` : '?'}
     </Tag>
   );
@@ -462,14 +477,35 @@ export const ContextWindowPill: React.FC<ContextWindowPillProps> = ({
           limit={effectiveLimit}
           percentage={percentage}
           taskMetadata={taskMetadata}
+          onEscape={closeWithKeyboard}
         />
       }
       title={null}
-      trigger="hover"
+      trigger={['hover', 'click']}
+      open={open}
+      onOpenChange={setOpen}
       placement="top"
       mouseEnterDelay={0.3}
     >
-      {pill}
+      <Button
+        ref={triggerRef}
+        type="text"
+        aria-label={`Context window ${hasLimit ? `${percentage}% used` : 'usage unknown'}; show token breakdown`}
+        aria-expanded={open}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.stopPropagation();
+            closeWithKeyboard();
+          }
+        }}
+        style={{
+          padding: 0,
+          height: 'auto',
+          color: 'inherit',
+        }}
+      >
+        {pill}
+      </Button>
     </Popover>
   );
 };
@@ -1220,22 +1256,27 @@ interface ChannelPillProps extends BasePillProps {
   channelName: string;
 }
 
-export const ChannelPill: React.FC<ChannelPillProps> = ({ channelType, channelName, style }) => {
-  // Map channel type to icon
-  const getIcon = () => {
-    const type = (channelType || '').toLowerCase();
-    switch (type) {
-      case 'slack':
-        return <SlackOutlined />;
-      case 'discord':
-        return <MessageOutlined />; // TODO: Add DiscordOutlined when available
-      default:
-        return <MessageOutlined />;
-    }
-  };
+/** Icon for a gateway channel type, shared by the pill and inline channel labels. */
+export function getChannelIcon(channelType?: string): React.ReactNode {
+  switch ((channelType || '').toLowerCase()) {
+    case 'slack':
+      return <SlackOutlined />;
+    case 'discord':
+      return <MessageOutlined />; // TODO: Add DiscordOutlined when available
+    default:
+      return <MessageOutlined />;
+  }
+}
 
+export const ChannelPill: React.FC<ChannelPillProps> = ({ channelType, channelName, style }) => {
   return (
-    <Tag icon={getIcon()} color={PILL_COLORS.success} truncate title={channelName} style={style}>
+    <Tag
+      icon={getChannelIcon(channelType)}
+      color={PILL_COLORS.success}
+      truncate
+      title={channelName}
+      style={style}
+    >
       {channelName}
     </Tag>
   );

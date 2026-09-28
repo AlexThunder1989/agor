@@ -3,7 +3,13 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { feathers } from '@agor/core/feathers';
-import { ENVIRONMENT_COMMAND_REPORT_SERVICE } from '@agor/core/types';
+import {
+  BRANCH_CLEANUP_REPORT_SERVICE,
+  BRANCH_DELETION_REPORT_SERVICE,
+  ENVIRONMENT_COMMAND_REPORT_SERVICE,
+  KNOWLEDGE_TRANSFER,
+  OWNERSHIP_TRANSFER_SERVICES,
+} from '@agor/core/types';
 import { describe, expect, it } from 'vitest';
 import {
   assertRealtimePublishPolicyCoverage,
@@ -40,13 +46,16 @@ describe('realtimePublishPolicyFor', () => {
     expect(realtimePublishPolicyFor('boards')?.minimumRole).toBeUndefined();
   });
 
-  it.each(['mcp-catalog/connect', 'mcp-catalog/start-session', 'mcp-slack-recovery'])(
-    'keeps %s replies private to the caller',
-    (path) => {
-      expect(realtimePublishPolicyFor(path)?.audience).toBe('none');
-      expect(isRealtimePublishAllowed(path)).toBe(false);
-    }
-  );
+  it.each([
+    'mcp-catalog/connect',
+    'mcp-catalog/start-session',
+    'mcp-slack-recovery',
+    KNOWLEDGE_TRANSFER.path,
+    ...Object.values(OWNERSHIP_TRANSFER_SERVICES),
+  ])('keeps %s replies private to the caller', (path) => {
+    expect(realtimePublishPolicyFor(path)?.audience).toBe('none');
+    expect(isRealtimePublishAllowed(path)).toBe(false);
+  });
 
   it('requires every entry to explain itself', () => {
     for (const [path, policy] of Object.entries(REALTIME_PUBLISH_POLICY)) {
@@ -56,10 +65,14 @@ describe('realtimePublishPolicyFor', () => {
 });
 
 describe('assertRealtimePublishPolicyCoverage', () => {
-  it('covers the constant-named environment report RPC even with no custom events', () => {
+  it.each([
+    ENVIRONMENT_COMMAND_REPORT_SERVICE,
+    BRANCH_DELETION_REPORT_SERVICE,
+    KNOWLEDGE_TRANSFER.path,
+  ])('covers private report RPC %s even with no custom events', (servicePath) => {
     const app = feathers();
     app.use(
-      ENVIRONMENT_COMMAND_REPORT_SERVICE,
+      servicePath,
       {
         async create() {
           return {};
@@ -68,7 +81,7 @@ describe('assertRealtimePublishPolicyCoverage', () => {
       { methods: ['create'], events: [] }
     );
     expect(() => assertRealtimePublishPolicyCoverage(app)).not.toThrow();
-    expect(realtimePublishPolicyFor(ENVIRONMENT_COMMAND_REPORT_SERVICE)?.audience).toBe('none');
+    expect(realtimePublishPolicyFor(servicePath)?.audience).toBe('none');
   });
 
   it('accepts an app whose services are all declared', () => {
@@ -147,6 +160,12 @@ describe('source scan: every registered path is declared', () => {
         /\bENVIRONMENT_COMMAND_REPORT_SERVICE\b/g,
         JSON.stringify(ENVIRONMENT_COMMAND_REPORT_SERVICE)
       )
+      .replace(
+        /\bBRANCH_DELETION_REPORT_SERVICE\b/g,
+        JSON.stringify(BRANCH_DELETION_REPORT_SERVICE)
+      )
+      .replace(/\bBRANCH_CLEANUP_REPORT_SERVICE\b/g, JSON.stringify(BRANCH_CLEANUP_REPORT_SERVICE))
+      .replace(/\bKNOWLEDGE_TRANSFER\.path\b/g, JSON.stringify(KNOWLEDGE_TRANSFER.path))
       .split('\n');
     const found: Array<{ path: string; line: number }> = [];
     lines.forEach((line, index) => {
@@ -156,6 +175,13 @@ describe('source scan: every registered path is declared', () => {
       // line for `app.use('/x', …)` and a line or two down for the multi-line
       // `registerAuthenticatedRoute(\n  app,\n  '/x',` form.
       const window = [line.slice(start), ...lines.slice(index + 1, index + 5)].join('\n');
+      // Ownership registers the two shared route constants in one kind loop.
+      if (/\.use\(\s*OWNERSHIP_TRANSFER_SERVICES\[kind\]/.test(window)) {
+        for (const path of Object.values(OWNERSHIP_TRANSFER_SERVICES)) {
+          found.push({ path, line: index + 1 });
+        }
+        return;
+      }
       const literal = window.match(/['"]([^'"\n]*)['"]/);
       if (!literal) return;
       found.push({ path: literal[1].replace(/^\/+/, '').replace(/\/+$/, ''), line: index + 1 });
@@ -209,6 +235,12 @@ describe('source scan: every registered path is declared', () => {
     ]);
   });
 
+  it('recognizes the shared deletion report service identifier', () => {
+    expect(extractRegisteredPaths('app.use(BRANCH_DELETION_REPORT_SERVICE, service);')).toEqual([
+      { path: BRANCH_DELETION_REPORT_SERVICE, line: 1 },
+    ]);
+  });
+
   it('recognizes the shared environment report service identifier', () => {
     expect(extractRegisteredPaths('app.use(ENVIRONMENT_COMMAND_REPORT_SERVICE, service);')).toEqual(
       [{ path: ENVIRONMENT_COMMAND_REPORT_SERVICE, line: 1 }]
@@ -232,6 +264,7 @@ describe('source scan: every registered path is declared', () => {
     // otherwise turn this whole describe into a silent pass.
     const found = registeredPathsInSource();
     expect(found.has('sessions')).toBe(true);
+    expect(found.has(KNOWLEDGE_TRANSFER.path)).toBe(true);
     expect(found.has('mcp-catalog/connect')).toBe(true);
     expect(found.size).toBeGreaterThan(100);
   });

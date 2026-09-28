@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { renderBranchSnapshot } from '../environment/render-snapshot';
 import type { RepoEnvironment, RepoEnvironmentConfigV1 } from '../types/branch';
 import { parseAgorYml, resolveVariant, writeAgorYml } from './agor-yml';
 
@@ -266,29 +267,60 @@ describe('parseAgorYml — misc', () => {
 });
 
 describe('parseAgorYml — repo .agor.yml demo variants', () => {
-  it('keeps the Codespaces provider opt-in and wires exact revision Sync', () => {
+  it('renders the experimental Codespaces launcher with shell-quoted exact identity and ref', () => {
     const env = parseAgorYml(REPO_ROOT_AGOR_YML);
     expect(env).not.toBeNull();
-    expect(env!.default).toBe('sqlite');
 
-    const codespaces = resolveVariant(env!, 'codespaces-sqlite');
-    if (codespaces === null) throw new Error('codespaces-sqlite variant must resolve');
+    const snapshot = renderBranchSnapshot(
+      {
+        // Agor's slug is a local identifier and is not necessarily the
+        // provider's owner/repository identity.
+        slug: 'agor',
+        remote_url: 'https://github.com/preset-io/agor.git',
+        environment: env!,
+      },
+      {
+        branch_id: '01999999-1111-7222-8333-444444444444',
+        branch_unique_id: 42,
+        name: 'safe-display-name',
+        ref: "feature/it's-$(not-a-command)",
+        path: '/worktree',
+      },
+      'codespaces-sqlite'
+    );
 
-    expect(codespaces.startup_timeout_ms).toBe(1_500_000);
-    expect(codespaces.start).toMatch(/agor-codespace-launcher\.mjs start/);
-    expect(codespaces.start).toContain('--wait-seconds 1440');
-    expect(codespaces.start).toContain('--repository {{shellQuote repo.github_slug}}');
-    expect(codespaces.start).toContain('--port-visibility public');
-    expect(codespaces.sync).toMatch(/agor-codespace-launcher\.mjs sync/);
-    expect(codespaces.sync).toContain('--revision {{shellQuote sync.revision}}');
-    expect(codespaces.stop).toMatch(/agor-codespace-launcher\.mjs stop/);
-    expect(codespaces.stop).toContain('--wait-seconds 1200');
-    expect(codespaces.nuke).toMatch(/agor-codespace-launcher\.mjs nuke/);
-    expect(codespaces.nuke).toContain('--wait-seconds 1200');
-    expect(codespaces.logs).toMatch(/agor-codespace-launcher\.mjs logs/);
-    // Start publishes the actual dynamic app/health URLs in its typed result.
-    expect(codespaces.health).toBeUndefined();
-    expect(codespaces.app).toBe('https://github.com/codespaces');
+    expect(snapshot?.start).toContain("--repository 'preset-io/agor'");
+    expect(snapshot?.start).toContain("--ref 'feature/it'\"'\"'s-$(not-a-command)'");
+    expect(snapshot?.start).toContain("--binding '01999999-1111-7222-8333-444444444444'");
+    expect(snapshot?.start).toContain('--wait-seconds 1200');
+    expect(snapshot?.start).toContain('--port-visibility public');
+    expect(snapshot?.start).toContain('--emit-health public-only');
+    expect(snapshot?.health).toBeUndefined();
+    expect(snapshot?.app).toBe('https://github.com/codespaces');
+  });
+
+  it('does not render a same-named non-GitHub repository as a GitHub target', () => {
+    const env = parseAgorYml(REPO_ROOT_AGOR_YML);
+    expect(env).not.toBeNull();
+
+    const snapshot = renderBranchSnapshot(
+      {
+        slug: 'agor',
+        remote_url: 'https://gitlab.com/preset-io/agor.git',
+        environment: env!,
+      },
+      {
+        branch_id: '01999999-1111-7222-8333-444444444444',
+        branch_unique_id: 42,
+        name: 'safe-display-name',
+        ref: 'feature/test',
+        path: '/worktree',
+      },
+      'codespaces-sqlite'
+    );
+
+    expect(snapshot?.start).toContain("--repository ''");
+    expect(snapshot?.start).not.toContain('preset-io/agor');
   });
 
   it('renders HA as the auth-resolved multi-tenant development profile', () => {
@@ -458,7 +490,6 @@ describe('writeAgorYml', () => {
         variants: {
           dev: {
             description: 'Development',
-            startup_timeout_ms: 2_700_000,
             start: 'pnpm dev',
             stop: 'pkill pnpm',
             health: 'http://localhost:3000/health',

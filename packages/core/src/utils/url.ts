@@ -105,6 +105,11 @@ export function mcpSlackRecoveryPath(): string {
   return '/recover/mcp';
 }
 
+/** Lightweight authenticated browser surface for a Slack MCP connect action. */
+export function mcpOAuthConnectPath(): string {
+  return '/connect/mcp';
+}
+
 function encodePathSegments(path: string): string {
   return path
     .split('/')
@@ -138,9 +143,13 @@ export function knowledgePath(namespaceSlug?: string | null, documentPath?: stri
  *  Also strips a trailing `/ui` suffix so operators who set
  *  a base URL to the full UI address (e.g. `https://agor.example.com/ui`)
  *  don't end up with double-prefixed `/ui/ui/...` entity URLs.
- *  `baseUrl` here comes from `getBaseUrl()` in config-manager, which
- *  prefers `ui.base_url` before the daemon fallback. */
+ *  `baseUrl` comes from tenant routing in hosted mode or deployment config in
+ *  static/local mode. All full-URL helpers return an empty string when the
+ *  base is unavailable; they never substitute a relative link. */
 function fullUrl(path: string, baseUrl: string): string {
+  // Hosted tenants may not have received routing metadata yet. Do not turn an
+  // unavailable absolute URL into a misleading relative link in MCP/gateways.
+  if (!baseUrl) return '';
   // Strip trailing slash first, then any trailing /ui suffix.
   let base = baseUrl.replace(/\/$/, '');
   if (base.endsWith(UI_MOUNT_PATH)) {
@@ -158,20 +167,20 @@ export function getBoardUrl(
   return fullUrl(boardPath(boardId, boardSlug), baseUrl);
 }
 
-/** Generate a session URL. Always returns a URL — the entity resolves
- *  to its board at click time. */
+/** Generate a session URL, or an empty string without a base URL.
+ *  The entity resolves to its board at click time. */
 export function getSessionUrl(sessionId: SessionID, baseUrl: string): string {
   return fullUrl(sessionPath(sessionId), baseUrl);
 }
 
-/** Generate a branch URL. Always returns a URL — the entity resolves
- *  to its board at click time. */
+/** Generate a branch URL, or an empty string without a base URL.
+ *  The entity resolves to its board at click time. */
 export function getBranchUrl(branchId: BranchID, baseUrl: string): string {
   return fullUrl(branchPath(branchId), baseUrl);
 }
 
-/** Generate an artifact URL. Always returns a URL — the entity
- *  resolves to its board at click time. */
+/** Generate an artifact URL, or an empty string without a base URL.
+ *  The entity resolves to its board at click time. */
 export function getArtifactUrl(artifactId: ArtifactID, baseUrl: string): string {
   return fullUrl(artifactPath(artifactId), baseUrl);
 }
@@ -186,6 +195,11 @@ export function getArtifactFullscreenUrl(artifactId: ArtifactID, baseUrl: string
 /** Preserve any operator-configured base path while adding the UI mount. */
 export function getMcpSlackRecoveryUrl(baseUrl: string): string {
   return fullUrl(mcpSlackRecoveryPath(), baseUrl);
+}
+
+/** Preserve any operator-configured base path while adding the UI mount. */
+export function getMcpOAuthConnectUrl(baseUrl: string): string {
+  return fullUrl(mcpOAuthConnectPath(), baseUrl);
 }
 
 /** Generate a Knowledge URL from namespace + optional document path. */
@@ -649,45 +663,6 @@ export function isAllowedHealthCheckUrl(urlString: string): boolean {
   if (hostname.startsWith('[fe80:')) return false; // IPv6 link-local
   if (hostname === 'metadata.google.internal') return false; // GCP metadata
   if (hostname === '[fd00:ec2::254]') return false; // AWS IPv6 metadata
-
-  return true;
-}
-
-/**
- * Validates a health URL from the transitional lifecycle-facts cache.
- *
- * Unlike an operator-authored `health_check_url`, provider output is untrusted,
- * so loopback, private, link-local, metadata, and internal-looking destinations
- * are refused. New lifecycle commands publish `health_url` in the typed result;
- * this guard remains only while already-started legacy instances can still
- * carry the derived value in `facts`.
- */
-export function isAllowedFactProbeUrl(urlString: string): boolean {
-  if (!isAllowedHealthCheckUrl(urlString)) return false;
-
-  let url: URL;
-  try {
-    url = new URL(normalizeOptionalHttpUrl(urlString, 'health_fact_url') as string);
-  } catch {
-    return false;
-  }
-
-  const hostname = url.hostname.toLowerCase();
-  const host =
-    hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
-
-  if (host === 'localhost' || host === '::1' || host === '0.0.0.0' || host === '::') return false;
-  if (/^127\./.test(host)) return false;
-  if (/^10\./.test(host)) return false;
-  if (/^192\.168\./.test(host)) return false;
-  if (/^172\.(1[6-9]|2[0-9]|3[01])\./.test(host)) return false;
-  if (/^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\./.test(host)) return false;
-  if (/^f[cd][0-9a-f]{2}:/.test(host)) return false;
-  if (/^fe80:/.test(host)) return false;
-  if (host.endsWith('.internal') || host.endsWith('.local') || host.endsWith('.localhost')) {
-    return false;
-  }
-  if (!host.includes('.')) return false;
 
   return true;
 }

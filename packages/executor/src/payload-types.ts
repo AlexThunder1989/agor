@@ -10,17 +10,19 @@
 
 import { type ResolvedConfigSlice, ResolvedConfigSliceSchema } from '@agor/core/config';
 import {
-  ENVIRONMENT_LIFECYCLE_TIMEOUT_MAX_MS,
-  ENVIRONMENT_LIFECYCLE_TIMEOUT_MIN_MS,
-  ENVIRONMENT_STARTUP_TIMEOUT_MAX_MS,
-  ENVIRONMENT_STARTUP_TIMEOUT_MIN_MS,
-} from '@agor/core/environment/health-transition';
-import {
   type ExecutorCommandResult,
   ExecutorCommandResultSchema,
   ExecutorResponseDescriptorSchema,
 } from '@agor/core/executor-protocol';
-import { AGENTIC_TOOL_NAMES, type AgenticToolName } from '@agor/core/types';
+import {
+  AGENTIC_TOOL_NAMES,
+  type AgenticToolName,
+  BRANCH_ARCHIVE_COMMAND,
+  BRANCH_CLEANUP_COMMAND,
+  BRANCH_CLEANUP_COMMAND_MAX_LENGTH,
+  BRANCH_DELETION_COMMAND,
+  ENVIRONMENT_COMMAND_BUDGET as ENV_BUDGET,
+} from '@agor/core/types';
 import { z } from 'zod';
 
 // Re-export so existing executor consumers (handlers, tool-registry, etc.)
@@ -304,8 +306,19 @@ export const GitBranchAddPayloadSchema = BasePayloadSchema.extend({
     /** Repo ID (UUID) */
     repoId: z.string().uuid(),
 
+    /**
+     * Generation that owns this provisioning attempt. Echoed back on the
+     * terminal `ready`/`failed` patch so the daemon can discard the
+     * acknowledgement when a retry has since superseded this attempt.
+     * Optional: a daemon that predates the fence simply won't send one.
+     */
+    provisioningAttemptId: z.string().optional(),
+
     /** Use restore mode: smart branch detection via ls-remote, falls back to creating from sourceBranch */
     restoreMode: z.boolean().optional(),
+
+    /** Retry/restore may adopt only a checkout durably owned by this DB branch. */
+    allowExistingCheckout: z.boolean().optional().default(false),
 
     /** User ID of the requesting user (for per-user credential resolution) */
     userId: z.string().uuid().optional(),
@@ -336,6 +349,9 @@ export const GitBranchRemovePayloadSchema = BasePayloadSchema.extend({
 
     /** Tenant-aware root that must contain branchPath */
     branchesRoot: z.string(),
+
+    /** Authoritative base repository; never infer it from the victim .git file. */
+    repoPath: z.string().min(1),
 
     /** Force removal even if dirty */
     force: z.boolean().optional(),
@@ -385,6 +401,60 @@ export const GitBranchCleanPayloadSchema = BasePayloadSchema.extend({
 
 export type GitBranchCleanPayload = z.infer<typeof GitBranchCleanPayloadSchema>;
 
+/** Server-resolved operation identity and immutable-at-admission executable configuration. */
+const BranchCleanupSpecificationSchema = z.object({
+  command: z
+    .string()
+    .min(1)
+    .max(BRANCH_CLEANUP_COMMAND_MAX_LENGTH)
+    .refine((value) => !value.includes('\0')),
+});
+const BranchMaintenanceParamsSchema = z.object({
+  branchId: z.string().uuid(),
+  operationId: z.string().uuid(),
+  generation: z.number().int().positive(),
+  executionId: z.string().uuid(),
+  deadlineAt: z.number().positive(),
+});
+const BranchCleanupParamsSchema = BranchMaintenanceParamsSchema.extend({
+  filesystemAction: z.literal('cleaned'),
+  cwd: z.string().min(1),
+  principalBranchAccess: z.literal('write'),
+  sandboxHomeStore: z.string().optional(),
+  sandboxWorktreesRoot: z.string().optional(),
+  sandboxBaseRepoPath: z.string().optional(),
+  cleanup: BranchCleanupSpecificationSchema,
+}).strict();
+// Fixed storage-owner operation, deliberately without a branch-shell cwd/mount.
+const BranchWorkspaceRemovalParamsSchema = BranchMaintenanceParamsSchema.extend({
+  filesystemAction: z.literal('deleted'),
+  removal: z
+    .object({
+      branchPath: z.string().min(1),
+      branchesRoot: z.string().min(1),
+      repoPath: z.string().min(1),
+      storageMode: z.enum(['worktree', 'clone']),
+    })
+    .strict(),
+}).strict();
+export const BranchCleanPayloadSchema = BasePayloadSchema.extend({
+  command: z.literal(BRANCH_CLEANUP_COMMAND),
+  daemonUrl: z.string().url(),
+  sessionToken: z.string().min(1),
+  params: BranchCleanupParamsSchema,
+});
+export type BranchCleanPayload = z.infer<typeof BranchCleanPayloadSchema>;
+export const BranchArchivePayloadSchema = BasePayloadSchema.extend({
+  command: z.literal(BRANCH_ARCHIVE_COMMAND),
+  daemonUrl: z.string().url(),
+  sessionToken: z.string().min(1),
+  params: z.discriminatedUnion('filesystemAction', [
+    BranchCleanupParamsSchema,
+    BranchWorkspaceRemovalParamsSchema,
+  ]),
+});
+export type BranchArchivePayload = z.infer<typeof BranchArchivePayloadSchema>;
+
 // ═══════════════════════════════════════════════════════════
 // Branch Files List Payload
 // ═══════════════════════════════════════════════════════════
@@ -428,6 +498,7 @@ export const BranchFilesReadPayloadSchema = BasePayloadSchema.extend({
   params: z.object({
     branchId: z.string().uuid(),
     filePath: z.string().min(1),
+    gitStatusSource: z.enum(['combined', 'workingTree', 'staged']).optional().default('combined'),
   }),
 });
 
@@ -587,7 +658,7 @@ export type BranchAgorYmlExportPayload = z.infer<typeof BranchAgorYmlExportPaylo
 // ═══════════════════════════════════════════════════════════
 
 /**
- * Environment lifecycle payload - run shell-based start/stop/nuke/sync
+ * Environment lifecycle payload - run shell-based start/stop/nuke
  * commands from the executor. Webhook lifecycle commands stay daemon-owned.
  */
 export const EnvironmentLifecyclePayloadSchema = BasePayloadSchema.extend({
@@ -602,27 +673,22 @@ export const EnvironmentLifecyclePayloadSchema = BasePayloadSchema.extend({
       branchId: z.string().uuid(),
 
       /** Branch checkout path. Executor refetches the branch but this avoids ambiguity. */
-      branchPath: z.string().optional(),
+      branchPath: z.string(),
 
       /** Lifecycle action */
-      /**
-       * `restart` is accepted only so the asynchronous attempt path can reject
-       * it explicitly. The synchronous daemon never emits it: Restart is a
-       * daemon-owned sequence of a bounded Stop and, once that Stop has
-       * verifiably settled, an ordinary Start with its own credential — not one
-       * executor process holding a single credential across both phases.
-       */
-      action: z.enum(['start', 'stop', 'restart', 'nuke', 'sync']),
-      /** Only the asynchronous delegated path carries durable attempt authority. */
-      attempt: z
-        .object({
-          id: z.string().uuid(),
-          claimDeadline: z.string().datetime(),
-          commandDeadline: z.string().datetime(),
-          resultDeadline: z.string().datetime(),
-          externalJobDeadlineMs: z.number().int().min(305000).max(365000),
-        })
-        .optional(),
+      action: z.enum(['start', 'stop', 'nuke']),
+      /** Durable, daemon-issued attempt authority for every execution mode. */
+      attempt: z.object({
+        id: z.string().uuid(),
+        claimDeadline: z.string().datetime(),
+        commandDeadline: z.string().datetime(),
+        resultDeadline: z.string().datetime(),
+        externalJobDeadlineMs: z
+          .number()
+          .int()
+          .min(ENV_BUDGET.commandMs + ENV_BUDGET.cleanupMs)
+          .max(ENV_BUDGET.claimMs + ENV_BUDGET.commandMs + ENV_BUDGET.cleanupMs),
+      }),
 
       /** Shell start command. Required for start. */
       startCommand: z.string().optional(),
@@ -632,57 +698,9 @@ export const EnvironmentLifecyclePayloadSchema = BasePayloadSchema.extend({
 
       /** Shell nuke command. Required for nuke. */
       nukeCommand: z.string().optional(),
-
-      /** Shell sync command. Required for sync. Pushes the branch's latest code
-       *  into the running remote environment (see RepoEnvironmentVariant.sync). */
-      syncCommand: z.string().optional(),
-
-      /** Exact clean commit this sync attempt must apply and acknowledge. */
-      desiredRevision: z
-        .string()
-        .regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
-        .optional(),
-
-      /** Opaque durable claim correlating this executor with one sync attempt. */
-      syncClaimToken: z.string().min(1).optional(),
-
-      /** Static app URL rendered by the daemon/branch snapshot. */
-      appUrl: z.string().optional(),
-
-      /** Static health URL rendered by the daemon/branch snapshot. */
-      healthCheckUrl: z.string().optional(),
-
-      /** Wall-clock budget for a start attempt, snapshotted by the daemon. */
-      startupTimeoutMs: z
-        .number()
-        .int()
-        .min(ENVIRONMENT_STARTUP_TIMEOUT_MIN_MS)
-        .max(ENVIRONMENT_STARTUP_TIMEOUT_MAX_MS)
-        .optional(),
-
-      /** Daemon-owned wall-clock budget for a non-Start shell phase. */
-      commandTimeoutMs: z
-        .number()
-        .int()
-        .min(ENVIRONMENT_LIFECYCLE_TIMEOUT_MIN_MS)
-        .max(ENVIRONMENT_LIFECYCLE_TIMEOUT_MAX_MS)
-        .optional(),
-
-      /** Monotonic lifecycle boundary that must still own every state update. */
-      lifecycleGeneration: z.number().int().nonnegative().optional(),
     })
     .superRefine((params, ctx) => {
-      if (
-        params.attempt &&
-        (!params.branchPath || params.action === 'restart' || params.action === 'sync')
-      ) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['attempt'],
-          message: 'Asynchronous commands require branchPath and support only Start, Stop, or Nuke',
-        });
-      }
-      if ((params.action === 'start' || params.action === 'restart') && !params.startCommand) {
+      if (params.action === 'start' && !params.startCommand) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['startCommand'],
@@ -701,24 +719,6 @@ export const EnvironmentLifecyclePayloadSchema = BasePayloadSchema.extend({
           code: z.ZodIssueCode.custom,
           path: ['nukeCommand'],
           message: 'nukeCommand is required for nuke',
-        });
-      }
-      if (params.action === 'sync') {
-        for (const field of ['syncCommand', 'desiredRevision', 'syncClaimToken'] as const) {
-          if (!params[field]) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              path: [field],
-              message: `${field} is required for sync`,
-            });
-          }
-        }
-      }
-      if (!params.attempt && params.action !== 'start' && params.commandTimeoutMs === undefined) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['commandTimeoutMs'],
-          message: 'commandTimeoutMs is required for non-start lifecycle commands',
         });
       }
     }),
@@ -939,13 +939,37 @@ export type ClaudeAuthFilePayload = z.infer<typeof ClaudeAuthFilePayloadSchema>;
 /**
  * All supported executor payloads
  */
+export const BranchDeletePayloadSchema = BasePayloadSchema.extend({
+  command: z.literal(BRANCH_DELETION_COMMAND),
+  daemonUrl: z.string().url(),
+  sessionToken: z.string().min(1),
+  params: z.object({
+    branchId: z.string().uuid(),
+    operationId: z.string().uuid(),
+    generation: z.number().int().positive(),
+    executionId: z.string().uuid(),
+    branchPath: z.string(),
+    branchesRoot: z.string(),
+    repoPath: z.string(),
+    branchHome: z.string(),
+    /** Existing tenant storage anchor; branch-homes itself is lazily created. */
+    tenantDataRoot: z.string(),
+    storageMode: z.enum(['clone', 'worktree']),
+    verifyDelegatedStorageMounts: z.boolean().optional(),
+  }),
+});
+export type BranchDeletePayload = z.infer<typeof BranchDeletePayloadSchema>;
+
 const ExecutorPayloadUnionSchema = z.discriminatedUnion('command', [
+  BranchDeletePayloadSchema,
   PromptPayloadSchema,
   AgenticToolInvokePayloadSchema,
   GitClonePayloadSchema,
   GitBranchAddPayloadSchema,
   GitBranchRemovePayloadSchema,
   GitBranchCleanPayloadSchema,
+  BranchCleanPayloadSchema,
+  BranchArchivePayloadSchema,
   BranchFilesListPayloadSchema,
   BranchFilesBrowsePayloadSchema,
   BranchFilesReadPayloadSchema,
@@ -1024,6 +1048,8 @@ export function getSupportedCommands(): string[] {
     'git.branch.add',
     'git.branch.remove',
     'git.branch.clean',
+    BRANCH_CLEANUP_COMMAND,
+    BRANCH_ARCHIVE_COMMAND,
     'git.repo.inspect',
     'git.managed-credentials.reconcile',
     'branch.files.list',

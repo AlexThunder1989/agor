@@ -10,13 +10,9 @@ import {
 } from '@ant-design/icons';
 import { Button, Space, Tooltip, theme } from 'antd';
 import { useConfirmNukeEnvironment } from '../../hooks/useConfirmNukeEnvironment';
+import { getEnvironmentAccessUrls } from '../../utils/environmentAccessUrls';
 import { getEffectiveEnv } from '../../utils/environmentConfig';
 import { getEnvironmentState } from '../../utils/environmentState';
-import {
-  getEnvironmentAccessUrl,
-  getEnvironmentAccessUrls,
-  hasEnvironmentHealthTarget,
-} from '../../utils/environmentUrl';
 import { Tag } from '../Tag';
 import { EnvironmentStatusIcon } from './EnvironmentStatusIcon';
 
@@ -60,9 +56,8 @@ export function EnvironmentPill({
     ? undefined
     : "Requires branch 'all' permission or admin access";
 
-  const environmentUrls = getEnvironmentAccessUrls(branch);
-  const environmentUrl = getEnvironmentAccessUrl(branch);
-  const hasHealthTarget = hasEnvironmentHealthTarget(branch);
+  // Prefer reported access links, retaining the user-editable static fallback.
+  const environmentUrl = getEnvironmentAccessUrls(env, branch.app_url)[0]?.url;
   const commandActive = hasActiveEnvironmentCommand(env);
 
   // Surface the active environment variant name on the pill instead of the
@@ -120,6 +115,7 @@ export function EnvironmentPill({
   const isStopping = status === 'stopping';
   const canStop =
     status === 'running' || status === 'starting' || (status === 'error' && !!env?.command_attempt);
+  const canOpenEnvironment = (isRunning || isStarting) && Boolean(environmentUrl);
   const startDisabled =
     commandActive ||
     connectionDisabled ||
@@ -157,14 +153,9 @@ export function EnvironmentPill({
           ? `Unhealthy - ${environmentUrl}${healthMessage}`
           : `Unhealthy - check failed${healthMessage}`;
       case 'running':
-        if (hasHealthTarget) {
-          return environmentUrl
-            ? `Running - ${environmentUrl} (checking health)`
-            : 'Running (checking health)';
-        }
         return environmentUrl
-          ? `Running - ${environmentUrl} (health check not configured)`
-          : 'Running (health check not configured)';
+          ? `Started - ${environmentUrl} (health unavailable${healthMessage})`
+          : `Started (health unavailable${healthMessage})`;
       case 'starting':
         return environmentUrl ? `Starting... - ${environmentUrl}` : 'Starting...';
       case 'stopping':
@@ -212,54 +203,30 @@ export function EnvironmentPill({
         style={{ width: '100%', display: 'inline-flex', alignItems: 'center' }}
         orientation="horizontal"
       >
-        {/* Left section - clickable to open URL (when running) */}
-        {env?.status === 'running' && environmentUrl ? (
-          <>
-            <Tooltip title={`${variantPrefix}Open environment - ${environmentUrl}`}>
-              <a
-                href={environmentUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={`Open ${environmentUrls[0]?.name ?? 'environment'}`}
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  color: 'inherit',
-                  padding: '0 7px',
-                  textDecoration: 'none',
-                  height: '22px',
-                  cursor: 'pointer',
-                }}
-              >
-                <Space size={4} align="center">
-                  <EnvironmentStatusIcon state={inferredState} size={12} />
-                  <span style={{ fontFamily: token.fontFamilyCode, lineHeight: 1 }}>
-                    {envLabel}
-                  </span>
-                </Space>
-              </a>
-            </Tooltip>
-            {environmentUrls.slice(1).map((entry) => (
-              <Tooltip key={entry.name} title={`${variantPrefix}Open ${entry.name} - ${entry.url}`}>
-                <a
-                  href={entry.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={`Open ${entry.name}`}
-                  onClick={(event) => event.stopPropagation()}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    padding: '0 4px',
-                    color: 'inherit',
-                  }}
-                >
-                  <GlobalOutlined style={{ fontSize: 11 }} />
-                </a>
-              </Tooltip>
-            ))}
-          </>
+        {/* The static fallback remains useful while Start discovers a runtime URL. */}
+        {canOpenEnvironment && environmentUrl ? (
+          <Tooltip title={`${variantPrefix}Open environment - ${environmentUrl}`}>
+            <a
+              href={environmentUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                color: 'inherit',
+                padding: '0 7px',
+                textDecoration: 'none',
+                height: '22px',
+                cursor: 'pointer',
+              }}
+            >
+              <Space size={4} align="center">
+                <EnvironmentStatusIcon state={inferredState} size={12} />
+                <span style={{ fontFamily: token.fontFamilyCode, lineHeight: 1 }}>{envLabel}</span>
+              </Space>
+            </a>
+          </Tooltip>
         ) : (
           <Tooltip title={`${variantPrefix}${getTooltipText()}`}>
             <div

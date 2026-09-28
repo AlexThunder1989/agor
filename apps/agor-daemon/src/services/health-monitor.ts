@@ -60,15 +60,7 @@ export interface HealthMonitorOptions {
   tenantId?: TenantID | string;
   /** Fail closed for event-driven monitoring when branch events do not carry tenant metadata. */
   requireTenantParams?: boolean;
-  /**
-   * Statuses whose environments the monitor keeps a polling timer for.
-   *
-   * Deliberately NOT `error`: an errored environment is diagnosed on demand (an
-   * explicit status request returns an ephemeral observation) but is never
-   * automatically revived, and `EnvironmentHealthRepository.claim` refuses it, so
-   * scheduling a timer for one would only burn claim attempts. Recovery is an
-   * explicit Start, which `error` re-enables in the UI.
-   */
+  /** Test seam for startup discovery. Production uses BranchRepository when db is provided. */
   discoverActiveEnvironmentRefs?: () => Promise<HealthMonitorActiveEnvironmentRef[]>;
   /** Maximum time shutdown waits for aborted observations to settle. */
   shutdownDrainTimeoutMs?: number;
@@ -77,22 +69,6 @@ export interface HealthMonitorOptions {
 interface HealthMonitorTimer {
   handle: NodeJS.Timeout;
   phase: 'grace' | 'interval';
-}
-
-/**
- * Statuses the monitor keeps polling.
- *
- * `error` is included deliberately. An environment is demoted to `error` when
- * it becomes unreachable, but "unreachable" is frequently temporary — a Codespace
- * whose app is still booting, or a lifecycle command that raced. If the monitor
- * stopped polling on `error`, such an environment could never return to
- * `running` on its own: it would sit red while serving HTTP 200, and a human
- * would have to press Start on a perfectly healthy app. `BranchesService.checkHealth`
- * already implements the `error → running` recovery path; this keeps the monitor
- * consistent with it.
- */
-function isMonitorableStatus(status: string | undefined): boolean {
-  return status === 'running' || status === 'starting';
 }
 
 function tenantParamsFromBranch(branch: Branch): HealthMonitorParams | undefined {
@@ -180,9 +156,9 @@ export class HealthMonitor {
 
     const status = branch.environment_instance?.status;
 
-    if (!branch.archived && isMonitorableStatus(status)) {
-      // Start monitoring if not already monitored. Health checks transition
-      // 'starting' → 'running' and recover 'error' → 'running'.
+    if (!branch.archived && (status === 'running' || status === 'starting')) {
+      // Start monitoring if not already monitored.
+      // Monitor both 'running' and 'starting' - health checks will transition 'starting' → 'running'.
       const params = this.paramsForBranch(branch);
       if (!params && this.requireTenantParams) {
         console.error(
@@ -311,29 +287,21 @@ export class HealthMonitor {
         // check also uses the service's unwrapped canonical loader; explicit
         // user/MCP status requests retain the normal authorization hooks.
         //
-        // This direct custom service call bypasses Feathers around hooks, so
-        // when the monitor has a db handle and tenant params, enter the same
-        // tenant DB/ALS scope the scheduler uses before mutating branch
-        // environment state and emitting realtime patches.
-        const branch =
-          this.db && params?.tenant?.tenant_id
-            ? await runWithTenantDatabaseScope(this.db, params.tenant.tenant_id, () =>
-                branchesService.checkHealth(branchId, params as never, {
-                  signal: controller.signal,
-                  intent: 'automatic',
-                })
-              )
-            : await branchesService.checkHealth(branchId, params as never, {
-                signal: controller.signal,
-                intent: 'automatic',
-              });
+        // Carry tenant identity, not a transaction, across the HTTP probe.
+        // checkHealth owns short tenant DB units for load/claim/commit/release.
+        // An outer scope here is a PostgreSQL transaction: nested units join it
+        // and retain the Branch claim's row lock for the entire HTTP timeout.
+        const branch = await branchesService.checkHealth(branchId, params as never, {
+          signal: controller.signal,
+          intent: 'automatic',
+        });
 
         // Keep the monitor's self-cleanup contract: a lifecycle change can
         // commit without its realtime hint reaching this replica. The canonical
         // result returned by checkHealth is the same live fact the removed
         // preflight inspected, so stop locally when it is no longer eligible.
-        const status = branch.environment_instance?.status;
-        if (branch.archived || !isMonitorableStatus(status)) {
+        const status = branch?.environment_instance?.status;
+        if (!branch || branch.archived || (status !== 'running' && status !== 'starting')) {
           this.stopMonitoring(branchId);
         }
       };
@@ -399,7 +367,10 @@ export class HealthMonitor {
 
     // Start monitoring running or starting branches
     const activeBranches = branches.filter(
-      (w) => !w.archived && isMonitorableStatus(w.environment_instance?.status)
+      (w) =>
+        !w.archived &&
+        (w.environment_instance?.status === 'running' ||
+          w.environment_instance?.status === 'starting')
     );
 
     for (const branch of activeBranches) {
@@ -441,7 +412,7 @@ export class HealthMonitor {
         const loadAndStart = async () => {
           const branch = await branchesService.get(ref.branchId, params as never);
           const status = branch.environment_instance?.status;
-          if (branch.archived || !isMonitorableStatus(status)) return;
+          if (branch.archived || (status !== 'running' && status !== 'starting')) return;
           this.branchParams.set(branch.branch_id, tenantParamsFromBranch(branch) ?? params);
           this.startMonitoring(branch.branch_id, this.branchParams.get(branch.branch_id));
           activeCount += 1;

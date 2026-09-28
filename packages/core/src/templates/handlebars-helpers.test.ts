@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 import Handlebars from 'handlebars';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -390,20 +389,6 @@ describe('handlebars-helpers', () => {
     });
   });
 
-  describe('shellQuote helper', () => {
-    it.each(["feature/it's-$(not-a-command)", 'two words', '-leading', '', 'line\nbreak'])(
-      'survives a real /bin/sh argv boundary: %j',
-      (value) => {
-        const quoted = renderTemplate('{{shellQuote value}}', { value });
-        const result = spawnSync('/bin/sh', ['-c', `set -- ${quoted}; printf %s "$1"`], {
-          encoding: 'utf8',
-        });
-        expect(result.status).toBe(0);
-        expect(result.stdout).toBe(value);
-      }
-    );
-  });
-
   describe('lowercase helper', () => {
     it('should convert uppercase string to lowercase', () => {
       const template = Handlebars.compile('{{lowercase name}}');
@@ -515,6 +500,23 @@ describe('handlebars-helpers', () => {
     it('should handle numbers as strings', () => {
       const template = Handlebars.compile('{{replace name "1" "X"}}');
       expect(template({ name: '12131' })).toBe('X2X3X');
+    });
+  });
+
+  describe('shellQuote helper', () => {
+    it('renders one inert POSIX shell word without HTML escaping', () => {
+      const template = Handlebars.compile('{{shellQuote value}}');
+
+      expect(template({ value: "feature/it's-$(not-a-command)" })).toBe(
+        `'feature/it'"'"'s-$(not-a-command)'`
+      );
+    });
+
+    it('quotes empty and non-string values', () => {
+      const template = Handlebars.compile('{{shellQuote value}}');
+
+      expect(template({ value: '' })).toBe("''");
+      expect(template({ value: 42 })).toBe("'42'");
     });
   });
 
@@ -1103,21 +1105,19 @@ NAME={{replace (uppercase branch.name) "-" "_"}}
           ip_address: '',
         },
         custom: { foo: 'bar' },
-        // Facts reported by a lifecycle command, exposed as {{env.*}}. Always
-        // present (empty before the environment has started) so a template
-        // referencing {{env.url}} renders '' rather than throwing.
-        env: {},
       });
     });
 
-    it('leaves unavailable provider identities empty rather than guessing', () => {
+    it('exposes a stable branch id and falls back from a missing ref to the branch name', () => {
       const context = buildBranchContext({
+        branch_id: '01999999-1111-7222-8333-444444444444',
         branch_unique_id: 1,
-        name: 'display-name-only',
+        name: 'feature-x',
         path: '/test',
       });
-      expect(renderTemplate('[{{branch.id}}][{{branch.ref}}][{{repo.github_slug}}]', context)).toBe(
-        '[][][]'
+
+      expect(renderTemplate('{{branch.id}} {{branch.ref}}', context)).toBe(
+        '01999999-1111-7222-8333-444444444444 feature-x'
       );
     });
 

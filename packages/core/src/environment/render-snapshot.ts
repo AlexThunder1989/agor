@@ -18,10 +18,6 @@ import { extractGitHubSlugFromUrl } from '../config/repo-reference';
 import { resolveVariantOrThrow } from '../config/variant-resolver';
 import { buildBranchContext, renderTemplate } from '../templates/handlebars-helpers';
 import type { RepoEnvironment } from '../types/branch';
-import {
-  resolveEnvironmentLifecycleTimeoutMs,
-  resolveEnvironmentStartupTimeoutMs,
-} from './health-transition';
 
 /**
  * Rendered snapshot — the concrete command strings a branch should hold.
@@ -32,11 +28,8 @@ import {
 export interface RenderedEnvironmentSnapshot {
   /** Name of the variant that was rendered (for provenance / UI). */
   variant: string;
-  startup_timeout_ms: number;
-  lifecycle_timeout_ms: number;
   start: string;
   stop: string;
-  sync?: string;
   nuke?: string;
   logs?: string;
   health?: string;
@@ -52,7 +45,7 @@ export interface RenderedEnvironmentSnapshot {
  */
 export interface RenderRepoInput {
   slug?: string;
-  /** Sanitized registered remote; only a derived GitHub identity is rendered. */
+  /** Sanitized registered git remote; only derived identities enter templates. */
   remote_url?: string;
   environment?: RepoEnvironment;
 }
@@ -71,16 +64,6 @@ export interface RenderBranchInput {
   host_ip_address?: string;
   base_ref?: string;
   ref_type?: 'branch' | 'tag';
-  /**
-   * Post-start template values derived from a typed lifecycle result
-   * (`BranchEnvironmentInstance.facts`). Exposed to templates as `{{env.*}}`.
-   * Undefined at branch-creation render time (the environment has not started),
-   * so `{{env.url}}` renders to '' then and to the real value on a re-render
-   * performed while the environment is running.
-   */
-  facts?: Record<string, string>;
-  /** Exact desired source revision exposed only while rendering `sync`. */
-  sync_revision?: string;
 }
 
 /**
@@ -164,46 +147,26 @@ export function renderBranchSnapshot(
     host_ip_address: branch.host_ip_address,
     base_ref: branch.base_ref,
     ref_type: branch.ref_type,
-    env_facts: branch.facts,
   });
 
   // Per §5 of the design: defaults → template_overrides → custom.
   // `buildBranchContext` already places custom under `custom.*`, so we
   // need to merge overrides in BEFORE custom. Easiest way: rebuild with
   // override'd base entities, then reattach `custom`.
-  //
-  // `env` (post-start runtime values) is destructured out alongside `custom` so
-  // both are immune to `template_overrides` deep-merge: lifecycle results are
-  // runtime truth and must not be shadowed by static config.
-  const {
-    custom,
-    env: envFacts,
-    sync: _ignoredSync,
-    ...nonCustomBase
-  } = baseContext as {
+  const { custom, ...nonCustomBase } = baseContext as {
     custom: Record<string, unknown>;
-    env: Record<string, unknown>;
-    sync?: Record<string, unknown>;
   } & Record<string, unknown>;
   const overridden = deepMergeContext(
     nonCustomBase,
     env.template_overrides as Record<string, unknown> | undefined
   );
-  const context: Record<string, unknown> = {
-    ...overridden,
-    custom,
-    env: envFacts,
-    sync: { revision: branch.sync_revision ?? '' },
-  };
+  const context: Record<string, unknown> = { ...overridden, custom };
 
   const snapshot: RenderedEnvironmentSnapshot = {
     variant: chosen,
-    startup_timeout_ms: resolveEnvironmentStartupTimeoutMs(resolved.startup_timeout_ms),
-    lifecycle_timeout_ms: resolveEnvironmentLifecycleTimeoutMs(resolved.lifecycle_timeout_ms),
     start: renderTemplate(resolved.start, context),
     stop: renderTemplate(resolved.stop, context),
   };
-  if (resolved.sync) snapshot.sync = renderTemplate(resolved.sync, context);
   if (resolved.nuke) snapshot.nuke = renderTemplate(resolved.nuke, context);
   if (resolved.logs) snapshot.logs = renderTemplate(resolved.logs, context);
   if (resolved.health) snapshot.health = renderTemplate(resolved.health, context);

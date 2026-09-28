@@ -133,6 +133,58 @@ export function createMigrationImpactRegistry(
 
 const MIGRATION_IMPACT_REGISTRY = createMigrationImpactRegistry([
   [
+    '0113_session_recency_not_null',
+    {
+      requiresOfflineCutover: false,
+      impact: defineMigrationImpact({
+        classification: 'performance',
+        userAction: 'none',
+        rollbackCompatibility: 'compatible',
+        summary:
+          'Backfills missing session recency from creation time and requires updated_at on every session. Enables direct recency sorting; existing writers already supply the timestamp.',
+      }),
+    },
+  ],
+  [
+    '0111_management_ownership_transfer',
+    {
+      requiresOfflineCutover: false,
+      impact: defineMigrationImpact({
+        classification: 'schema',
+        userAction: 'none',
+        rollbackCompatibility: 'compatible',
+        summary:
+          'Removes immutable-owner triggers. Shared application commands validate and authorize management transfers. Existing reference guards and tenant isolation remain; no resource rows are rewritten.',
+      }),
+    },
+  ],
+  [
+    '0107_branch_permanent_deletion',
+    {
+      requiresOfflineCutover: true,
+      impact: defineMigrationImpact({
+        classification: 'protocol',
+        userAction: 'required',
+        rollbackCompatibility: 'incompatible',
+        summary:
+          'Adds sticky branch deletion admission. Stop old writers before enabling permanent deletion; older binaries do not honor the fence.',
+      }),
+    },
+  ],
+  [
+    '0105_mcp_oauth_grant_attribution',
+    {
+      requiresOfflineCutover: true,
+      impact: defineMigrationImpact({
+        classification: 'protocol',
+        userAction: 'required',
+        rollbackCompatibility: 'incompatible',
+        summary:
+          'Retires unattributed shared MCP OAuth grants; current admins must consent again. Preserves per-user grants. Stop all daemons before migration; older writers cannot supply required attribution.',
+      }),
+    },
+  ],
+  [
     '0101_environment_command_discovery',
     {
       requiresOfflineCutover: false,
@@ -156,6 +208,7 @@ const MIGRATION_IMPACT_REGISTRY = createMigrationImpactRegistry([
     '0098_board_branch_capability_policies',
     '0099_shared_session_prompting',
     '0100_claude_oauth_attempts',
+    '0110_user_provider_oauth_grants',
     '0102_mcp_oauth_client_registrations',
     '0103_oauth_authority_watermark_reconciliation',
     '0102_shared_session_prompting',

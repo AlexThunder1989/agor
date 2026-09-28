@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AgenticToolInvokePayloadSchema,
+  BranchFilesReadPayloadSchema,
   EnvironmentLifecyclePayloadSchema,
   EnvironmentLogsPayloadSchema,
   ExecutorPayloadSchema,
@@ -24,6 +25,36 @@ import {
   parseExecutorPayload,
   ZellijAttachPayloadSchema,
 } from './payload-types.js';
+
+describe('BranchFilesReadPayloadSchema', () => {
+  const payload = {
+    command: 'branch.files.read',
+    sessionToken: 'jwt-token-here',
+    params: {
+      branchId: '550e8400-e29b-41d4-a716-446655440000',
+      filePath: 'src/example.ts',
+    },
+  };
+
+  it('accepts a staged source-control preview', () => {
+    expect(
+      BranchFilesReadPayloadSchema.parse({
+        ...payload,
+        params: { ...payload.params, gitStatusSource: 'staged' },
+      }).params.gitStatusSource
+    ).toBe('staged');
+  });
+
+  it('defaults to the combined preview and rejects unknown snapshots', () => {
+    expect(BranchFilesReadPayloadSchema.parse(payload).params.gitStatusSource).toBe('combined');
+    expect(() =>
+      BranchFilesReadPayloadSchema.parse({
+        ...payload,
+        params: { ...payload.params, gitStatusSource: 'unknown' },
+      })
+    ).toThrow();
+  });
+});
 
 describe('PromptPayloadSchema', () => {
   it('should parse valid prompt payload', () => {
@@ -307,10 +338,13 @@ describe('EnvironmentLifecyclePayloadSchema', () => {
         branchPath: '/data/agor/worktrees/repo/feature',
         action: 'start',
         startCommand: 'docker compose up -d --build',
-        appUrl: 'http://localhost:3000',
-        healthCheckUrl: 'http://localhost:3000/health',
-        startupTimeoutMs: 2_700_000,
-        lifecycleGeneration: 7,
+        attempt: {
+          id: '550e8400-e29b-41d4-a716-446655440001',
+          claimDeadline: '2026-01-01T00:00:00.000Z',
+          commandDeadline: '2026-01-01T00:05:00.000Z',
+          resultDeadline: '2026-01-01T00:06:00.000Z',
+          externalJobDeadlineMs: 485000,
+        },
       },
     };
 
@@ -318,9 +352,6 @@ describe('EnvironmentLifecyclePayloadSchema', () => {
     expect(result.command).toBe('environment.lifecycle');
     expect(result.params.action).toBe('start');
     expect(result.params.startCommand).toBe('docker compose up -d --build');
-    expect(result.params.healthCheckUrl).toBe('http://localhost:3000/health');
-    expect(result.params.startupTimeoutMs).toBe(2_700_000);
-    expect(result.params.lifecycleGeneration).toBe(7);
   });
 
   it('should reject start payloads without startCommand', () => {
@@ -330,47 +361,18 @@ describe('EnvironmentLifecyclePayloadSchema', () => {
         sessionToken: 'jwt-token-here',
         params: {
           branchId: '550e8400-e29b-41d4-a716-446655440000',
+          branchPath: '/data/agor/worktrees/repo/feature',
           action: 'start',
+          attempt: {
+            id: '550e8400-e29b-41d4-a716-446655440001',
+            claimDeadline: '2026-01-01T00:00:00.000Z',
+            commandDeadline: '2026-01-01T00:05:00.000Z',
+            resultDeadline: '2026-01-01T00:06:00.000Z',
+            externalJobDeadlineMs: 485000,
+          },
         },
       })
     ).toThrow();
-  });
-
-  it('requires an exact desired revision and claim for sync', () => {
-    const valid = {
-      command: 'environment.lifecycle',
-      sessionToken: 'jwt-token-here',
-      params: {
-        branchId: '550e8400-e29b-41d4-a716-446655440000',
-        action: 'sync',
-        syncCommand: 'bridge sync',
-        desiredRevision: 'a'.repeat(40),
-        syncClaimToken: 'claim-a',
-        commandTimeoutMs: 21 * 60_000,
-      },
-    };
-
-    expect(EnvironmentLifecyclePayloadSchema.parse(valid).params.desiredRevision).toBe(
-      'a'.repeat(40)
-    );
-    expect(() =>
-      EnvironmentLifecyclePayloadSchema.parse({
-        ...valid,
-        params: { ...valid.params, desiredRevision: 'abc123' },
-      })
-    ).toThrow();
-    expect(() =>
-      EnvironmentLifecyclePayloadSchema.parse({
-        ...valid,
-        params: { branchId: valid.params.branchId, action: 'sync' },
-      })
-    ).toThrow();
-    expect(() =>
-      EnvironmentLifecyclePayloadSchema.parse({
-        ...valid,
-        params: { ...valid.params, commandTimeoutMs: undefined },
-      })
-    ).toThrow('commandTimeoutMs');
   });
 });
 
@@ -439,6 +441,7 @@ describe('GitBranchRemovePayloadSchema', () => {
         branchId: '550e8400-e29b-41d4-a716-446655440002',
         branchPath: '/data/agor/worktrees/user/repo/feature-x',
         branchesRoot: '/data/agor/worktrees',
+        repoPath: '/data/agor/repos/repo',
       },
     };
 
@@ -456,6 +459,7 @@ describe('GitBranchRemovePayloadSchema', () => {
         branchId: '550e8400-e29b-41d4-a716-446655440002',
         branchPath: '/data/agor/worktrees/user/repo/feature-x',
         branchesRoot: '/data/agor/worktrees',
+        repoPath: '/data/agor/repos/repo',
         force: true,
       },
     };
@@ -783,6 +787,8 @@ describe('getSupportedCommands', () => {
     expect(commands).toContain('agentic-tool.invoke');
     expect(commands).toContain('codex.auth-file');
     expect(commands).toContain('claude.auth-file');
-    expect(commands.length).toBe(29);
+    expect(commands).toContain('branch.clean');
+    expect(commands).toContain('branch.archive');
+    expect(commands.length).toBe(31);
   });
 });

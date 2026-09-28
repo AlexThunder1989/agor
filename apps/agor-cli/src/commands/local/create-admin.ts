@@ -161,7 +161,7 @@ export default class LocalCreateAdmin extends Command {
             email: flags.email,
             name: flags.name,
             unixUsername: flags['unix-username'],
-            password,
+            password: flags.password,
           });
           user = await createDevelopmentDefaultAdminUser(db);
         } else {

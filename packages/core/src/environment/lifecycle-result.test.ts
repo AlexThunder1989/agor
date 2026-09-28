@@ -1,119 +1,55 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ENVIRONMENT_LIFECYCLE_RESULT_MAX_ACCESS_URLS,
+  decodeEnvironmentLifecycleResult,
   isAllowedDynamicEnvironmentHealthUrl,
-  lifecycleResultTemplateFacts,
-  resolveEnvironmentHealthTarget,
   validateEnvironmentLifecycleResult,
 } from './lifecycle-result';
 
 describe('validateEnvironmentLifecycleResult', () => {
-  it('normalizes multiple named URLs, health, and opaque resource identity', () => {
+  it('accepts the tiny optional app/health schema', () => {
+    expect(validateEnvironmentLifecycleResult({})).toEqual({});
     expect(
       validateEnvironmentLifecycleResult({
-        version: 1,
-        access_urls: [
-          { name: 'App', url: 'https://app.example.test' },
-          { name: 'Metrics', url: 'https://metrics.example.test/' },
-        ],
-        health_url: 'https://app.example.test/health',
-        resource: {
-          provider: 'github-codespaces',
-          id: 'cs_123',
-          name: 'space-name',
-          manage_url: 'https://github.com/codespaces/space-name',
-        },
+        app: 'https://space-5000.app.github.dev',
+        health: 'https://space-3000.app.github.dev/health',
       })
     ).toEqual({
-      version: 1,
-      access_urls: [
-        { name: 'App', url: 'https://app.example.test/' },
-        { name: 'Metrics', url: 'https://metrics.example.test/' },
-      ],
-      health_url: 'https://app.example.test/health',
-      resource: {
-        provider: 'github-codespaces',
-        id: 'cs_123',
-        name: 'space-name',
-        manage_url: 'https://github.com/codespaces/space-name',
-      },
+      app: 'https://space-5000.app.github.dev/',
+      health: 'https://space-3000.app.github.dev/health',
     });
-  });
-
-  it('accepts only a full canonical revision acknowledgement', () => {
-    const revision = 'a'.repeat(40);
-    expect(validateEnvironmentLifecycleResult({ version: 1, applied_revision: revision })).toEqual({
-      version: 1,
-      applied_revision: revision,
-    });
-
-    for (const invalid of ['a'.repeat(12), 'A'.repeat(40), `${'a'.repeat(40)}-dirty`, 'unknown']) {
-      expect(() =>
-        validateEnvironmentLifecycleResult({ version: 1, applied_revision: invalid })
-      ).toThrow('full lowercase Git');
-    }
   });
 
   it.each([
     null,
     [],
-    {},
-    { version: 2 },
-    { version: 1, token: 'secret' },
-    { version: 1, access_urls: [] },
-    { version: 1, access_urls: [{ name: 'App', url: 'file:///tmp/app' }] },
-    {
-      version: 1,
-      access_urls: [
-        { name: 'App', url: 'https://one.example.test' },
-        { name: 'app', url: 'https://two.example.test' },
-      ],
-    },
-    { version: 1, health_url: 'https://example.test/health?token=secret' },
-    { version: 1, resource: {} },
-    { version: 1, resource: { id: 'x', secret: 'nope' } },
+    { app: '' },
+    { health: null },
+    { app: 'file:///tmp/app' },
+    { app: 'https://user:secret@example.test' },
+    { health: 'https://example.test/health?token=secret' },
+    { app: 'https://example.test', token: 'secret' },
   ])('rejects an invalid or over-broad result: %o', (value) => {
     expect(() => validateEnvironmentLifecycleResult(value)).toThrow();
   });
-
-  it('bounds the number of URLs and total encoded size', () => {
-    expect(() =>
-      validateEnvironmentLifecycleResult({
-        version: 1,
-        access_urls: Array.from(
-          { length: ENVIRONMENT_LIFECYCLE_RESULT_MAX_ACCESS_URLS + 1 },
-          (_, index) => ({ name: `App ${index}`, url: `https://${index}.example.test` })
-        ),
-      })
-    ).toThrow('too many');
-    expect(() =>
-      validateEnvironmentLifecycleResult({ version: 1, resource: { id: 'x'.repeat(9_000) } })
-    ).toThrow('size limit');
-  });
 });
 
-describe('lifecycleResultTemplateFacts', () => {
-  it('exposes only the bounded compatibility fields', () => {
+describe('decodeEnvironmentLifecycleResult', () => {
+  it('normalizes the exact legacy access_urls result-file shape', () => {
     expect(
-      lifecycleResultTemplateFacts({
-        version: 1,
+      decodeEnvironmentLifecycleResult({
         access_urls: [
-          { name: 'App', url: 'https://app.example.test/' },
-          { name: 'Metrics', url: 'https://metrics.example.test/' },
+          { name: 'Metrics', url: 'https://metrics.example.test' },
+          { name: 'App', url: 'https://app.example.test' },
         ],
-        health_url: 'https://app.example.test/health',
-        resource: { provider: 'github-codespaces', id: '123', name: 'space' },
-        applied_revision: 'b'.repeat(40),
       })
-    ).toEqual({
-      url: 'https://app.example.test/',
-      health: 'https://app.example.test/health',
-      name: 'space',
-      resource_id: '123',
-      resource_provider: 'github-codespaces',
-      url_metrics: 'https://metrics.example.test/',
-      applied_revision: 'b'.repeat(40),
-    });
+    ).toEqual({ app: 'https://app.example.test/' });
+  });
+
+  it('rejects mixed or extended legacy records', () => {
+    expect(() =>
+      decodeEnvironmentLifecycleResult({ access_urls: [], health: 'https://example.test/health' })
+    ).toThrow();
+    expect(() => decodeEnvironmentLifecycleResult({ access_urls: [], token: 'secret' })).toThrow();
   });
 });
 
@@ -125,61 +61,5 @@ describe('isAllowedDynamicEnvironmentHealthUrl', () => {
     expect(isAllowedDynamicEnvironmentHealthUrl('http://127.0.0.1:3000/health')).toBe(false);
     expect(isAllowedDynamicEnvironmentHealthUrl('http://169.254.169.254/latest')).toBe(false);
     expect(isAllowedDynamicEnvironmentHealthUrl('https://example.test/health?token=x')).toBe(false);
-  });
-});
-
-describe('resolveEnvironmentHealthTarget', () => {
-  it('selects configured, typed, and legacy targets with the daemon security rules', () => {
-    expect(
-      resolveEnvironmentHealthTarget({
-        configuredHealthUrl: 'http://localhost:3030/health',
-        lifecycleResultHealthUrl: 'https://space-3000.app.github.dev/health',
-      })
-    ).toEqual({
-      rawDynamicHealthUrl: 'https://space-3000.app.github.dev/health',
-      healthUrl: 'http://localhost:3030/health',
-      isDynamicHealth: false,
-    });
-    expect(
-      resolveEnvironmentHealthTarget({
-        lifecycleResultHealthUrl: 'https://space-3000.app.github.dev/health',
-      })
-    ).toEqual({
-      rawDynamicHealthUrl: 'https://space-3000.app.github.dev/health',
-      healthUrl: 'https://space-3000.app.github.dev/health',
-      isDynamicHealth: true,
-    });
-    expect(
-      resolveEnvironmentHealthTarget({
-        legacyFactHealthUrl: 'https://legacy.example.com/health',
-      })
-    ).toEqual({
-      rawDynamicHealthUrl: 'https://legacy.example.com/health',
-      healthUrl: 'https://legacy.example.com/health',
-      isDynamicHealth: true,
-    });
-  });
-
-  it('rejects unsafe dynamic targets and never falls through an authoritative typed result', () => {
-    expect(
-      resolveEnvironmentHealthTarget({
-        lifecycleResultHealthUrl: 'http://127.0.0.1:3000/health',
-        legacyFactHealthUrl: 'https://legacy.example.com/health',
-      })
-    ).toEqual({
-      rawDynamicHealthUrl: 'http://127.0.0.1:3000/health',
-      healthUrl: undefined,
-      isDynamicHealth: false,
-    });
-    expect(
-      resolveEnvironmentHealthTarget({
-        lifecycleResultHealthUrl: 'https://example.com/health?token=secret',
-      }).healthUrl
-    ).toBeUndefined();
-    expect(
-      resolveEnvironmentHealthTarget({
-        legacyFactHealthUrl: 'http://127.0.0.1:3000/health',
-      }).healthUrl
-    ).toBeUndefined();
   });
 });

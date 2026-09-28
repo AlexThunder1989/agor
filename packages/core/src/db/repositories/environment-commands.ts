@@ -10,10 +10,10 @@ import {
   hasActiveEnvironmentCommand,
   type UserID,
 } from '../../types';
+import { assertBranchActivityAllowed } from '../branch-admission';
 import type { Database } from '../client';
 import {
   isPostgresDatabase,
-  isSQLiteDatabase,
   lockRowForUpdate,
   runDatabaseTransaction,
   select,
@@ -36,54 +36,38 @@ export class EnvironmentCommandRepository {
       row: typeof branches.$inferSelect
     ) => { value: T; environment?: Environment }
   ): Promise<T> {
-    const transaction = () =>
-      runDatabaseTransaction(
-        this.db,
-        async (tx) => {
-          await lockRowForUpdate(tx, this.db, branches, eq(branches.branch_id, id));
-          const row = await select(tx).from(branches).where(eq(branches.branch_id, id)).one();
-          if (!row) throw new EntityNotFoundError('Branch', id);
-          const nowRow = isPostgresDatabase(this.db)
-            ? await select(tx, { now: sql<Date>`clock_timestamp()` })
-                .from(branches)
-                .where(eq(branches.branch_id, id))
-                .one()
-            : undefined;
-          const now = nowRow ? new Date(nowRow.now) : new Date();
-          const data = row.data as { environment_instance?: Environment };
-          const result = work(data.environment_instance ?? { status: 'stopped' }, now, row);
-          if (result.environment) {
-            await update(tx, branches)
-              .set({
-                data: { ...row.data, environment_instance: result.environment },
-                updated_at: now,
-                environment_generation: sql`${branches.environment_generation} + 1`,
-                environment_health_claim_token: null,
-                environment_health_claim_expires_at: null,
-                environment_health_next_observation_at: null,
-              })
+    return runDatabaseTransaction(
+      this.db,
+      async (tx) => {
+        await lockRowForUpdate(tx, this.db, branches, eq(branches.branch_id, id));
+        const row = await select(tx).from(branches).where(eq(branches.branch_id, id)).one();
+        if (!row) throw new EntityNotFoundError('Branch', id);
+        const nowRow = isPostgresDatabase(this.db)
+          ? await select(tx, { now: sql<Date>`clock_timestamp()` })
+              .from(branches)
               .where(eq(branches.branch_id, id))
-              .run();
-          }
-          return result.value;
-        },
-        { sqliteImmediate: true }
-      );
-    // Retry only rolled-back database contention, never provider commands.
-    // libsql can return SQLITE_BUSY immediately even with a busy timeout.
-    for (let retry = 0; ; retry++) {
-      try {
-        return await transaction();
-      } catch (error) {
-        if (
-          !isSQLiteDatabase(this.db) ||
-          !/SQLITE_BUSY|database is locked/i.test(String(error)) ||
-          retry >= 9
-        )
-          throw error;
-        await new Promise((resolve) => setTimeout(resolve, 10 * (retry + 1)));
-      }
-    }
+              .one()
+          : undefined;
+        const now = nowRow ? new Date(nowRow.now) : new Date();
+        const data = row.data as { environment_instance?: Environment };
+        const result = work(data.environment_instance ?? { status: 'stopped' }, now, row);
+        if (result.environment) {
+          await update(tx, branches)
+            .set({
+              data: { ...row.data, environment_instance: result.environment },
+              updated_at: now,
+              environment_generation: sql`${branches.environment_generation} + 1`,
+              environment_health_claim_token: null,
+              environment_health_claim_expires_at: null,
+              environment_health_next_observation_at: null,
+            })
+            .where(eq(branches.branch_id, id))
+            .run();
+        }
+        return result.value;
+      },
+      { sqliteImmediate: true, sqliteBusyRetries: 9 }
+    );
   }
 
   async admit(input: {
@@ -91,9 +75,11 @@ export class EnvironmentCommandRepository {
     action: EnvironmentCommandAction;
     attemptId: string;
     userId: UserID;
+    commandBudgetMs?: number;
     confirmationOf?: string;
   }): Promise<Environment> {
     return this.mutate(input.branch.branch_id, (previous, now, row) => {
+      assertBranchActivityAllowed(row, { requireRecoveryReady: true });
       if (row.archived || (row.filesystem_status && row.filesystem_status !== 'ready')) {
         throw new RepositoryError('Environment commands require a ready, non-archived branch');
       }
@@ -135,7 +121,15 @@ export class EnvironmentCommandRepository {
       } else if (input.confirmationOf) {
         throw new RepositoryError('Start confirmation is only valid for Start');
       }
-      const commandDeadline = now.getTime() + BUDGET.claimMs + BUDGET.commandMs;
+      const commandBudgetMs = input.commandBudgetMs ?? BUDGET.commandMs;
+      if (
+        !Number.isSafeInteger(commandBudgetMs) ||
+        commandBudgetMs < 1 ||
+        commandBudgetMs > BUDGET.standaloneCommandMs
+      ) {
+        throw new RepositoryError('Invalid environment command budget');
+      }
+      const commandDeadline = now.getTime() + BUDGET.claimMs + commandBudgetMs;
       const next: Environment = {
         ...environment,
         status: input.action === 'start' ? 'starting' : 'stopping',
@@ -144,6 +138,7 @@ export class EnvironmentCommandRepository {
           action: input.action,
           requested_by: input.userId,
           requested_at: now.toISOString(),
+          command_budget_ms: commandBudgetMs,
           claim_deadline: new Date(now.getTime() + BUDGET.claimMs).toISOString(),
           command_deadline: new Date(commandDeadline).toISOString(),
           result_deadline: new Date(
@@ -161,11 +156,18 @@ export class EnvironmentCommandRepository {
       delete next.last_health_check;
       delete next.last_command;
       delete next.last_error;
+      if (input.action === 'start') {
+        delete next.health_url;
+        next.access_urls = row.app_url ? [{ name: 'App', url: row.app_url }] : [];
+      }
       return { value: next, environment: next };
     });
   }
 
-  async report(report: EnvironmentCommandReport): Promise<Environment> {
+  async report(
+    report: EnvironmentCommandReport,
+    options?: { expectedRequester?: UserID }
+  ): Promise<Environment> {
     return this.mutate(report.branch_id, (environment, now, row) => {
       const attempt = environment.command_attempt;
       if (
@@ -175,6 +177,9 @@ export class EnvironmentCommandRepository {
         attempt.action !== report.action
       ) {
         throw new RepositoryError('Stale environment command report');
+      }
+      if (options?.expectedRequester && attempt.requested_by !== options.expectedRequester) {
+        throw new RepositoryError('Environment command actor changed');
       }
       if (report.kind === 'result' && attempt.finished_at) {
         // Duplicate delivery is harmless; it never overwrites the first settlement.
@@ -189,7 +194,10 @@ export class EnvironmentCommandRepository {
         next.command_attempt!.claimed_at = now.toISOString();
         // The command receives a full budget from claim, never past the hard admission deadline.
         next.command_attempt!.command_deadline = new Date(
-          Math.min(Date.parse(attempt.command_deadline), now.getTime() + BUDGET.commandMs)
+          Math.min(
+            Date.parse(attempt.command_deadline),
+            now.getTime() + (attempt.command_budget_ms ?? BUDGET.commandMs)
+          )
         ).toISOString();
       } else {
         if (!attempt.claimed_at)
@@ -209,16 +217,28 @@ export class EnvironmentCommandRepository {
             report.truncated
           );
           if (report.outcome === 'succeeded' && report.action === 'start') {
-            settled.status = row.health_check_url ? 'starting' : 'running';
+            const effectiveHealthUrl = report.lifecycle_result?.health ?? row.health_check_url;
+            settled.status = effectiveHealthUrl ? 'starting' : 'running';
             settled.last_health_check = {
               timestamp: now.toISOString(),
               status: 'unknown',
-              message: row.health_check_url
+              message: effectiveHealthUrl
                 ? 'Start command succeeded; waiting for health observation'
                 : 'Start command reported success; no health check configured',
             };
-            settled.access_urls =
-              report.access_urls ?? (row.app_url ? [{ name: 'App', url: row.app_url }] : []);
+            if (report.lifecycle_result?.health) {
+              settled.health_url = report.lifecycle_result.health;
+            } else {
+              delete settled.health_url;
+            }
+            settled.access_urls = report.lifecycle_result?.app
+              ? [{ name: 'App', url: report.lifecycle_result.app }]
+              : row.app_url
+                ? [{ name: 'App', url: row.app_url }]
+                : [];
+          } else if (report.outcome === 'succeeded') {
+            delete settled.health_url;
+            settled.access_urls = row.app_url ? [{ name: 'App', url: row.app_url }] : [];
           }
           return { value: settled, environment: settled };
         }

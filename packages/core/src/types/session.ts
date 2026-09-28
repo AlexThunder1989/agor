@@ -218,7 +218,22 @@ export function getDefaultPermissionMode(agenticTool: AgenticToolName): Permissi
 export const SESSION_SDK_HOME_SCOPES = ['execution_home', 'branch'] as const;
 export type SessionSdkHomeScope = (typeof SESSION_SDK_HOME_SCOPES)[number];
 
+export interface SessionUsageSummary {
+  total: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+  cost: number;
+}
+
 export interface Session {
+  /** Create-response-only warning count; not persisted. No server identity is disclosed. */
+  mcp_defaults_skipped?: number;
+
+  /** Read-only, opt-in aggregate over all tasks, independent of transcript paging. */
+  usage_summary?: SessionUsageSummary;
+
   /** Unique session identifier (UUIDv7) */
   session_id: SessionID;
 
@@ -624,17 +639,25 @@ export type SchedulerInitializationFailureCode =
 /** Session data accepted before defaults and configuration references are materialized. */
 export type CreateSessionInput = Omit<
   Partial<Session>,
-  'agentic_tool' | 'agentic_tool_preset_id' | 'model_config' | 'sdk_home_scope'
+  | 'agentic_tool'
+  | 'agentic_tool_preset_id'
+  | 'model_config'
+  | 'sdk_home_scope'
+  | 'usage_summary'
+  | 'mcp_defaults_skipped'
 > & {
   agentic_tool?: AgenticToolName;
   agentic_tool_preset_id?: AgenticToolConfigurationReference | null;
   model_config?: Partial<NonNullable<Session['model_config']>> | null;
-  /** MCP server IDs to attach in the same create call (issue #2629). */
+  /** Strict explicit selection (including []); omit to inherit branch then user defaults. */
   mcpServerIds?: string[];
 };
 
 /** Session patch semantics: omit/undefined preserves, string sets, null clears. */
-export type SessionUpdate = Omit<Partial<Session>, 'sdk_session_id' | 'sdk_home_scope'> & {
+export type SessionUpdate = Omit<
+  Partial<Session>,
+  'sdk_session_id' | 'sdk_home_scope' | 'usage_summary' | 'mcp_defaults_skipped'
+> & {
   sdk_session_id?: string | null;
 };
 

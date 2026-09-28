@@ -19,7 +19,7 @@ import type {
   UpdateUserInput,
   User,
 } from '@agor-live/client';
-import { hasMinimumRole, PermissionScope } from '@agor-live/client';
+import { getTeammateConfig, hasMinimumRole } from '@agor-live/client';
 import { Flex, Layout, theme, Upload } from 'antd';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -37,8 +37,8 @@ import { useAppNavigation } from '../../hooks/useAppNavigation';
 import { useBoardTitle } from '../../hooks/useBoardTitle';
 import { useEventStream } from '../../hooks/useEventStream';
 import { useFaviconStatus } from '../../hooks/useFaviconStatus';
-import { findFrameworkRepo } from '../../hooks/useFrameworkRepo';
 import { useLocalStorage } from '../../hooks/useLocalStorage';
+import { usePermissionDecision } from '../../hooks/usePermissionDecision';
 import { useRecentBoards } from '../../hooks/useRecentBoards';
 import { useSettingsRoute } from '../../hooks/useSettingsRoute';
 import { useStableCallback } from '../../hooks/useStableCallback';
@@ -69,7 +69,6 @@ import type { AgenticToolOption, CreateRepoOptions } from '../../types';
 import { initializeAudioOnInteraction } from '../../utils/audio';
 import { useThemedMessage } from '../../utils/message';
 import type { OnboardingReopenMode } from '../../utils/onboardingLifecycle';
-import { resolveQuickStartMcpServerIds } from '../../utils/resolveQuickStartMcpServerIds';
 import { getShellSurfacePath, hasExplicitEntityRouteTarget } from '../../utils/routeTargets';
 import { startTeammateBootstrapSession } from '../../utils/startTeammateBootstrapSession';
 import {
@@ -77,7 +76,6 @@ import {
   buildTeammateFirstSessionTitle,
 } from '../../utils/teammateBootstrapPrompt';
 import { createTeammateBranch } from '../../utils/teammateCreation';
-import { getTemplateForFrameworkSource } from '../../utils/teammateTemplates';
 import { getUserDefaultConfigurationSource } from '../AgenticToolConfigurationPicker/useAgenticConfigurationSources';
 import { AppHeader } from '../AppHeader';
 import type { BoardTeammatePanelTab } from '../BoardTeammatePanel';
@@ -902,19 +900,12 @@ export const App: React.FC<AppProps> = ({
   // `handleQuickStartSession` reads.
   const chooseAgenticTool = useCallback(
     async (branchId: string, tool: AgenticToolName, replacingSessionId?: string) => {
-      // Read the branch at call time instead of subscribing — `branchById` gets
-      // a new identity on every branch event (env heartbeats, git-state), which
-      // would otherwise churn this callback's identity and re-render every
-      // AppActions consumer on a live board.
-      const branch = agorStore.getState().branchById.get(branchId as Branch['branch_id']);
-      const mcpServerIds = resolveQuickStartMcpServerIds(user, branch);
-
       const outcome = await onCreateSession?.(
         {
           branch_id: branchId,
           agent: tool,
           agenticToolPresetId: getUserDefaultConfigurationSource(user, tool),
-          mcpServerIds,
+          // Omit MCP selection: quick start inherits authoritative defaults.
         },
         currentBoardId
       );
@@ -1048,6 +1039,7 @@ export const App: React.FC<AppProps> = ({
         repoId,
         branchName: result.branchName,
         sourceBranch: result.sourceBranch,
+        sourceRemoteUrl: result.sourceRemoteUrl,
       },
       { client, repoById: agorStore.getState().repoById, onCreateBranch, onUpdateBranch }
     );
@@ -1057,12 +1049,6 @@ export const App: React.FC<AppProps> = ({
         'AI teammate branch could not be created. Please check the branch details and try again.'
       );
     }
-
-    const template = getTemplateForFrameworkSource({
-      sourceBranch: result.sourceBranch,
-      selectedRepoId: result.repoId,
-      frameworkRepoId: findFrameworkRepo(agorStore.getState().repoById)?.[0],
-    });
 
     const sessionConfig: NewSessionConfig = {
       branch_id: branch.branch_id,
@@ -1075,9 +1061,8 @@ export const App: React.FC<AppProps> = ({
         description: result.description,
         userName: user?.name,
         userEmail: user?.email,
-        // This path carries no explicit template id, so recover the persona
-        // only when the source belongs to the detected framework repository.
-        templateId: template?.id,
+        templateId: result.templateId,
+        localHome: getTeammateConfig(branch)?.localHome,
       }),
       modelConfig: result.modelConfig,
       effort: result.effort,
@@ -1156,32 +1141,7 @@ export const App: React.FC<AppProps> = ({
     [client, navigation]
   );
 
-  const handlePermissionDecision = useCallback(
-    async (
-      sessionId: string,
-      requestId: string,
-      taskId: string,
-      allow: boolean,
-      scope: PermissionScope
-    ) => {
-      if (!client) return;
-
-      try {
-        // Call the permission decision endpoint
-        await client.service(`sessions/${sessionId}/permission-decision`).create({
-          requestId,
-          taskId,
-          allow,
-          reason: allow ? 'Approved by user' : 'Denied by user',
-          remember: scope !== PermissionScope.ONCE, // Only remember if not 'once'
-          scope,
-        });
-      } catch (error) {
-        console.error('❌ Failed to send permission decision:', error);
-      }
-    },
-    [client]
-  );
+  const handlePermissionDecision = usePermissionDecision(client);
 
   // Narrow per-id subscriptions: only patches to the SELECTED session (and
   // its branch) wake the shell — those renders are needed to feed

@@ -56,16 +56,6 @@ describe('local create-admin development default', () => {
   });
 });
 
-describe('local create-admin password resolution', () => {
-  it('prefers the explicit flag and otherwise reads the canonical environment variable', () => {
-    expect(resolveAdminPassword('from-flag', { AGOR_ADMIN_PASSWORD: 'from-env' })).toBe(
-      'from-flag'
-    );
-    expect(resolveAdminPassword(undefined, { AGOR_ADMIN_PASSWORD: 'from-env' })).toBe('from-env');
-    expect(resolveAdminPassword(undefined, {})).toBeUndefined();
-  });
-});
-
 describe('create-admin failure presentation', () => {
   it('surfaces the single-tenant rejection verbatim (not flattened by DB sanitization)', () => {
     const error = new BootstrapTenantUnsupportedError(
@@ -84,5 +74,15 @@ describe('create-admin failure presentation', () => {
     });
     expect(presentCreateAdminFailure(dbError)).not.toMatch(/duplicate key/);
     expect(presentCreateAdminFailure(dbError)).toMatch(/Database/);
+  });
+});
+
+describe('local create-admin password resolution', () => {
+  it('prefers the explicit flag and otherwise reads the canonical environment variable', () => {
+    expect(resolveAdminPassword('from-flag', { AGOR_ADMIN_PASSWORD: 'from-env' })).toBe(
+      'from-flag'
+    );
+    expect(resolveAdminPassword(undefined, { AGOR_ADMIN_PASSWORD: 'from-env' })).toBe('from-env');
+    expect(resolveAdminPassword(undefined, {})).toBeUndefined();
   });
 });

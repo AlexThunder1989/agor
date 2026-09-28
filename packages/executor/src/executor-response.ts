@@ -46,7 +46,7 @@ function tooLargeResult(maxResponseBytes: number): ExecutorCommandResult {
  */
 export class ExecutorResponsePublisher {
   private readonly body = new PassThrough();
-  private response?: Promise<Response>;
+  private readonly response: Promise<Response>;
   private readonly abort = new AbortController();
   private readonly deadlineTimer: ReturnType<typeof setTimeout>;
   private writeChain = Promise.resolve();
@@ -59,14 +59,10 @@ export class ExecutorResponsePublisher {
   constructor(private readonly descriptor: ExecutorResponseDescriptor) {
     const remainingMs = Math.max(1, Date.parse(descriptor.deadlineAt) - Date.now());
     this.deadlineTimer = setTimeout(() => this.abort.abort(), remainingMs);
-  }
-
-  private startResponse(): Promise<Response> {
-    if (this.response) return this.response;
-    this.response = fetch(this.descriptor.url, {
+    this.response = fetch(descriptor.url, {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${this.descriptor.token}`,
+        authorization: `Bearer ${descriptor.token}`,
         'content-type': `${EXECUTOR_RESPONSE_CONTENT_TYPE}; charset=utf-8`,
         'cache-control': 'no-store',
         [EXECUTOR_RESPONSE_PROTOCOL_HEADER]: EXECUTOR_RESPONSE_PROTOCOL,
@@ -80,7 +76,6 @@ export class ExecutorResponsePublisher {
     // Event producers are intentionally synchronous. Observe an early network
     // rejection here; final() still awaits and surfaces the same rejection.
     void this.response.catch(() => undefined);
-    return this.response;
   }
 
   emit(event: unknown): void {
@@ -108,7 +103,6 @@ export class ExecutorResponsePublisher {
       data,
     };
     if (this.enqueue(frame)) {
-      this.startResponse();
       this.seq += 1;
       this.eventCount += 1;
     }
@@ -146,13 +140,12 @@ export class ExecutorResponsePublisher {
       throw new Error('Executor response framing exceeds configured limit');
     }
 
-    const responsePromise = this.startResponse();
     this.bytesQueued += Buffer.byteLength(line);
     this.writeChain = this.writeChain.then(() => writeWithBackpressure(this.body, line));
     try {
       await this.writeChain;
       this.body.end();
-      const response = await responsePromise;
+      const response = await this.response;
       if (response.status !== 204) {
         throw new Error(`Executor response receiver rejected the payload (${response.status})`);
       }

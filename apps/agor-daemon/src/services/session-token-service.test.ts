@@ -149,56 +149,78 @@ describe('SessionTokenService runtime scoping', () => {
     );
   });
 
-  it('allows a server-deadline-bound command window but refuses a silent config cap', async () => {
-    const now = new Date('2026-08-23T00:00:00.000Z');
-    const store = authorityStore();
-    const service = new SessionTokenService(
-      { expiration_ms: 60 * 60_000, max_uses: -1 },
-      { authorityStore: store, now: () => now, startCleanupTimer: false }
-    );
-    service.setJwtSecret('session-token-test-secret');
-
-    const token = await runWithTenantDatabaseScope(scopeOnlyDb, 'tenant-a', () =>
-      service.generateCommandToken('environment-start', 'user-1', 'branch-1', {
-        expirationMs: 26 * 60_000,
-      })
-    );
-    const decoded = jwt.decode(token) as jwt.JwtPayload;
-
-    expect(decoded.exp! - decoded.iat!).toBe(26 * 60);
-    expect(store.issue).toHaveBeenCalledWith(
-      expect.objectContaining({
-        tenantId: 'tenant-a',
-        purpose: 'executor-command',
-        sessionId: 'environment-start',
-        branchId: 'branch-1',
-        expiresAt: new Date(now.getTime() + 26 * 60_000),
-      })
-    );
-    await expect(
-      runWithTenantDatabaseScope(scopeOnlyDb, 'tenant-a', () =>
-        service.generateCommandToken('environment-start', 'user-1', 'branch-1', {
-          expirationMs: 60 * 60_000 + 1,
-        })
-      )
-    ).rejects.toThrow('exceeds execution.session_token_expiration_ms');
-  });
-
   it('centralizes command issuance through the daemon-owned service', async () => {
     const generateCommandToken = vi.fn(async () => 'delegated-user-token');
     const app = { sessionTokenService: { generateCommandToken } };
 
     await expect(
-      issueExecutorCommandToken(app, 'branch-files-read', 'user-1', 'branch-1', {
-        expirationMs: 20_000,
-      })
+      issueExecutorCommandToken(app, 'branch-files-read', 'user-1', 'branch-1')
     ).resolves.toBe('delegated-user-token');
-    expect(generateCommandToken).toHaveBeenCalledWith('branch-files-read', 'user-1', 'branch-1', {
-      expirationMs: 20_000,
-    });
+    expect(generateCommandToken).toHaveBeenCalledWith('branch-files-read', 'user-1', 'branch-1');
     await expect(issueExecutorCommandToken({}, 'command', 'user-1')).rejects.toThrow(
       'Session token service unavailable'
     );
+  });
+
+  it.each([
+    { command: 'environment-start', expirationMs: 30 * 60_000, attempt: undefined, seconds: 1800 },
+    { command: 'git.branch.add', expirationMs: undefined, attempt: 'attempt-1', seconds: 900 },
+    { command: 'git.branch.add', expirationMs: 10_000, attempt: 'attempt-1', seconds: 10 },
+    { command: 'git.branch.add', expirationMs: 120 * 60_000, attempt: 'attempt-1', seconds: 3600 },
+  ])(
+    'keeps command lifetime and provisioning scope independent: $command / $seconds',
+    async ({ command, expirationMs, attempt, seconds }) => {
+      const service = new SessionTokenService(
+        { expiration_ms: 60 * 60_000, max_uses: -1 },
+        { startCleanupTimer: false }
+      );
+      service.setJwtSecret('session-token-test-secret');
+      const token = await runWithTenantDatabaseScope(scopeOnlyDb, 'tenant-a', () =>
+        issueExecutorCommandToken(
+          { sessionTokenService: service },
+          command,
+          'user-1',
+          'branch-1',
+          expirationMs,
+          attempt
+        )
+      );
+      const decoded = jwt.verify(token, 'session-token-test-secret') as jwt.JwtPayload;
+      expect(decoded).toMatchObject({
+        purpose: 'executor-command',
+        session_id: command,
+        branch_id: 'branch-1',
+        tenant_id: 'tenant-a',
+        sub: 'user-1',
+      });
+      expect(decoded.provisioning_attempt_id).toBe(attempt);
+      expect(decoded.exp! - decoded.iat!).toBe(seconds);
+      await expect(service.validateToken(token, { tenantId: 'tenant-b' })).resolves.toBeNull();
+      await expect(service.validateToken(token, { tenantId: 'tenant-a' })).resolves.not.toBeNull();
+    }
+  );
+
+  it('still rejects invalid provisioning scope when a command lifetime is supplied', async () => {
+    const service = new SessionTokenService(
+      { expiration_ms: 60_000, max_uses: -1 },
+      { startCleanupTimer: false }
+    );
+    for (const [command, branchId, attempt] of [
+      ['environment-start', 'branch-1', 'attempt-1'],
+      ['git.branch.add', undefined, 'attempt-1'],
+      ['git.branch.add', 'branch-1', ''],
+    ] as const) {
+      await expect(
+        issueExecutorCommandToken(
+          { sessionTokenService: service },
+          command,
+          'user-1',
+          branchId,
+          10_000,
+          attempt
+        )
+      ).rejects.toThrow('Provisioning scope requires a branch materialization command and attempt');
+    }
   });
 
   it('copies the ambient tenant scope into executor-session token claims', async () => {

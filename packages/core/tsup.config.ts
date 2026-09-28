@@ -10,6 +10,7 @@ export default defineConfig({
     'types/index': 'src/types/index.ts',
     'realtime/index': 'src/realtime/index.ts',
     'executor-protocol': 'src/executor-protocol.ts',
+    'oauth/rotating-grant-refresh': 'src/oauth/rotating-grant-refresh.ts',
     'db/index': 'src/db/index.ts',
     'db/session-guard': 'src/db/session-guard.ts', // Defensive programming for deleted sessions
     'tenant-portability/index': 'src/tenant-portability/index.ts',
@@ -20,6 +21,7 @@ export default defineConfig({
     'codex/auth-file': 'src/codex/auth-file.ts', // Pure Codex auth.json schema inspection
     'codex/credential-file': 'src/codex/credential-file.ts', // Node-only race-safe Codex credential I/O
     'config/index': 'src/config/index.ts',
+    'config/agor-home': 'src/config/agor-home.ts', // Leaf state-home resolver (AGOR_HOME)
     'config/agor-yml': 'src/config/agor-yml.ts', // Node-only .agor.yml file I/O
     'config/browser': 'src/config/browser.ts', // Browser-safe config utilities
     'permissions/index': 'src/permissions/index.ts',
@@ -34,14 +36,13 @@ export default defineConfig({
     'templates/teammate-welcome-note': 'src/templates/teammate-welcome-note.ts', // Teammate board welcome note renderer
     'templates/zone-trigger-context': 'src/templates/zone-trigger-context.ts', // Canonical zone-trigger context builder
     'environment/variable-resolver': 'src/environment/variable-resolver.ts', // Environment variable resolution
+    'environment/lifecycle-result': 'src/environment/lifecycle-result.ts', // Tiny dynamic managed-environment Start result
     'environment/render-snapshot': 'src/environment/render-snapshot.ts', // v2 branch env snapshot rendering
-    'environment/health-transition': 'src/environment/health-transition.ts', // shared status rules for both health monitors
-    'environment/lifecycle-result': 'src/environment/lifecycle-result.ts', // bounded managed-environment result protocol
     'environment/access-urls': 'src/environment/access-urls.ts', // Browser-safe command result contract
     'environment/webhook': 'src/environment/webhook.ts', // Managed environment webhook execution policy
     'utils/errors': 'src/utils/errors.ts', // Error handling and formatting utilities
-    'utils/pinned-fetch': 'src/utils/pinned-fetch.ts', // DNS-pinned public-only request boundary
     'utils/url': 'src/utils/url.ts', // Shared URL validation helpers
+    'utils/pinned-fetch': 'src/utils/pinned-fetch.ts', // Public-only DNS-pinned managed environment health
     'utils/safe-outbound-fetch': 'src/utils/safe-outbound-fetch.ts', // Pinned SSRF-safe OAuth/JWT egress
     'utils/permission-mode-mapper': 'src/utils/permission-mode-mapper.ts', // Permission mode mapping for cross-agent compatibility
     'utils/cron': 'src/utils/cron.ts', // Cron validation and parsing utilities
@@ -87,6 +88,12 @@ export default defineConfig({
   dts: false,
   clean: process.env.TSUP_CLEAN !== 'false',
   splitting: false,
+  esbuildOptions(options) {
+    options.define = {
+      ...options.define,
+      __AGOR_CORE_CJS__: String(options.format === 'cjs'),
+    };
+  },
   // These pure-JS, high-fanout feature dependencies are compiled into the
   // copied core artifact. Keeping them out of the consumer dependency graph
   // materially lowers cold-cache npm extraction concurrency and inode use.
@@ -94,6 +101,9 @@ export default defineConfig({
   shims: true, // Enable shims for import.meta.url in CJS builds
   // Don't bundle agent SDKs and Node.js-only dependencies
   external: [
+    // Tenant-aware config resolution must use the DB entrypoint's ambient scope,
+    // not an inlined copy.
+    '@agor/core/db',
     '@anthropic-ai/claude-agent-sdk',
     '@openai/codex-sdk',
     '@google/gemini-cli-core',

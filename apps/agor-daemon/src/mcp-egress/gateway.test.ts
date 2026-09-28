@@ -5,6 +5,7 @@ import {
   BranchRepository,
   CapabilityPolicyRepository,
   createDatabaseAsync,
+  executeRaw,
   generateId,
   MCPServerRepository,
   RepoRepository,
@@ -102,11 +103,13 @@ interface HarnessOptions {
   oauthExpiresAt?: Date | null;
   separatePrincipal?: boolean;
   authoritySnapshotCheckpoint?: () => Promise<void>;
-  oauthAuthHeadersCreate?: (params: {
-    mcp_egress_assert_current?: () => Promise<void>;
-  }) => Promise<{ headers: Record<string, { authorization?: string; error?: string }> }>;
+  oauthAuthHeadersCreate?: (
+    data: { mcp_server_ids: string[]; force_refresh?: boolean },
+    params: { mcp_egress_assert_current?: () => Promise<void> }
+  ) => Promise<{ headers: Record<string, { authorization?: string; error?: string }> }>;
   capabilityServerTransform?: (server: MCPServer) => MCPServer;
   initialMcpRecovery?: boolean;
+  separateOAuthConsenter?: boolean;
 }
 
 async function harness(options: HarnessOptions) {
@@ -201,7 +204,6 @@ async function harness(options: HarnessOptions) {
     status: TaskStatus.RUNNING,
     message_range: { start_index: 0, end_index: 0, start_timestamp: new Date().toISOString() },
     git_state: { ref_at_start: 'main', sha_at_start: 'test' },
-    tool_use_count: 0,
     metadata: initialMcpRecovery ? { mcp_recovery: initialMcpRecovery } : undefined,
   });
   const server = await new MCPServerRepository(rawDb).create({
@@ -222,24 +224,35 @@ async function harness(options: HarnessOptions) {
     server.auth?.type === 'oauth' && (server.auth.oauth_mode ?? 'per_user') === 'shared'
       ? null
       : (principal.user_id as UserID);
+  const oauthConsenter = options.separateOAuthConsenter
+    ? await new UsersRepository(rawDb).create({
+        email: `${randomUUID()}@example.test`,
+        role: 'admin',
+      })
+    : principal;
   if (server.auth?.type === 'oauth') {
-    await new UserMCPOAuthTokenRepository(rawDb).saveToken(oauthTokenUserId, server.mcp_server_id, {
-      accessToken: options.oauthAccessToken ?? 'oauth-access-token-initial',
-      refreshToken: options.oauthRefreshToken,
-      expiresAt: options.oauthExpiresAt,
-      clientId: server.auth.oauth_client_id ?? 'gateway-test-oauth-client',
-      grantBinding: {
-        generation: 1,
-        version: 4,
-        fingerprint: 'gateway-test-binding-v1',
-        metadataUri: 'https://auth.example.test/.well-known/oauth-protected-resource',
-        resourceUri: server.url ?? 'https://provider.example.test/mcp',
-        issuer: 'https://auth.example.test',
-        authorizationEndpoint: 'https://auth.example.test/authorize',
-        tokenEndpoint: server.auth.oauth_token_url ?? 'https://auth.example.test/token',
-        redirectUri: 'https://daemon.example.test/mcp-servers/oauth-callback',
+    await new UserMCPOAuthTokenRepository(rawDb).saveToken(
+      oauthTokenUserId,
+      server.mcp_server_id,
+      {
+        accessToken: options.oauthAccessToken ?? 'oauth-access-token-initial',
+        refreshToken: options.oauthRefreshToken,
+        expiresAt: options.oauthExpiresAt,
+        clientId: server.auth.oauth_client_id ?? 'gateway-test-oauth-client',
+        grantBinding: {
+          generation: 1,
+          version: 4,
+          fingerprint: 'gateway-test-binding-v1',
+          metadataUri: 'https://auth.example.test/.well-known/oauth-protected-resource',
+          resourceUri: server.url ?? 'https://provider.example.test/mcp',
+          issuer: 'https://auth.example.test',
+          authorizationEndpoint: 'https://auth.example.test/authorize',
+          tokenEndpoint: server.auth.oauth_token_url ?? 'https://auth.example.test/token',
+          redirectUri: 'https://daemon.example.test/mcp-servers/oauth-callback',
+        },
       },
-    });
+      oauthConsenter.user_id
+    );
     grantIdentity = mcpOAuthGrantIdentity(
       await new UserMCPOAuthTokenRepository(rawDb).getToken(oauthTokenUserId, server.mcp_server_id)
     );
@@ -250,9 +263,10 @@ async function harness(options: HarnessOptions) {
     service: (path: string) => {
       if (path !== 'mcp-servers/oauth-auth-headers') return {};
       return {
-        create: async (_data: unknown, params: unknown) => {
+        create: async (data: unknown, params: unknown) => {
           if (options.oauthAuthHeadersCreate) {
             return options.oauthAuthHeadersCreate(
+              data as { mcp_server_ids: string[]; force_refresh?: boolean },
               params as { mcp_egress_assert_current?: () => Promise<void> }
             );
           }
@@ -372,6 +386,7 @@ async function harness(options: HarnessOptions) {
     capability,
     jwtSecret,
     oauthTokenUserId,
+    oauthConsenter,
     request,
     routeRequest,
   };
@@ -380,6 +395,25 @@ async function harness(options: HarnessOptions) {
 const initialize = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' });
 
 describe('authoritative MCP gateway real transport', () => {
+  it('rejects a new hop after the shared consenter is deleted while the task caller remains active', async () => {
+    let providerRequests = 0;
+    const provider = await listen((_request, response) => {
+      providerRequests += 1;
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} }));
+    });
+    const h = await harness({
+      server: { transport: 'http', url: provider, auth: { type: 'oauth', oauth_mode: 'shared' } },
+      separateOAuthConsenter: true,
+    });
+    await expect(h.request('POST', initialize)).resolves.toBeDefined();
+    expect(providerRequests).toBe(1);
+    await new UsersRepository(h.rawDb).delete(h.oauthConsenter.user_id);
+    await expect(h.request('POST', initialize)).rejects.toMatchObject({ code: 'grant_changed' });
+    expect(providerRequests).toBe(1);
+    expect(await new UsersRepository(h.rawDb).findById(h.principal.user_id)).not.toBeNull();
+  });
+
   it('returns the fixed JSON-RPC failure when request headers are malformed', async () => {
     const forward = vi.fn();
     const recordRejectedRequest = vi.fn();
@@ -910,6 +944,7 @@ describe('authoritative MCP gateway real transport', () => {
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end('{"jsonrpc":"2.0","id":1,"result":{}}');
     });
+
     const h = await harness({
       server: {
         transport: 'http',
@@ -924,6 +959,235 @@ describe('authoritative MCP gateway real transport', () => {
     expect(h.oauthTokenUserId).not.toBe(h.user.user_id);
     await expect(h.request('POST', initialize)).resolves.toBeDefined();
     expect(authorization).toBe('Bearer prompt-caller-oauth-token');
+  });
+
+  it('refreshes once and retries an OAuth request after an authenticated 401', async () => {
+    const authorizationHeaders: Array<string | undefined> = [];
+    const url = await listen((request, response) => {
+      authorizationHeaders.push(request.headers.authorization);
+      if (request.headers.authorization === 'Bearer access-before-refresh') {
+        response.writeHead(401, { 'content-type': 'application/json' });
+        response.end('{"error":"expired-token-private-provider-detail"}');
+        return;
+      }
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end('{"jsonrpc":"2.0","id":1,"result":{"refreshed":true}}');
+    });
+    const authHeaderRequests: Array<{ force_refresh?: boolean }> = [];
+    const h = await harness({
+      server: {
+        transport: 'http',
+        url: `${url}/mcp`,
+        auth: { type: 'oauth', oauth_client_id: 'configured-client' },
+      },
+      oauthAccessToken: 'access-before-refresh',
+      oauthRefreshToken: 'refresh-token-never-exposed',
+      oauthAuthHeadersCreate: async (data) => {
+        authHeaderRequests.push(data);
+        return {
+          headers: {
+            [h.server.mcp_server_id]: {
+              authorization: data.force_refresh
+                ? 'Bearer access-after-refresh'
+                : 'Bearer access-before-refresh',
+            },
+          },
+        };
+      },
+    });
+
+    const forwarded = await h.request('POST', initialize);
+    expect(forwarded.response.status).toBe(200);
+    expect(await forwarded.response.text()).toContain('"refreshed":true');
+    expect(authorizationHeaders).toEqual([
+      'Bearer access-before-refresh',
+      'Bearer access-after-refresh',
+    ]);
+    expect(authHeaderRequests).toEqual([
+      { mcp_server_ids: [h.server.mcp_server_id] },
+      { mcp_server_ids: [h.server.mcp_server_id], force_refresh: true },
+    ]);
+  });
+
+  it.each([
+    ['access-before-refresh', 'body'],
+    ['access-after-refresh', 'body'],
+    ['access-before-refresh', 'header'],
+    ['access-after-refresh', 'header'],
+  ] as const)(
+    'filters a retry response reflecting either attempt credential: %s in %s',
+    async (reflected, location) => {
+      let attempts = 0;
+      const url = await listen((_request, response) => {
+        attempts += 1;
+        response.writeHead(attempts === 1 ? 401 : 200, {
+          'content-type': 'application/json',
+          ...(location === 'header' ? { 'mcp-session-id': reflected } : {}),
+        });
+        response.end(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: location === 'body' ? reflected : 'safe',
+          })
+        );
+      });
+      const h = await harness({
+        server: {
+          transport: 'http',
+          url: `${url}/mcp`,
+          auth: { type: 'oauth', oauth_client_id: 'configured-client' },
+        },
+        oauthAccessToken: 'access-before-refresh',
+        oauthRefreshToken: 'refresh-token-never-exposed',
+        oauthAuthHeadersCreate: async (data) => ({
+          headers: {
+            [h.server.mcp_server_id]: {
+              authorization: data.force_refresh
+                ? 'Bearer access-after-refresh'
+                : 'Bearer access-before-refresh',
+            },
+          },
+        }),
+      });
+      if (location === 'body') {
+        await expect(h.request('POST', initialize)).rejects.toMatchObject({
+          code: 'credential_reflection_blocked',
+        });
+      } else {
+        const { response } = await h.request('POST', initialize);
+        expect(response.headers.has('mcp-session-id')).toBe(false);
+        expect(await response.text()).toContain('safe');
+      }
+      expect(attempts).toBe(2);
+    }
+  );
+
+  it.each([204, 205, 304].flatMap((status) => [false, true].map((retry) => ({ status, retry }))))(
+    'preserves null-body DELETE status $status (OAuth retry: $retry) and filters reflected headers',
+    async ({ status, retry }) => {
+      const received: Array<{
+        method: string | undefined;
+        body: string;
+        auth: string | undefined;
+      }> = [];
+      const url = await listen(async (request, response) => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        received.push({
+          method: request.method,
+          body: Buffer.concat(chunks).toString(),
+          auth: request.headers.authorization,
+        });
+        if (retry && received.length === 1) {
+          response.writeHead(401);
+          response.end();
+          return;
+        }
+        response.writeHead(status, {
+          'mcp-session-id': 'access-before-refresh',
+          'retry-after': retry ? 'access-after-refresh' : 'access-before-refresh',
+          'mcp-protocol-version': '2025-03-26',
+        });
+        response.end();
+      });
+      const refreshes: boolean[] = [];
+      const h = await harness({
+        server: {
+          transport: 'http',
+          url,
+          auth: { type: 'oauth', oauth_client_id: 'configured-client' },
+        },
+        oauthAccessToken: 'access-before-refresh',
+        oauthRefreshToken: 'refresh-token-never-exposed',
+        oauthAuthHeadersCreate: async (data) => {
+          refreshes.push(data.force_refresh === true);
+          return {
+            headers: {
+              [h.server.mcp_server_id]: {
+                authorization: data.force_refresh
+                  ? 'Bearer access-after-refresh'
+                  : 'Bearer access-before-refresh',
+              },
+            },
+          };
+        },
+      });
+      const { response } = await h.request('DELETE');
+      expect(response.status).toBe(status);
+      expect(response.body).toBeNull();
+      expect(await response.text()).toBe('');
+      expect(response.headers.has('mcp-session-id')).toBe(false);
+      expect(response.headers.has('retry-after')).toBe(false);
+      expect(response.headers.get('mcp-protocol-version')).toBe('2025-03-26');
+      expect(refreshes).toEqual(retry ? [false, true] : [false]);
+      expect(received).toEqual([
+        { method: 'DELETE', body: '', auth: 'Bearer access-before-refresh' },
+        ...(retry ? [{ method: 'DELETE', body: '', auth: 'Bearer access-after-refresh' }] : []),
+      ]);
+    }
+  );
+
+  it('returns the second OAuth 401 without refreshing or dispatching a third time', async () => {
+    const authorizationHeaders: Array<string | undefined> = [];
+    const url = await listen((request, response) => {
+      authorizationHeaders.push(request.headers.authorization);
+      response.writeHead(401, { 'content-type': 'application/json' });
+      response.end('{"error":"still-unauthorized"}');
+    });
+    const authHeaderRequests: Array<{ force_refresh?: boolean }> = [];
+    const h = await harness({
+      server: {
+        transport: 'http',
+        url: `${url}/mcp`,
+        auth: { type: 'oauth', oauth_client_id: 'configured-client' },
+      },
+      oauthAccessToken: 'access-before-refresh',
+      oauthRefreshToken: 'refresh-token-never-exposed',
+      oauthAuthHeadersCreate: async (data) => {
+        authHeaderRequests.push(data);
+        return {
+          headers: {
+            [h.server.mcp_server_id]: {
+              authorization: data.force_refresh
+                ? 'Bearer access-after-refresh'
+                : 'Bearer access-before-refresh',
+            },
+          },
+        };
+      },
+    });
+
+    const forwarded = await h.request('POST', initialize);
+    expect(forwarded.response.status).toBe(401);
+    expect(authorizationHeaders).toEqual([
+      'Bearer access-before-refresh',
+      'Bearer access-after-refresh',
+    ]);
+    expect(authHeaderRequests).toEqual([
+      { mcp_server_ids: [h.server.mcp_server_id] },
+      { mcp_server_ids: [h.server.mcp_server_id], force_refresh: true },
+    ]);
+  });
+
+  it('does not retry a non-OAuth request after a provider 401', async () => {
+    let providerRequests = 0;
+    const url = await listen((_request, response) => {
+      providerRequests += 1;
+      response.writeHead(401, { 'content-type': 'application/json' });
+      response.end('{"error":"invalid-bearer"}');
+    });
+    const h = await harness({
+      server: {
+        transport: 'http',
+        url: `${url}/mcp`,
+        auth: { type: 'bearer', token: 'configured-static-bearer' },
+      },
+    });
+
+    const forwarded = await h.request('POST', initialize);
+    expect(forwarded.response.status).toBe(401);
+    expect(providerRequests).toBe(1);
   });
 
   it('rejects GET before provider dispatch', async () => {
@@ -1131,7 +1395,7 @@ describe('authoritative MCP gateway real transport', () => {
         oauthAccessToken: 'prior-valid-access-token',
         oauthRefreshToken: 'refresh-secret-never-sent-stale',
         oauthExpiresAt: new Date(0),
-        oauthAuthHeadersCreate: async (params) => {
+        oauthAuthHeadersCreate: async (_data, params) => {
           const observed = await new UserMCPOAuthTokenRepository(h.rawDb).getToken(
             h.oauthTokenUserId,
             h.server.mcp_server_id
@@ -1540,6 +1804,9 @@ describe('authoritative MCP gateway real transport', () => {
     });
     const dbB = await createDatabaseAsync({ dialect: 'sqlite', url: `file:${file}` });
     databases.push(dbB as typeof dbB & { $client?: { close?: () => void } });
+    // This test deliberately holds the writer lock until rejection. Avoid
+    // spending the production five-second busy wait on an expected conflict.
+    await executeRaw(dbB, 'PRAGMA busy_timeout = 50');
     const pending = h.request('POST', initialize);
     await snapshotObserved;
     const mutate = () =>

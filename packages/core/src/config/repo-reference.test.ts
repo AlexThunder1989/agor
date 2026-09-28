@@ -346,6 +346,7 @@ describe('extractGitHubSlugFromUrl', () => {
     ['https://github.com/preset-io/agor.git', 'preset-io/agor'],
     ['http://github.com/preset-io/agor', 'preset-io/agor'],
     ['git://github.com/preset-io/agor.git', 'preset-io/agor'],
+    ['ssh://git@github.com/preset-io/agor.git', 'preset-io/agor'],
     ['ssh://git@github.com:22/preset-io/agor.git', 'preset-io/agor'],
     ['git@github.com:preset-io/agor.git', 'preset-io/agor'],
   ])('derives a credential-free slug from %s', (remoteUrl, expected) => {

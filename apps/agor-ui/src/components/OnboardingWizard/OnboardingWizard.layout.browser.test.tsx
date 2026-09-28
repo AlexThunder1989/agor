@@ -13,7 +13,7 @@
  * Run: pnpm vitest run --config vitest.browser.config.ts
  */
 import { type BoardID, boardPath, type User } from '@agor-live/client';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { theme as antdTheme, ConfigProvider } from 'antd';
 import { type ComponentProps, useEffect, useState } from 'react';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
@@ -65,7 +65,7 @@ function renderWizardAt(
     service: vi.fn((name: string) => {
       if (name === 'boards') return boardsService;
       if (name === 'users') return { get: vi.fn(async () => user) };
-      return {};
+      return { on: vi.fn(), off: vi.fn(), get: vi.fn(async () => ({ state: 'no_auth' })) };
     }),
   };
   const props = {
@@ -115,7 +115,7 @@ describe('OnboardingWizard layout (real browser)', () => {
       service: vi.fn((name: string) => {
         if (name === 'boards') return boardsService;
         if (name === 'users') return usersService;
-        return {};
+        return { on: vi.fn(), off: vi.fn(), get: vi.fn(async () => ({ state: 'no_auth' })) };
       }),
     };
     const onUpdateUser = vi.fn(async () => undefined);
@@ -192,6 +192,8 @@ describe('OnboardingWizard layout (real browser)', () => {
     fireEvent.click(screen.getByText(/skip for now/i).closest('button')!);
     await screen.findByText('Connect your AI');
     fireEvent.click(screen.getByText(/skip for now/i).closest('button')!);
+    await screen.findByText('Choose your tools');
+    fireEvent.click(screen.getByText(/skip for now/i).closest('button')!);
     await screen.findByText("You're ready to build.");
     const closeRect = screen.getByRole('button', { name: 'Close' }).getBoundingClientRect();
     expect(closeRect.top).toBeGreaterThanOrEqual(0);
@@ -265,6 +267,28 @@ describe('OnboardingWizard layout (real browser)', () => {
     }
 
     expect(offenders, `goal titles must stay one line:\n${offenders.join('\n')}`).toEqual([]);
+  });
+
+  it('keeps Claude and Codex recommendation labels accessible and inside their option buttons', async () => {
+    renderWizardAt('llm');
+    await screen.findByText('Connect your AI');
+
+    expect(screen.getAllByText('Recommended')).toHaveLength(2);
+    for (const title of ['Claude', 'GPT']) {
+      const button = screen.getByRole('button', { name: new RegExp(`${title}.*Recommended`) });
+      const badge = within(button).getByText('Recommended');
+      await waitFor(() => expect(badge).toBeVisible());
+      const badgeRect = badge.getBoundingClientRect();
+      const buttonRect = button.getBoundingClientRect();
+      expect(badgeRect.left).toBeGreaterThanOrEqual(buttonRect.left);
+      expect(badgeRect.right).toBeLessThanOrEqual(buttonRect.right);
+      expect(badgeRect.top).toBeGreaterThanOrEqual(buttonRect.top);
+      expect(badgeRect.bottom).toBeLessThanOrEqual(buttonRect.bottom);
+    }
+    for (const title of ['Gemini', 'Custom']) {
+      const button = screen.getByRole('button', { name: new RegExp(title) });
+      expect(within(button).queryByText('Recommended')).not.toBeInTheDocument();
+    }
   });
 
   it('keeps all three Claude sign-in methods in an even row or narrow stacked layout', async () => {
@@ -454,6 +478,9 @@ describe('OnboardingWizard layout (real browser)', () => {
     const key = `sk-ant-api03-${'x'.repeat(40)}`;
     fireEvent.change(screen.getByLabelText('Anthropic API key'), { target: { value: key } });
     fireEvent.click(screen.getByText(/^connect →/i).closest('button') as HTMLElement);
+
+    await screen.findByText('Choose your tools');
+    fireEvent.click(screen.getByText(/^continue →/i).closest('button') as HTMLElement);
 
     // done — teammate-centric success screen.
     await screen.findByText('Rusty is ready.');
