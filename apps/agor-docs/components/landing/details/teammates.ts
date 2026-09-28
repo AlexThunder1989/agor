@@ -66,7 +66,7 @@ export const teammatesDetails: LandingDetail[] = [
     title: 'Bring it where your team [already talks]',
     body: [
       'Not everyone needs to live on the board. Mention a teammate in Slack or Discord, or tag it on a GitHub PR or Shortcut story, and Agor starts a session on the right branch and replies where you asked. Microsoft Teams is coming soon to Agor Cloud.',
-      'When a sender is matched to an Agor user, the session runs as that person, with their access and their name on the record. Each channel sets its own permission mode, model, and tools.',
+      'When a sender is matched to an Agor user, the session runs as that person, with their access and their name on the record. Each channel has its own model, tools, and approval rules.',
     ],
     points: [
       {
@@ -74,8 +74,8 @@ export const teammatesDetails: LandingDetail[] = [
         body: 'In Slack and Discord channels, a teammate only answers when someone mentions it.',
       },
       {
-        title: 'Scoped per channel',
-        body: 'Use supervised mode to keep a person approving tool calls, or trust mode for bounded, well-understood work.',
+        title: 'You decide how much rope',
+        body: 'Keep a person approving each tool call from the linked Agor session in one channel, and let well-understood work run on its own in another.',
       },
     ],
     media: {
@@ -84,7 +84,7 @@ export const teammatesDetails: LandingDetail[] = [
       alt: 'Slack thread where a person mentions an Agor teammate, which starts a session and replies with a link to it',
     },
     links: [
-      { label: 'Message gateway', href: '/guide/message-gateway' },
+      { label: 'Message gateway and its security notes', href: '/guide/message-gateway' },
       { label: 'Meet Blake, our deal desk agent', href: '/blog/meet-blake' },
     ],
   },
