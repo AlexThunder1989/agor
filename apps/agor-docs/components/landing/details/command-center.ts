@@ -222,15 +222,15 @@ export const commandCenterDetails: LandingDetail[] = [
     id: 'context-and-cost',
     navLabel: 'Context & cost',
     eyebrow: 'Stay oriented',
-    title: 'Know how much {context} and budget each session has used',
+    title: 'Know when to keep going and when to [start fresh]',
     body: [
-      'With five sessions running across three branches, you need more than scrollback. Agor shows token and dollar costs per prompt, rolled up per session, and a context meter behind the conversation that fills as the window runs out.',
-      'That turns "should I spawn a fresh child or keep going?" into something you can see, and lets you change model or effort mid-session on Claude and Codex.',
+      'With five sessions running across three branches, you need more than scrollback. A context meter behind each conversation fills as its window runs out, so "should I spawn a fresh child or keep going?" is something you can see.',
+      'Each prompt also shows what it cost, so you can spot an expensive step while it is happening and switch to a lighter model or effort for the routine ones, mid-session on Claude and Codex.',
     ],
     points: [
       {
-        title: 'Per-prompt accounting',
-        body: 'Input, output, and cache tokens with an estimated cost for each message.',
+        title: 'Cost per step',
+        body: 'Input, output, and cache tokens with an estimated cost on each message, where you make the call.',
       },
       {
         title: 'Structured tool blocks',

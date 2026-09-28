@@ -8,12 +8,12 @@ export const governanceDetails: LandingDetail[] = [
     title: 'See the work, and [what it costs]',
     body: [
       'Every agent session lives on a shared board, next to the branch it works on. Anyone with access can see what is running, what is waiting on a person, and what an agent actually did, without chasing status updates.',
-      'Token counts and estimated cost show up on each message and roll up per session, so a runaway prompt or an oversized model is easy to spot while there is still time to change course.',
+      'Estimated cost is recorded on every message and rolls up per session, so whoever looks after AI spend can see where it goes, and catch a runaway prompt or an oversized model before it becomes a pattern.',
     ],
     points: [
       {
-        title: 'Per-prompt accounting',
-        body: 'Input, output, and cache tokens with an estimated dollar cost, inline in the conversation. Coverage depends on what each agent’s SDK reports.',
+        title: 'Cost on the record',
+        body: 'Estimated cost stays attached to each session and branch, next to the work it paid for. Coverage depends on what each agent’s SDK reports.',
       },
       {
         title: 'Usage analytics',
