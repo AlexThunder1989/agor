@@ -95,6 +95,7 @@ export const governanceDetails: LandingDetail[] = [
     title: 'Pick an [execution boundary] that fits your team',
     body: [
       'Permissions decide who can use a branch. The execution mode decides which files and credentials agent code can actually reach. Agor keeps those two controls separate, and you choose the boundary that matches who can reach the daemon.',
+      'The browser terminal and message gateway channels are the two places people reach agent context most directly, so match them to your execution mode and channel settings. Security covers every trust boundary in detail.',
     ],
     points: [
       {
@@ -111,7 +112,7 @@ export const governanceDetails: LandingDetail[] = [
       },
     ],
     links: [
-      { label: 'Execution modes', href: '/security' },
+      { label: 'Every trust boundary', href: '/security' },
       {
         label: 'Why we left Unix impersonation',
         href: '/blog/why-agor-is-leaving-unix-impersonation-behind',
