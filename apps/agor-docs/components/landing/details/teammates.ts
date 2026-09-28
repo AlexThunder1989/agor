@@ -168,7 +168,7 @@ export const teammatesDetails: LandingDetail[] = [
     eyebrow: 'Identity and boundaries',
     title: 'A clear [job] and clear {limits}',
     body: [
-      'A useful teammate fits in one sentence: it helps this team handle this kind of work across these systems. Its identity files hold that purpose, along with its voice and the principles it works by.',
+      'A useful teammate fits in one sentence: it helps this team handle this kind of work across these systems. Its identity files hold that purpose, along with its voice and the principles it works by. Those files come from agor-teammate, the public framework every Agor teammate is built on, which borrows its core ideas from OpenClaw.',
       'People stay in charge of scope. Decide what it can do read-only, what it drafts for review, and when it should stop and ask. Start with a tight loop, and widen its autonomy as it earns trust.',
     ],
     points: [
@@ -185,7 +185,11 @@ export const teammatesDetails: LandingDetail[] = [
         body: 'Scope its tools and Knowledge to the job, not to everything the company has.',
       },
     ],
-    links: [{ label: 'Agent modeling 101', href: '/blog/agent-modeling-101' }],
+    links: [
+      { label: 'Agent modeling 101', href: '/blog/agent-modeling-101' },
+      { label: 'The agor-teammate framework', href: 'https://github.com/preset-io/agor-teammate' },
+      { label: 'Agor and OpenClaw', href: '/blog/openclaw' },
+    ],
   },
   {
     id: 'shared-ownership',
