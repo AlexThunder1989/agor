@@ -57,6 +57,7 @@ import { MCPCatalogModalProvider } from './contexts/MCPCatalogModalContext';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import { setPrimaryAgenticToolIfUnset } from './domain/primaryAgenticTool';
 import {
+  getSessionCreationWarning,
   type NewSessionConfig,
   runSessionCreationStages,
   type SessionCreationResult,
@@ -83,6 +84,7 @@ import {
   useOnboardingLifecycle,
 } from './hooks/useOnboardingLifecycle';
 import { useSurfaceBranding } from './hooks/useSurfaceBranding';
+import { useUnarchiveBranch } from './hooks/useUnarchiveBranch';
 import { sessionCreated } from './store/agorRealtimeActions';
 import { agorStore, useAgorStore } from './store/agorStore';
 import { DeviceRouter } from './surfaces/DeviceRouter';
@@ -378,6 +380,7 @@ function AppContent() {
     authorityGeneration: authenticationGeneration,
   });
   const startEnvironmentWithConfirmation = useEnvironmentStart(client);
+  const handleUnarchiveBranch = useUnarchiveBranch(client);
   const appAuthorityGuard = useAuthorityOperationGuard(
     user?.user_id && user.role && client && connected && !connecting
       ? [user.user_id, user.role, client, authGeneration]
@@ -1240,7 +1243,9 @@ function AppContent() {
       createSession: () => createSession({ ...sessionConfig, branch_id }),
       onSessionCreated: (session) => {
         sessionCreated(session);
-        showSuccess('Session created!');
+        const warning = getSessionCreationWarning(session);
+        if (warning) showWarning(warning, { duration: 10 });
+        else showSuccess('Session created!');
       },
       initialPrompt: config.initialPrompt ?? '',
       preparePrompt: attachmentFiles?.length
@@ -1674,23 +1679,6 @@ function AppContent() {
       showError(
         `Failed to ${options.metadataAction} branch: ${error instanceof Error ? error.message : String(error)}`,
         { key: 'archive-delete' }
-      );
-      throw error;
-    }
-  };
-
-  const handleUnarchiveBranch = async (branchId: string, options?: { boardId?: string }) => {
-    if (!client) {
-      throw new Error('Not connected to daemon');
-    }
-    try {
-      showLoading('Unarchiving branch...', { key: 'unarchive' });
-      await client.service(`branches/${branchId}/unarchive`).create(options || {});
-      showSuccess('Branch unarchived successfully!', { key: 'unarchive' });
-    } catch (error) {
-      showError(
-        `Failed to unarchive branch: ${error instanceof Error ? error.message : String(error)}`,
-        { key: 'unarchive' }
       );
       throw error;
     }

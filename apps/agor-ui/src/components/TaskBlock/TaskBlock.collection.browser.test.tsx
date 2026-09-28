@@ -62,7 +62,7 @@ function retainedFiberProps(container: HTMLElement, target: object) {
 
 // Return only weak observations and scalar graph counts. Neither the test's async frame
 // nor its render helpers may keep the original message/content alive.
-function mountThenProject(kind: 'tool' | 'thinking') {
+function mountThenProject(kind: 'tool' | 'thinking', withWidget: boolean) {
   const task: Task = {
     task_id: generateId(),
     session_id: generateId(),
@@ -94,11 +94,30 @@ function mountThenProject(kind: 'tool' | 'thinking') {
             { type: 'text', text: '' },
           ],
   };
+  const widgetId = generateId();
+  const widget: Message = {
+    ...message,
+    message_id: widgetId,
+    role: MessageRole.SYSTEM,
+    type: 'widget_request',
+    index: 2,
+    content: 'Collection fixture',
+    metadata: {
+      widget: {
+        widget_id: widgetId,
+        widget_type: 'collection_fixture',
+        schema_version: 1,
+        params: {},
+        status: 'pending',
+        requested_at: task.created_at,
+      },
+    },
+  };
   const weak = new WeakRef(message.content as object);
   const view = (messages: Message[], loaded: boolean) => (
     <TaskBlock
       task={task}
-      taskMessages={messages}
+      taskMessages={withWidget ? [...messages, widget] : messages}
       taskMessagesLoaded={loaded}
       onLoadTaskMessages={noop}
       onRetainTaskDetails={retain}
@@ -114,10 +133,15 @@ function mountThenProject(kind: 'tool' | 'thinking') {
   return { weak, retainedProps: retainedFiberProps(container, message.content as object) };
 }
 
-it.each(['tool', 'thinking'] as const)(
-  'collects evicted %s content while the TaskBlock stays mounted',
-  async (kind) => {
-    const { weak, retainedProps } = mountThenProject(kind);
+it.each([
+  ['tool', false],
+  ['thinking', false],
+  ['tool', true],
+  ['thinking', true],
+] as const)(
+  'collects evicted %s content while the TaskBlock stays mounted (widget: %s)',
+  async (kind, withWidget) => {
+    const { weak, retainedProps } = mountThenProject(kind, withWidget);
     expect(retainedProps).toEqual({ current: 0, alternate: 0 });
     const gc = (globalThis as typeof globalThis & { gc: () => void }).gc;
     expect(typeof gc).toBe('function');
