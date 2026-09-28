@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  Bug,
   ClipboardList,
   Code2,
   DoorOpen,
@@ -12,8 +13,11 @@ import {
   type LucideIcon,
   Scale,
   Target,
+  Telescope,
 } from 'lucide-react';
+import Link from 'next/link';
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
+import { trackEvent } from '../../lib/analytics';
 import styles from '../LandingPage.module.css';
 import { LearnMore } from './LandingLink';
 
@@ -31,6 +35,8 @@ const rosterMembers: Array<{
   meta: string;
   r: number;
   a: number;
+  /** Blog post in the member's own words, when there is one. */
+  story?: string;
 }> = [
   {
     icon: Code2,
@@ -103,6 +109,7 @@ const rosterMembers: Array<{
     meta: '@-mention him in Slack',
     r: 180,
     a: -134,
+    story: '/blog/meet-blake',
   },
   {
     icon: DoorOpen,
@@ -111,6 +118,25 @@ const rosterMembers: Array<{
     meta: 'lives in #agor · attends rituals',
     r: 200,
     a: -158,
+    story: '/blog/meet-hodor',
+  },
+  {
+    icon: Telescope,
+    name: 'Wendy',
+    role: 'Competitive intelligence: who shipped what, and what it means',
+    meta: 'daily market scan · Monday briefing',
+    r: 210,
+    a: -99,
+    story: '/blog/meet-wendy-preset-ai-competitive-intelligence-analyst',
+  },
+  {
+    icon: Bug,
+    name: 'Bug Basher',
+    role: 'Takes Apache Superset bugs from report to merged PR',
+    meta: 'one branch per bug · tests first',
+    r: 210,
+    a: 60,
+    story: '/blog/meet-bug-basher',
   },
 ];
 
@@ -222,7 +248,25 @@ export function RosterSection({ sampler = false }: { sampler?: boolean }) {
           ]
             .filter(Boolean)
             .join(' ');
-          return (
+          return member.story ? (
+            <Link
+              key={member.name}
+              href={member.story}
+              className={blipClass}
+              style={radarPosition(member.r, member.a)}
+              onMouseEnter={() => setHoveredMember(index)}
+              onMouseLeave={() => setHoveredMember(null)}
+              onFocus={() => setHoveredMember(index)}
+              onBlur={() => setHoveredMember(null)}
+              aria-label={`${member.name}: ${member.role}. Read the story`}
+              onClick={() => trackEvent('roster_story_click', { member: member.name })}
+            >
+              <span className={styles.blipIcon}>
+                <member.icon size={19} aria-hidden />
+              </span>
+              <span className={styles.blipName}>{member.name}</span>
+            </Link>
+          ) : (
             <button
               type="button"
               key={member.name}
@@ -264,6 +308,9 @@ export function RosterSection({ sampler = false }: { sampler?: boolean }) {
               <div className={styles.tooltipMeta}>
                 <span className={styles.tooltipMem}>{member.meta}</span>
               </div>
+              {member.story ? (
+                <p className={styles.tooltipStory}>Click to read the story →</p>
+              ) : null}
             </div>
           );
         })}
@@ -285,6 +332,11 @@ export function RosterSection({ sampler = false }: { sampler?: boolean }) {
             <div className={styles.tooltipMeta}>
               <span className={styles.tooltipMem}>{rosterMembers[hoveredMember].meta}</span>
             </div>
+            {rosterMembers[hoveredMember].story ? (
+              <Link href={rosterMembers[hoveredMember].story ?? ''} className={styles.tooltipStory}>
+                Read the story →
+              </Link>
+            ) : null}
           </>
         ) : (
           <p className={styles.radarDetailHint}>Tap a teammate to scan</p>

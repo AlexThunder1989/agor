@@ -29,7 +29,10 @@ export const commandCenterDetails: LandingDetail[] = [
       src: '/screenshots/zone-trigger.png',
       alt: 'Zone trigger dialog for a Codex review zone, with options to reuse a session, choose prompt, fork, or spawn, and an editable templated prompt',
     },
-    links: [{ label: 'Boards & zones', href: '/guide/boards' }],
+    links: [
+      { label: 'Boards & zones', href: '/guide/boards' },
+      { label: 'See Bug Basher’s bug pipeline', href: '/blog/meet-bug-basher' },
+    ],
   },
   {
     id: 'session-trees',
@@ -89,7 +92,13 @@ export const commandCenterDetails: LandingDetail[] = [
       src: '/screenshots/parallel-board-5-sessions.png',
       alt: 'Branch card with a Claude Code parent session and five Codex child sessions writing unit tests in parallel',
     },
-    links: [{ label: 'Real orchestration patterns', href: '/guide/sessions' }],
+    links: [
+      { label: 'Real orchestration patterns', href: '/guide/sessions' },
+      {
+        label: 'Meet Wendy, who fans out research',
+        href: '/blog/meet-wendy-preset-ai-competitive-intelligence-analyst',
+      },
+    ],
   },
   {
     id: 'knowledge',

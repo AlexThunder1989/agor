@@ -2972,3 +2972,18 @@
   font-size: 0.75rem;
   line-height: 1.5;
 }
+
+/* Roster members with a blog post render as links: keep the blip look. */
+a.radarBlip {
+  color: inherit;
+  text-decoration: none;
+}
+
+.tooltipStory {
+  display: block;
+  margin: 8px 0 0;
+  color: var(--landing-teal);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: none;
+}

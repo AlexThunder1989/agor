@@ -28,6 +28,7 @@ export const teammatesDetails: LandingDetail[] = [
     links: [
       { label: 'Knowledge', href: '/guide/knowledge' },
       { label: 'How teammates remember', href: '/guide/teammates' },
+      { label: 'How Hodor keeps its memory', href: '/blog/meet-hodor' },
     ],
   },
   {
@@ -120,7 +121,10 @@ export const teammatesDetails: LandingDetail[] = [
       src: '/screenshots/marketing/agor-marketing-slack-thread.png',
       alt: 'Slack thread where a person mentions an Agor teammate, which starts a session and replies with a link to it',
     },
-    links: [{ label: 'Message gateway', href: '/guide/message-gateway' }],
+    links: [
+      { label: 'Message gateway', href: '/guide/message-gateway' },
+      { label: 'Meet Blake, our deal desk agent', href: '/blog/meet-blake' },
+    ],
   },
   {
     id: 'schedules',
@@ -150,7 +154,13 @@ export const teammatesDetails: LandingDetail[] = [
       src: '/screenshots/scheduler-modal.png',
       alt: 'Configure Schedule modal with a daily cron, an agent picker, and a prompt to read HEARTBEAT.md and run a heartbeat',
     },
-    links: [{ label: 'Scheduler', href: '/guide/scheduler' }],
+    links: [
+      { label: 'Scheduler', href: '/guide/scheduler' },
+      {
+        label: 'Wendy’s daily heartbeat',
+        href: '/blog/meet-wendy-preset-ai-competitive-intelligence-analyst',
+      },
+    ],
   },
   {
     id: 'identity',
