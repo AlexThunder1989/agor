@@ -2,7 +2,9 @@ import type { LandingPageId } from '../pages';
 
 export type DetailMedia =
   | { type: 'image'; src: string; alt: string }
-  | { type: 'video'; src: string; srcSmall?: string; poster: string; alt: string };
+  | { type: 'video'; src: string; srcSmall?: string; poster: string; alt: string }
+  /** A rendered component instead of a capture, e.g. the branch role matrix. */
+  | { type: 'roleMatrix' };
 
 /** One story block on a landing page. `id` is the anchor other pages deep-link to. */
 export interface LandingDetail {

@@ -5,6 +5,7 @@ import { useEffect, useRef } from 'react';
 import { HighlightedText } from '../heroCopy';
 import styles from '../LandingPage.module.css';
 import type { DetailMedia, LandingDetail } from './details/types';
+import { RoleMatrix } from './RoleMatrix';
 
 // Plays only while on screen, so a page of loops never decodes them all at once.
 function InViewVideo({ media }: { media: Extract<DetailMedia, { type: 'video' }> }) {
@@ -90,7 +91,9 @@ export function DetailSection({ detail }: { detail: LandingDetail }) {
       </div>
       {media ? (
         <div className={styles.detailMediaFrame}>
-          {media.type === 'video' ? (
+          {media.type === 'roleMatrix' ? (
+            <RoleMatrix />
+          ) : media.type === 'video' ? (
             <InViewVideo media={media} />
           ) : (
             // biome-ignore lint/performance/noImgElement: Static product screenshot

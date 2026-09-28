@@ -57,6 +57,7 @@ export const governanceDetails: LandingDetail[] = [
         body: 'A workspace admin enables it first, then a board or branch Manager turns it on where it fits.',
       },
     ],
+    media: { type: 'roleMatrix' },
     links: [
       { label: 'Board and branch permissions', href: '/security' },
       { label: 'Execution isolation guide', href: '/guide/multiplayer-unix-isolation' },
