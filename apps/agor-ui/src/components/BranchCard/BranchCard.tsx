@@ -31,6 +31,8 @@ import {
 import { ensureColorVisible, isDarkTheme } from '../../utils/theme';
 import { ArchiveActionButton } from '../ArchiveButton';
 import { ArchiveDeleteBranchModal } from '../ArchiveDeleteBranchModal';
+import { BranchFilesystemRecovery } from '../BranchFilesystemRecovery';
+import { BranchWorkspaceStatus } from '../BranchWorkspaceStatus';
 import { EnvironmentPill } from '../EnvironmentPill';
 import { MarkdownPreview } from '../MarkdownRenderer';
 import { CreatedByTag } from '../metadata';
@@ -125,13 +127,19 @@ const BranchCardComponent = ({
       const renderer = card.closest('.react-flow__renderer');
       if (!scrollArea || !card.contains(scrollArea) || !renderer) return;
 
-      // Session lists belong to the canvas gesture surface, even when virtual.
-      // Expanded descriptions/peeks retain ordinary scrolling only if they overflow.
-      const isSessionList = sessionSectionsRef.current?.contains(scrollArea);
+      // AntD puts nowheel on the tree wrapper, not its virtual scroll holder.
+      // Read current layout dimensions on every gesture (load/expand/resize can
+      // change them). Like markdown, an overflowing tree keeps ordinary wheel
+      // even at its edges; ctrl/meta still belongs to canvas zoom.
+      const treeHolder = scrollArea.querySelector<HTMLElement>('.ant-tree-list-holder');
+      const viewport = treeHolder ?? scrollArea;
+      const isPaginatedList = sessionSectionsRef.current?.contains(scrollArea) && !treeHolder;
+      // The spacer measures row content. Descendant decorations can extend
+      // scrollHeight a few pixels even when a short tree has no virtual scrolling.
+      const contentHeight = treeHolder?.firstElementChild?.clientHeight ?? viewport.scrollHeight;
       const overflows =
-        scrollArea.scrollHeight > scrollArea.clientHeight ||
-        scrollArea.scrollWidth > scrollArea.clientWidth;
-      if (!event.ctrlKey && !event.metaKey && !isSessionList && overflows) return;
+        contentHeight > viewport.clientHeight || viewport.scrollWidth > viewport.clientWidth;
+      if (!event.ctrlKey && !event.metaKey && !isPaginatedList && overflows) return;
 
       // Removing nowheel alone is insufficient: the virtual list still consumes
       // wheel. Capture first, then let React Flow own pan/zoom and anchoring.
@@ -535,6 +543,7 @@ const BranchCardComponent = ({
         </Space>
       </div>
 
+      <BranchWorkspaceStatus branch={branch} />
       {branch.deletion_status && (
         <div
           role="status"
@@ -572,6 +581,8 @@ const BranchCardComponent = ({
           />
         </Space>
       </div>
+
+      <BranchFilesystemRecovery branch={branch} client={client} />
 
       {/* Notes */}
       {branch.notes && (
@@ -635,6 +646,8 @@ const BranchCardComponent = ({
       {/* Branch cards are repeated across the canvas, so mount this only on demand. */}
       {archiveDeleteModalMounted && (
         <ArchiveDeleteBranchModal
+          client={client}
+          currentUser={currentUserId ? userById.get(currentUserId) : null}
           open={archiveDeleteModalOpen}
           branch={branch}
           sessionCount={sessions.length}

@@ -17,7 +17,6 @@ import {
   DEFAULT_GEMINI_MODEL,
   GEMINI_MODELS,
 } from '@agor/core/models';
-import { resolveSessionDefaults } from '@agor/core/sessions';
 import {
   AGENTIC_TOOL_NAMES,
   type AgenticToolName,
@@ -26,6 +25,9 @@ import {
   getSessionType,
   type Session,
   type SessionID,
+  type SpawnConfig,
+  USER_DEFAULT_AGENTIC_CONFIGURATION,
+  WORKSPACE_DEFAULT_AGENTIC_CONFIGURATION,
   type ZoneBoardObject,
 } from '@agor/core/types';
 import type { McpServer } from '@modelcontextprotocol/server';
@@ -40,6 +42,7 @@ import {
   resolveBranchId,
   resolveMcpServerId,
   resolveSessionId,
+  resolveTaskId,
 } from '../resolve-ids.js';
 import {
   mcpListLimit,
@@ -637,6 +640,31 @@ export function registerSessionTools(server: McpServer, ctx: McpContext): void {
             'MCP server IDs to attach. Overrides parent session inheritance. Omit to inherit from parent. Pass empty array for no MCPs.'
           ),
         modelConfig: modelConfigInputSchema,
+        presetId: mcpOptionalNonEmptyString(
+          'presetId',
+          `Child configuration preset UUID, ${USER_DEFAULT_AGENTIC_CONFIGURATION}, or ${WORKSPACE_DEFAULT_AGENTIC_CONFIGURATION}. Cannot be combined with individual configuration overrides.`
+        ),
+        permissionMode: z
+          .enum([
+            'default',
+            'acceptEdits',
+            'bypassPermissions',
+            'plan',
+            'dontAsk',
+            'autoEdit',
+            'yolo',
+            'ask',
+            'auto',
+            'on-failure',
+            'allow-all',
+          ])
+          .optional()
+          .describe(
+            'Child permission mode. Inline configuration must be allowed by the workspace.'
+          ),
+        codexSandboxMode: z.enum(['read-only', 'workspace-write', 'danger-full-access']).optional(),
+        codexApprovalPolicy: z.enum(['untrusted', 'on-failure', 'on-request', 'never']).optional(),
+        codexNetworkAccess: z.boolean().optional(),
       }),
     },
     async (args) => {
@@ -653,6 +681,11 @@ export function registerSessionTools(server: McpServer, ctx: McpContext): void {
         task_id: args.taskId,
         mcpServerIds: args.mcpServerIds,
         modelConfig: coerceModelConfig(args.modelConfig),
+        presetId: args.presetId as SpawnConfig['presetId'],
+        permissionMode: args.permissionMode,
+        codexSandboxMode: args.codexSandboxMode,
+        codexApprovalPolicy: args.codexApprovalPolicy,
+        codexNetworkAccess: args.codexNetworkAccess,
       };
 
       // spawn/fork are custom methods, not Feathers transport methods. Scope
@@ -691,7 +724,7 @@ export function registerSessionTools(server: McpServer, ctx: McpContext): void {
     'agor_sessions_prompt',
     {
       description:
-        'Prompt an existing session to continue work. Supports four modes: continue (append to conversation), fork (branch at decision point), subsession (delegate to child agent), or btw (ephemeral fork — ask a side question without disrupting the target session, even if running). Configuration is inherited from parent session or user defaults.',
+        'Prompt an existing session to continue work. Supports four modes: continue (append to conversation), fork (branch at decision point), subsession (delegate to child agent), or btw (ephemeral fork — ask a side question without disrupting the target session, even if running). Configuration is inherited from parent session or user defaults. For urgent information that invalidates active work: capture the original active task ID before any queue changes, then use mode=continue to enqueue updated instructions while the child is active; inspect/re-read agor_tasks_list with status=queued, cancel obsolete pending work with agor_tasks_cancel_queued, and move the update to the front with agor_tasks_reorder_queued using expectedTaskIds. ONLY THEN call agor_sessions_stop with expectedTaskId set to that original active task ID and a reason: stop preserves/drains the queue, so stopping first risks dispatching stale work. The update is a next turn after verified termination, not in-place injection or guaranteed instantaneous delivery. Accepted/pending stop is not confirmed termination. If the original finishes and the update starts, expectedTaskId protects the update: on condition_changed re-read and reassess, never fall back to an unconditional stop. These separate calls are not atomic; on conflicts or unexpected dispatch/queue changes re-read and reassess. Existing running-task edits are preserved, not rolled back.',
       inputSchema: z.object({
         sessionId: mcpRequiredId(
           'sessionId',
@@ -1041,7 +1074,7 @@ export function registerSessionTools(server: McpServer, ctx: McpContext): void {
           .array(mcpRequiredId('mcpServerIds[]', 'MCP server'))
           .optional()
           .describe(
-            'MCP server IDs to attach. Overrides branch and user default inheritance. Omit to use branch config > user defaults.'
+            'Explicit MCP server IDs to attach atomically; an unavailable or unauthorized selection rejects creation. [] selects none. Omit to inherit branch config > user defaults; missing inherited servers are skipped with a warning.'
           ),
         modelConfig: modelConfigInputSchema,
       }),
@@ -1055,26 +1088,12 @@ export function registerSessionTools(server: McpServer, ctx: McpContext): void {
       // Get branch to extract repo context
       const branch = await ctx.app.service('branches').get(args.branchId, ctx.baseServiceParams);
 
-      // Session creation materializes permission/model defaults centrally so
-      // selected presets retain their provenance. MCP attachment remains here
-      // because explicit attach failures are part of this tool's response.
+      // The service owns atomic attachment and inherited-default warnings.
       const explicitMcpServerIds =
         args.mcpServerIds !== undefined
           ? await Promise.all(args.mcpServerIds.map((id) => resolveMcpServerId(ctx, id)))
           : undefined;
       const modelConfig = coerceModelConfig(args.modelConfig);
-      const mcpServerIds = resolveSessionDefaults({
-        agenticTool,
-        user,
-        branch,
-        overrides: { mcpServerIds: explicitMcpServerIds },
-      }).mcp_server_ids;
-      // Track whether the caller explicitly requested these servers. When they
-      // did, we surface attach failures in the response instead of silently
-      // dropping them (the "mcpServerId doesn't stick" bug). For inherited
-      // servers (branch/user defaults) we preserve the existing "gracefully
-      // skip deleted/invalid" behavior so startup doesn't get chatty.
-      const mcpServerIdsFromArgs = args.mcpServerIds !== undefined;
 
       // Build callback configuration for remote session callbacks
       const callbackConfig: Record<string, unknown> = {};
@@ -1196,6 +1215,7 @@ export function registerSessionTools(server: McpServer, ctx: McpContext): void {
 
       const sessionData: Record<string, unknown> = {
         branch_id: branch.branch_id,
+        mcpServerIds: explicitMcpServerIds,
         agentic_tool: agenticTool,
         status: 'idle',
         title: args.title,
@@ -1263,39 +1283,6 @@ export function registerSessionTools(server: McpServer, ctx: McpContext): void {
         );
       }
 
-      // Attach MCP servers (inherited from branch or user defaults, or
-      // explicitly requested via args.mcpServerIds). Explicit failures are
-      // collected and returned to the caller so they don't silently vanish.
-      const mcpAttachFailures: Array<{ mcp_server_id: string; reason: string }> = [];
-      if (mcpServerIds && mcpServerIds.length > 0) {
-        for (const mcpServerId of mcpServerIds) {
-          try {
-            // Attach via the session-scoped REST surface — `session-mcp-servers`
-            // (flat) is read-only here; the create handler lives on
-            // `/sessions/:id/mcp-servers` with `{ mcpServerId }` (camelCase).
-            // See register-routes.ts: `/sessions/:id/mcp-servers` create handler.
-            await ctx.app
-              .service('/sessions/:id/mcp-servers')
-              .create(
-                { mcpServerId },
-                { ...ctx.baseServiceParams, route: { id: session.session_id } }
-              );
-          } catch (error) {
-            const reason = error instanceof Error ? error.message : String(error);
-            if (mcpServerIdsFromArgs) {
-              // Caller explicitly asked for this server — surface the failure.
-              mcpAttachFailures.push({ mcp_server_id: mcpServerId, reason });
-            } else {
-              // Inherited from branch/user defaults — gracefully skip.
-              console.warn(
-                `Skipped MCP server ${mcpServerId} for session ${session.session_id}: ${reason}`
-              );
-            }
-          }
-        }
-      }
-
-      // Execute initial prompt if provided
       let initialTask = null;
       if (args.initialPrompt) {
         initialTask = await ctx.app.service('/sessions/:id/prompt').create(
@@ -1319,19 +1306,18 @@ export function registerSessionTools(server: McpServer, ctx: McpContext): void {
           ? ' Not genealogy-linked because the target branch differs from the calling session branch.'
           : '';
 
-      const mcpFailureNote =
-        mcpAttachFailures.length > 0
-          ? ` Warning: ${mcpAttachFailures.length} requested MCP server(s) failed to attach — see mcpAttachFailures.`
-          : '';
+      const mcpWarningNote = session.mcp_defaults_skipped
+        ? ` Warning: ${session.mcp_defaults_skipped} unavailable default MCP server(s) were skipped. Review branch MCP Servers or your user defaults.`
+        : '';
 
       return textResult({
         session: redactSessionForMcp(session),
         taskId: initialTask?.task_id,
         note: args.initialPrompt
-          ? `Session created and initial prompt execution started.${parentNote}${callbackNote}${mcpFailureNote}`
-          : `Session created successfully.${parentNote}${callbackNote}${mcpFailureNote}`,
+          ? `Session created and initial prompt execution started.${parentNote}${callbackNote}${mcpWarningNote}`
+          : `Session created successfully.${parentNote}${callbackNote}${mcpWarningNote}`,
         ...(remoteRelationship && { remoteRelationship }),
-        ...(mcpAttachFailures.length > 0 && { mcpAttachFailures }),
+        ...(session.mcp_defaults_skipped && { mcp_defaults_skipped: session.mcp_defaults_skipped }),
       });
     }
   );
@@ -1705,10 +1691,15 @@ export function registerSessionTools(server: McpServer, ctx: McpContext): void {
     'agor_sessions_stop',
     {
       description:
-        'Request that a running session stop. The session becomes idle only after Agor verifies executor quiescence or process absence; otherwise it remains guarded in stopping. Use this for emergency stops, timeout-based cancellation, or human-in-the-loop gates. Only works on sessions in active states (running, stopping, awaiting_permission, awaiting_input).',
+        'Request that a running session stop. The session becomes idle only after Agor verifies executor quiescence or process absence. A stop can also be accepted as pending (outcome "pending" with a pendingCode such as "awaiting_remote_executor" while a remote executor has not connected yet, or an HA coordination code); the request is durable and settles later without another call. Only an "unverified" outcome leaves the task guarded in stopping and requires an owner/admin force-fail. Use this for emergency stops, timeout-based cancellation, or human-in-the-loop gates. Only works on sessions in active states (running, stopping, awaiting_permission, awaiting_input). Stop preserves/drains queued work and preserves existing running-task edits; it does not roll back changes or clear the queue. To replace obsolete work with urgent information, capture the original active task ID, then FIRST enqueue updated instructions with agor_sessions_prompt (mode=continue) while the child is active, inspect/re-read agor_tasks_list with status=queued, cancel obsolete queued tasks with agor_tasks_cancel_queued, and move the update to the front with agor_tasks_reorder_queued using expectedTaskIds. ONLY THEN stop with expectedTaskId set to that original active task ID and a reason; stopping first risks dispatching stale work. The update is a next turn after verified termination, not in-place injection or guaranteed instantaneous delivery. Accepted/pending stop is not confirmed termination. If the original finishes and the update starts, expectedTaskId protects the update: on condition_changed re-read and reassess, never fall back to an unconditional stop. These separate calls are not atomic; on conflicts or unexpected dispatch/queue changes re-read and reassess.',
       annotations: { destructiveHint: true },
       inputSchema: z.object({
         sessionId: mcpRequiredId('sessionId', 'Session', 'Session ID to stop (UUIDv7 or short ID)'),
+        expectedTaskId: mcpOptionalId(
+          'expectedTaskId',
+          'Task',
+          'Original active Task ID (UUIDv7 or short ID). Stop only that execution; a successor yields condition_changed. Never retry a mismatch with an unconditional stop.'
+        ),
         reason: mcpOptionalString(
           'reason',
           'Audit log reason for the stop (e.g. "timeout", "user requested", "safety gate")'
@@ -1718,19 +1709,44 @@ export function registerSessionTools(server: McpServer, ctx: McpContext): void {
     async (args) => {
       const sessionId = await resolveSessionId(ctx, args.sessionId);
 
-      const result = await ctx.app
-        .service('/sessions/:id/stop')
-        .create(
-          { ...(args.reason ? { reason: args.reason } : {}) },
-          { ...ctx.baseServiceParams, route: { id: sessionId } }
-        );
+      const expectedTaskId = args.expectedTaskId
+        ? await resolveTaskId(ctx, args.expectedTaskId)
+        : undefined;
+      const result = await ctx.app.service('/sessions/:id/stop').create(
+        {
+          ...(args.reason ? { reason: args.reason } : {}),
+          ...(expectedTaskId ? { expected_task_id: expectedTaskId } : {}),
+        },
+        { ...ctx.baseServiceParams, route: { id: sessionId } }
+      );
 
-      const stopResult = result as { success: boolean; status?: string; reason?: string };
+      const stopResult = result as {
+        success: boolean;
+        outcome?: string;
+        status?: string;
+        reason?: string;
+        pendingCode?: string;
+        stoppedTaskId?: string;
+      };
 
       if (!stopResult.success) {
+        if (stopResult.outcome === 'pending') {
+          // Accepted, not failed: the durable request settles without another call.
+          return textResult({
+            success: false,
+            accepted: true,
+            sessionId,
+            outcome: 'pending',
+            status: stopResult.status,
+            pendingCode: stopResult.pendingCode,
+            stoppedTaskId: stopResult.stoppedTaskId,
+            note: stopResult.reason || 'Stop accepted; waiting for executor termination.',
+          });
+        }
         return textResult({
           success: false,
           sessionId,
+          ...(stopResult.outcome ? { outcome: stopResult.outcome } : {}),
           error: stopResult.reason || 'Failed to stop session',
         });
       }
@@ -1738,6 +1754,7 @@ export function registerSessionTools(server: McpServer, ctx: McpContext): void {
       return textResult({
         success: true,
         sessionId,
+        ...(stopResult.outcome ? { outcome: stopResult.outcome } : {}),
         status: stopResult.status,
         ...(args.reason ? { reason: args.reason } : {}),
         note: stopResult.reason || 'Session stopped successfully.',

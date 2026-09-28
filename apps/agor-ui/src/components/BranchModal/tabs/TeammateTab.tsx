@@ -1,28 +1,21 @@
-import type { Board, Branch, MCPServer } from '@agor-live/client';
+import type { AgorClient, Branch } from '@agor-live/client';
 import { getTeammateConfig } from '@agor-live/client';
 import { RobotOutlined } from '@ant-design/icons';
-import { Descriptions, Form, Input, Select, Space, Typography } from 'antd';
-import { useAgorStore } from '../../../store/agorStore';
-import { selectBranchById } from '../../../store/selectors';
-import { boardSelectOptions } from '../../BoardTile';
+import { Button, Descriptions, Form, Input, Popconfirm, Space, Typography } from 'antd';
+import { useState } from 'react';
+import { useConnectionDisabled } from '../../../contexts/ConnectionContext';
+import { useThemedMessage } from '../../../utils/message';
 import { EmojiPickerInput } from '../../EmojiPickerInput/EmojiPickerInput';
-import { MCPServerSelect } from '../../MCPServerSelect';
-import { FIELD_WIDTHS } from '../../SettingsModal/panelPrimitives';
 import { Tag } from '../../Tag';
-import type { GeneralFormState, TeammateFormState } from '../useBranchModalForm';
+import type { TeammateFormState } from '../useBranchModalForm';
 
 interface TeammateTabProps {
   branch: Branch;
+  client?: AgorClient | null;
+  onRetired?: () => void;
   canEdit: boolean;
   state: TeammateFormState;
   setField: <K extends keyof TeammateFormState>(key: K, value: TeammateFormState[K]) => void;
-  // Board + default MCP servers can be folded in here from the General tab.
-  // Optional: when omitted (the current BranchModal layout keeps a separate
-  // General tab), the folded Board/MCP section simply isn't rendered.
-  boards?: Board[];
-  mcpServers?: MCPServer[];
-  general?: GeneralFormState;
-  setGeneral?: <K extends keyof GeneralFormState>(key: K, value: GeneralFormState[K]) => void;
 }
 
 export const TeammateTab: React.FC<TeammateTabProps> = ({
@@ -30,12 +23,25 @@ export const TeammateTab: React.FC<TeammateTabProps> = ({
   canEdit,
   state,
   setField,
-  boards,
-  mcpServers,
-  general,
-  setGeneral,
+  client,
+  onRetired,
 }) => {
-  const branchById = useAgorStore(selectBranchById);
+  const [retiring, setRetiring] = useState(false);
+  const disabled = useConnectionDisabled();
+  const { showSuccess, showError } = useThemedMessage();
+  const retire = async () => {
+    if (!client) return;
+    setRetiring(true);
+    try {
+      await client.service(`branches/${branch.branch_id}/retire-teammate`).create({});
+      showSuccess('Teammate retired; files preserved');
+      onRetired?.();
+    } catch (error) {
+      showError(error instanceof Error ? error.message : 'Failed to retire teammate');
+    } finally {
+      setRetiring(false);
+    }
+  };
   const config = getTeammateConfig(branch);
   if (!config) return null;
 
@@ -54,8 +60,8 @@ export const TeammateTab: React.FC<TeammateTabProps> = ({
         </Space>
 
         {/* Editable fields */}
-        <Form layout="vertical" colon={false}>
-          <Form.Item label="Display Name" style={FIELD_WIDTHS.short}>
+        <Form layout="horizontal" colon={false}>
+          <Form.Item label="Display Name" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
             <Input
               value={state.displayName}
               onChange={(e) => setField('displayName', e.target.value)}
@@ -63,7 +69,7 @@ export const TeammateTab: React.FC<TeammateTabProps> = ({
               disabled={!canEdit}
             />
           </Form.Item>
-          <Form.Item label="Icon">
+          <Form.Item label="Icon" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
             <EmojiPickerInput
               value={state.emoji}
               onChange={(val) => setField('emoji', val)}
@@ -73,6 +79,8 @@ export const TeammateTab: React.FC<TeammateTabProps> = ({
           </Form.Item>
           <Form.Item
             label="Description"
+            labelCol={{ span: 6 }}
+            wrapperCol={{ span: 18 }}
             tooltip="What does this AI teammate do? Visible to other agents via MCP."
           >
             <Input.TextArea
@@ -83,35 +91,19 @@ export const TeammateTab: React.FC<TeammateTabProps> = ({
               disabled={!canEdit}
             />
           </Form.Item>
-
-          {general && setGeneral && (
-            <>
-              <Form.Item label="Board" style={FIELD_WIDTHS.short}>
-                <Select
-                  value={general.boardId}
-                  onChange={(value) => setGeneral('boardId', value)}
-                  placeholder="Select board (optional)..."
-                  allowClear
-                  disabled={!canEdit}
-                  options={boardSelectOptions(boards ?? [], branchById)}
-                />
-              </Form.Item>
-              <Form.Item
-                label="MCP Servers"
-                tooltip="Default MCP servers for new sessions with this teammate"
-                style={FIELD_WIDTHS.medium}
-              >
-                <MCPServerSelect
-                  mcpServers={mcpServers ?? []}
-                  value={general.mcpServerIds}
-                  onChange={(value) => setGeneral('mcpServerIds', value)}
-                  placeholder="Select default MCP servers..."
-                  disabled={!canEdit}
-                />
-              </Form.Item>
-            </>
-          )}
         </Form>
+
+        {!branch.archived && (
+          <Popconfirm
+            title="Retire teammate?"
+            description="Archives this teammate and clears personal primary preferences. Files are preserved. Reassign any board primary first."
+            onConfirm={retire}
+          >
+            <Button danger disabled={!canEdit || !client || disabled} loading={retiring}>
+              Retire teammate
+            </Button>
+          </Popconfirm>
+        )}
 
         {/* Read-only metadata */}
         <Descriptions column={1} bordered size="small">
@@ -131,10 +123,6 @@ export const TeammateTab: React.FC<TeammateTabProps> = ({
             ) : (
               <Tag>Manual</Tag>
             )}
-          </Descriptions.Item>
-          {/* Preserved here since teammates no longer show the General tab. */}
-          <Descriptions.Item label="Created">
-            {new Date(branch.created_at).toLocaleString()}
           </Descriptions.Item>
         </Descriptions>
       </Space>

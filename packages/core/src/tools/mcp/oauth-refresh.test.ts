@@ -7,6 +7,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Database } from '../../db/client';
+import { getCurrentTenantDatabaseScope } from '../../db/tenant-context';
 
 const { MockOutboundPreDispatchAuthorityError } = vi.hoisted(() => ({
   MockOutboundPreDispatchAuthorityError: class OutboundPreDispatchAuthorityError extends Error {
@@ -49,8 +51,10 @@ import type { MCPServerID, UserID } from '../../types';
 import {
   __refreshMutexSizeForTests,
   __resetRefreshMutexForTests,
+  classifyFailedRefreshClaimStatus,
   GrantConfigurationChangedError,
   InvalidGrantError,
+  isReplaySafeRefreshTokenEndpoint,
   MissingClientIdError,
   MissingRefreshTokenError,
   MissingTokenEndpointError,
@@ -60,6 +64,34 @@ import {
   refreshAndPersistToken,
   refreshMCPToken,
 } from './oauth-refresh';
+
+describe('refresh-token replay safety', () => {
+  it.each(['https://oauth2.googleapis.com/token', 'https://www.googleapis.com/oauth2/v4/token'])(
+    'recognizes the exact Google token endpoint %s',
+    (endpoint) => {
+      expect(isReplaySafeRefreshTokenEndpoint(endpoint)).toBe(true);
+    }
+  );
+
+  it.each([
+    'https://oauth2.googleapis.com.attacker.example/token',
+    'http://oauth2.googleapis.com/token',
+    'https://auth.example.test/token',
+    'not a URL',
+  ])('does not broaden retry safety to %s', (endpoint) => {
+    expect(isReplaySafeRefreshTokenEndpoint(endpoint)).toBe(false);
+  });
+
+  it('keeps ambiguous rotating-token failures fenced while releasing Google and known failures', () => {
+    expect(classifyFailedRefreshClaimStatus(true, 'https://auth.example.test/token')).toBe(
+      'ambiguous'
+    );
+    expect(classifyFailedRefreshClaimStatus(true, 'https://oauth2.googleapis.com/token')).toBe(
+      'idle'
+    );
+    expect(classifyFailedRefreshClaimStatus(false, 'https://auth.example.test/token')).toBe('idle');
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Repo mocks.
@@ -431,11 +463,21 @@ describe('refreshAndPersistToken', () => {
     mockFetchJson({ access_token: 'new-a', expires_in: 3600 });
 
     const token = await refreshAndPersistToken({
-      db: { run: () => undefined } as any,
+      db: { run: () => undefined } as unknown as Database,
+      tenantId: 'tenant-a',
       userId: USER_ID,
       mcpServerId: SERVER_ID,
       observedRefreshVersion: observedVersion(),
-      validateGrant: async () => true,
+      validateGrant: async () => {
+        expect(getCurrentTenantDatabaseScope()).toMatchObject({
+          kind: 'tenant',
+          tenantId: 'tenant-a',
+        });
+        return true;
+      },
+      assertCurrent: async () => {
+        expect(getCurrentTenantDatabaseScope()).toBeUndefined();
+      },
     });
 
     expect(token).toBe('new-a');
@@ -923,8 +965,9 @@ describe('refreshAndPersistToken', () => {
     expect(__refreshMutexSizeForTests()).toBe(0);
   });
 
-  it('mutex: different keys refresh independently', async () => {
-    const SERVER_ID_2 = 'srv-2' as MCPServerID;
+  it('refreshes Gmail and Calendar grants independently', async () => {
+    const GMAIL_SERVER_ID = 'gmail-mcp' as MCPServerID;
+    const CALENDAR_SERVER_ID = 'calendar-mcp' as MCPServerID;
 
     mockGetToken.mockImplementation((_u, s) => ({
       user_id: USER_ID,
@@ -934,39 +977,55 @@ describe('refreshAndPersistToken', () => {
       oauth_client_id: 'cid',
     }));
     mockFindById.mockResolvedValue({
-      url: 'https://srv.example.com/mcp',
-      auth: { oauth_token_url: 'https://auth.example.com/token' },
+      url: 'https://gmailmcp.googleapis.com/mcp/v1',
+      auth: { oauth_token_url: 'https://oauth2.googleapis.com/token' },
     });
     // `mockImplementation` returns a fresh Response per call — `Response.text()`
     // consumes the body, so reusing a single instance across two calls throws
     // "Body has already been read" on the second read.
-    globalThis.fetch = vi.fn().mockImplementation(() =>
-      Promise.resolve(
-        new Response(JSON.stringify({ access_token: 'a', expires_in: 3600 }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      )
-    ) as typeof globalThis.fetch;
+    globalThis.fetch = vi.fn().mockImplementation((_input, init: RequestInit) => {
+      const refreshToken = new URLSearchParams(String(init.body)).get('refresh_token');
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ access_token: `access-for-${refreshToken}`, expires_in: 3600 }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        )
+      );
+    }) as typeof globalThis.fetch;
 
     await Promise.all([
       refreshAndPersistToken({
         db: { run: () => undefined } as any,
         userId: USER_ID,
-        mcpServerId: SERVER_ID,
+        mcpServerId: GMAIL_SERVER_ID,
         observedRefreshVersion: observedVersion(),
         validateGrant: async () => true,
       }),
       refreshAndPersistToken({
         db: { run: () => undefined } as any,
         userId: USER_ID,
-        mcpServerId: SERVER_ID_2,
+        mcpServerId: CALENDAR_SERVER_ID,
         observedRefreshVersion: observedVersion(),
         validateGrant: async () => true,
       }),
     ]);
 
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect(mockCompleteStandaloneRefresh).toHaveBeenCalledWith(
+      USER_ID,
+      GMAIL_SERVER_ID,
+      expect.any(Object),
+      expect.objectContaining({ accessToken: 'access-for-rt-gmail-mcp' })
+    );
+    expect(mockCompleteStandaloneRefresh).toHaveBeenCalledWith(
+      USER_ID,
+      CALENDAR_SERVER_ID,
+      expect.any(Object),
+      expect.objectContaining({ accessToken: 'access-for-rt-calendar-mcp' })
+    );
   });
 
   it('mutex: in-flight map is cleared after completion (success)', async () => {

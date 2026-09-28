@@ -1,3 +1,4 @@
+import { resolveRepoCleanupPolicy } from '@agor/core/types';
 import type { CreateLocalRepoRequest, CreateRepoRequest, Repo } from '@agor-live/client';
 import { DeleteOutlined, EditOutlined, FolderOutlined, PlusOutlined } from '@ant-design/icons';
 import type { RadioChangeEvent } from 'antd';
@@ -14,6 +15,8 @@ import { DrillInFrame, useSettingsDrill } from './SettingsDrill';
 
 interface ReposTableProps {
   repoById: Map<string, Repo>;
+  /** Whether the caller may configure the branch cleanup policy (admin-only). */
+  canConfigureCleanup?: boolean;
   onCreate?: (data: CreateRepoRequest) => void;
   onCreateLocal?: (data: CreateLocalRepoRequest) => void;
   onUpdate?: (repoId: string, updates: Partial<Repo>) => void;
@@ -22,6 +25,7 @@ interface ReposTableProps {
 
 export const ReposTable: React.FC<ReposTableProps> = ({
   repoById,
+  canConfigureCleanup = false,
   onCreate,
   onCreateLocal,
   onUpdate,
@@ -75,6 +79,7 @@ export const ReposTable: React.FC<ReposTableProps> = ({
       repoForm.setFieldsValue({
         slug: editingRepo.slug,
         default_branch: editingRepo.default_branch || 'main',
+        cleanup_policy: resolveRepoCleanupPolicy(editingRepo.cleanup_policy),
       });
       setDirty(false);
     }
@@ -113,6 +118,16 @@ export const ReposTable: React.FC<ReposTableProps> = ({
       if (values.default_branch) {
         updates.default_branch = values.default_branch;
       }
+      // Branch cleanup policy (#2742) — admin-only; only sent when actually changed.
+      if (
+        canConfigureCleanup &&
+        values.cleanup_policy &&
+        Object.entries(resolveRepoCleanupPolicy(editingRepo.cleanup_policy)).some(
+          ([key, value]) => values.cleanup_policy[key] !== value
+        )
+      ) {
+        updates.cleanup_policy = values.cleanup_policy;
+      }
       onUpdate?.(editingRepo.repo_id, updates);
     } else {
       if (repoMode === 'local') {
@@ -130,7 +145,17 @@ export const ReposTable: React.FC<ReposTableProps> = ({
     }
     setDirty(false);
     closeDrill();
-  }, [repoForm, isEditing, editingRepo, repoMode, onUpdate, onCreateLocal, onCreate, closeDrill]);
+  }, [
+    repoForm,
+    isEditing,
+    editingRepo,
+    repoMode,
+    canConfigureCleanup,
+    onUpdate,
+    onCreateLocal,
+    onCreate,
+    closeDrill,
+  ]);
 
   const handleModeChange = (e: RadioChangeEvent) => {
     const value = e.target.value as 'remote' | 'local';
@@ -263,6 +288,7 @@ export const ReposTable: React.FC<ReposTableProps> = ({
             mode={isEditing ? 'edit' : 'create'}
             repoMode={repoMode}
             onRepoModeChange={handleModeChange}
+            canConfigureCleanup={canConfigureCleanup}
           />
         </Form>
       </DrillInFrame>

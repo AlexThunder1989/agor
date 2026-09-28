@@ -3,9 +3,11 @@ import type { FormInstance, RadioChangeEvent } from 'antd';
 import { Form, Input, Radio, Typography } from 'antd';
 import { extractSlugFromPath } from '@/utils/repoSlug';
 import { FIELD_WIDTHS } from '../SettingsModal/panelPrimitives';
+import { RepoCleanupPolicyFields } from './RepoCleanupPolicyFields';
 
 export interface RepoFormFieldsProps {
   form: FormInstance;
+  canConfigureCleanup?: boolean;
   mode: 'create' | 'edit';
   repoMode: 'remote' | 'local';
   onRepoModeChange: (e: RadioChangeEvent) => void;
@@ -20,6 +22,7 @@ export interface RepoFormFieldsProps {
  */
 export const RepoFormFields: React.FC<RepoFormFieldsProps> = ({
   form,
+  canConfigureCleanup = false,
   mode,
   repoMode,
   onRepoModeChange,
@@ -126,6 +129,8 @@ export const RepoFormFields: React.FC<RepoFormFieldsProps> = ({
           <Input placeholder="main" />
         </Form.Item>
       )}
+
+      {isEditing && canConfigureCleanup && <RepoCleanupPolicyFields />}
 
       {!isEditing && (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>

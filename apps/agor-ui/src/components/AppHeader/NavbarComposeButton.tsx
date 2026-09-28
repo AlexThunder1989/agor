@@ -1,19 +1,5 @@
-import type {
-  AgenticToolName,
-  AgorClient,
-  Branch,
-  CodexApprovalPolicy,
-  CodexSandboxMode,
-  EffortLevel,
-  PermissionMode,
-  User,
-} from '@agor-live/client';
-import {
-  DEFAULT_AGENTIC_TOOL_NAME,
-  getDefaultPermissionMode,
-  getTeammateConfig,
-  mapToCodexPermissionConfig,
-} from '@agor-live/client';
+import type { AgenticToolName, AgorClient, Branch, User } from '@agor-live/client';
+import { DEFAULT_AGENTIC_TOOL_NAME, getTeammateConfig } from '@agor-live/client';
 import { BulbOutlined, CloseOutlined, EditOutlined, RobotOutlined } from '@ant-design/icons';
 import {
   Alert,
@@ -27,20 +13,21 @@ import {
   Typography,
   theme,
 } from 'antd';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { NewSessionConfig, SessionCreationResult } from '../../domain/sessionCreation';
 import { useAppNavigation } from '../../hooks/useAppNavigation';
 import { useIdentityGuardedAsync } from '../../hooks/useIdentityGuardedAsync';
 import { useLocalStorage } from '../../hooks/useLocalStorage';
+import { usePrimaryTeammate } from '../../hooks/usePrimaryTeammate';
 import { useAgorStore } from '../../store/agorStore';
 import { selectMcpServerById, selectUserById } from '../../store/selectors';
+import { resolveSessionMcpServerIds } from '../../utils/resolveQuickStartMcpServerIds';
 import { AgenticConfigChipRow } from '../AgenticConfigChipRow';
-import { buildConfigFromFormValues, getFormValuesFromConfig } from '../AgenticToolConfigForm';
-import { INLINE_AGENTIC_CONFIGURATION } from '../AgenticToolConfigurationPicker';
 import {
-  getUserAgenticToolDefault,
-  getUserDefaultConfigurationSource,
-} from '../AgenticToolConfigurationPicker/useAgenticConfigurationSources';
+  buildNewSessionConfig,
+  getNewSessionDefaultValues,
+  getNewSessionToolSwitchValues,
+} from '../AgenticToolConfigurationPicker/newSessionConfig';
 import { AgentSelectionGrid, AVAILABLE_AGENTS } from '../AgentSelectionGrid';
 import { resolveAvailableUserAgenticTool } from '../AgentSelectionGrid/availableAgents';
 import { AutocompleteTextarea } from '../AutocompleteTextarea';
@@ -105,9 +92,6 @@ export const NavbarComposeButton: React.FC<NavbarComposeButtonProps> = ({
   const agenticToolSettings = useAgorStore((state) => state.agenticToolSettingsByName);
 
   const [open, setOpen] = useState(false);
-  const [resolving, setResolving] = useState(false);
-  const [resolveFailed, setResolveFailed] = useState(false);
-  const [primaryBranch, setPrimaryBranch] = useState<Branch | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<string>(DEFAULT_AGENTIC_TOOL_NAME);
   const [prompt, setPrompt] = useState('');
   const [pendingSend, setPendingSend] = useState<SendMode | null>(null);
@@ -122,8 +106,6 @@ export const NavbarComposeButton: React.FC<NavbarComposeButtonProps> = ({
       scopeKey: `navbar:${currentUser?.user_id ?? 'anonymous'}`,
       showError: (msg) => message.error(msg),
     });
-  const mcpEditedRef = useRef(false);
-  const mcpInitializedBranchIdRef = useRef<string | null>(null);
 
   // One lightweight tinted-box treatment, shared by the tip and the no-primary banner.
   const bannerBox: React.CSSProperties = {
@@ -133,95 +115,37 @@ export const NavbarComposeButton: React.FC<NavbarComposeButtonProps> = ({
     borderRadius: token.borderRadius,
   };
 
-  const initializeMcpForBranch = useCallback(
-    (branch: Branch) => {
-      if (mcpInitializedBranchIdRef.current === branch.branch_id) return;
-      if (!mcpEditedRef.current) {
-        const branchMcpIds = branch.mcp_server_ids;
-        form.setFieldValue(
-          'mcpServerIds',
-          branchMcpIds && branchMcpIds.length > 0
-            ? branchMcpIds
-            : currentUser?.default_mcp_server_ids
-        );
-      }
-      mcpInitializedBranchIdRef.current = branch.branch_id;
-    },
-    [currentUser?.default_mcp_server_ids, form]
-  );
-
   // Resolve eagerly once the client exists (so the collapsed trigger shows the
   // teammate's emoji before first open) and re-resolve on open to catch changes
   // made elsewhere. The preference is optional; null asks for a target only
   // when the caller actually uses quick compose.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reopen and caller changes deliberately invalidate the caller-scoped preference
-  useEffect(() => {
-    if (!client) return;
-    let cancelled = false;
-    setResolving(true);
-    setResolveFailed(false);
-    client
-      .service('users')
-      .getPrimaryTeammate()
-      .then((branch) => {
-        if (!cancelled) {
-          setPrimaryBranch(branch);
-          setResolveFailed(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setResolveFailed(true);
-      })
-      .finally(() => {
-        if (!cancelled) setResolving(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, client, currentUser?.user_id, authenticationGeneration]);
+  const {
+    branch: primaryBranch,
+    setBranch: setPrimaryBranch,
+    resolving,
+    failed: resolveFailed,
+  } = usePrimaryTeammate(client, currentUser?.user_id, authenticationGeneration, open);
 
   // Seed the chip-row form from the user's default on open. Only keyed on `open`
   // so a live user refresh can't wipe edits made while the popover is up.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset only on open
   useEffect(() => {
     if (!open) return;
-    mcpEditedRef.current = false;
-    mcpInitializedBranchIdRef.current = null;
     const primaryTool = resolveAvailableUserAgenticTool(
       currentUser,
       agenticToolSettings,
       AVAILABLE_AGENTS
     );
     setSelectedAgent(primaryTool);
-    const agentDefaults = getUserAgenticToolDefault(currentUser, primaryTool).configuration;
     form.resetFields();
-    form.setFieldsValue({
-      agenticToolPresetId: getUserDefaultConfigurationSource(currentUser, primaryTool),
-      ...getFormValuesFromConfig(primaryTool, agentDefaults),
-      mcpServerIds: currentUser?.default_mcp_server_ids,
-    });
+    form.setFieldsValue(getNewSessionDefaultValues(currentUser, primaryTool));
   }, [open, form]);
 
-  // Initialize branch inheritance once. Later branch resolution must not wipe
-  // a value the caller already edited while choosing an assistant.
+  // Re-seed config defaults when the picked tool changes (same helper as NewSessionModal).
   useEffect(() => {
-    if (!open || !primaryBranch) return;
-    initializeMcpForBranch(primaryBranch);
-  }, [open, primaryBranch, initializeMcpForBranch]);
-
-  // Re-seed config defaults when the picked tool changes (mirrors NewSessionModal).
-  useEffect(() => {
-    const tool = selectedAgent as AgenticToolName;
-    const agentDefaults = getUserAgenticToolDefault(currentUser, tool).configuration;
-    form.setFieldsValue({
-      ...getFormValuesFromConfig(tool, agentDefaults),
-      agenticToolPresetId: getUserDefaultConfigurationSource(currentUser, tool),
-      ...(tool !== 'codex' && {
-        codexSandboxMode: undefined,
-        codexApprovalPolicy: undefined,
-        codexNetworkAccess: undefined,
-      }),
-    });
+    form.setFieldsValue(
+      getNewSessionToolSwitchValues(currentUser, selectedAgent as AgenticToolName)
+    );
   }, [selectedAgent, form, currentUser]);
 
   const closeAndReset = () => {
@@ -238,62 +162,15 @@ export const NavbarComposeButton: React.FC<NavbarComposeButtonProps> = ({
     );
   }, []);
 
-  const buildConfig = (branch: Branch): NewSessionConfig => {
-    const tool = selectedAgent as AgenticToolName;
-    const values = form.getFieldsValue(true);
-    const agentDefaults = getUserAgenticToolDefault(currentUser, tool).configuration;
-    const permissionMode: PermissionMode =
-      (values.permissionMode as PermissionMode | undefined) ??
-      agentDefaults?.permissionMode ??
-      getDefaultPermissionMode(tool);
-    const isInline = values.agenticToolPresetId === INLINE_AGENTIC_CONFIGURATION;
-    const inlineConfig = isInline
-      ? buildConfigFromFormValues(tool, {
-          modelConfig: values.modelConfig,
-          effort: values.effort,
-          permissionMode: values.permissionMode,
-        })
-      : undefined;
-    const fallbackMcpServerIds =
-      branch.mcp_server_ids && branch.mcp_server_ids.length > 0
-        ? branch.mcp_server_ids
-        : currentUser?.default_mcp_server_ids;
-
-    const config: NewSessionConfig = {
-      branch_id: branch.branch_id,
-      agent: tool,
-      agenticToolPresetId: isInline ? undefined : values.agenticToolPresetId,
+  const buildConfig = (branch: Branch): NewSessionConfig =>
+    buildNewSessionConfig({
+      user: currentUser,
+      tool: selectedAgent as AgenticToolName,
+      branch,
+      values: form.getFieldsValue(true),
       initialPrompt: prompt,
-      modelConfig: isInline
-        ? inlineConfig?.modelConfig
-        : (values.modelConfig ?? agentDefaults?.modelConfig),
-      effort: isInline
-        ? undefined
-        : ((values.effort as EffortLevel | undefined) ?? agentDefaults?.modelConfig?.effort),
-      mcpServerIds: values.mcpServerIds ?? fallbackMcpServerIds,
-      permissionMode,
-      attachmentFiles:
-        attachments.length > 0 ? attachments.map((attachment) => attachment.file) : undefined,
-    };
-
-    if (tool === 'codex') {
-      const codexDefaults = mapToCodexPermissionConfig(permissionMode);
-      config.codexSandboxMode =
-        (values.codexSandboxMode as CodexSandboxMode | undefined) ??
-        agentDefaults?.codexSandboxMode ??
-        codexDefaults.sandboxMode;
-      config.codexApprovalPolicy =
-        (values.codexApprovalPolicy as CodexApprovalPolicy | undefined) ??
-        agentDefaults?.codexApprovalPolicy ??
-        codexDefaults.approvalPolicy;
-      config.codexNetworkAccess =
-        values.codexNetworkAccess ??
-        agentDefaults?.codexNetworkAccess ??
-        codexDefaults.networkAccess;
-    }
-
-    return config;
-  };
+      attachmentFiles: attachments.map((attachment) => attachment.file),
+    });
 
   const doSend = async (mode: SendMode, branch: Branch) => {
     if (!onCreateSession) return;
@@ -345,7 +222,6 @@ export const NavbarComposeButton: React.FC<NavbarComposeButtonProps> = ({
   };
 
   const handlePicked = (branch: Branch) => {
-    initializeMcpForBranch(branch);
     setPrimaryBranch(branch);
     if (pendingSend) {
       const mode = pendingSend;
@@ -420,14 +296,7 @@ export const NavbarComposeButton: React.FC<NavbarComposeButtonProps> = ({
           description="Check the connection and reopen this composer to retry."
         />
       ) : (
-        <Form
-          form={form}
-          layout="vertical"
-          requiredMark={false}
-          onValuesChange={(changedValues) => {
-            if (Object.hasOwn(changedValues, 'mcpServerIds')) mcpEditedRef.current = true;
-          }}
-        >
+        <Form form={form} layout="vertical" requiredMark={false}>
           {!primaryBranch && (
             <div style={{ marginBottom: token.marginSM }}>
               <div style={{ ...bannerBox, marginBottom: token.marginSM }}>
@@ -455,6 +324,10 @@ export const NavbarComposeButton: React.FC<NavbarComposeButtonProps> = ({
             currentUser={currentUser}
             client={client}
             branchId={primaryBranch?.branch_id}
+            inheritedMcpServerIds={resolveSessionMcpServerIds(
+              currentUser?.default_mcp_server_ids,
+              primaryBranch
+            )}
             validateModelSelection
             showEffort
             collapsibleChips

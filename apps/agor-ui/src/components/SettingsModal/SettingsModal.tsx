@@ -526,6 +526,7 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
         return (
           <ReposTable
             repoById={repoById}
+            canConfigureCleanup={isAdmin}
             onCreate={onCreateRepo}
             onCreateLocal={onCreateLocalRepo}
             onUpdate={onUpdateRepo}
