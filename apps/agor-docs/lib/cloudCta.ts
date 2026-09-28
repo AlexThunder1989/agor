@@ -36,6 +36,14 @@ const UNKNOWN_STATUS_CTA: CloudCta = {
   variant: 'hubspot_modal',
 };
 
+/** Short labels for tight spots such as the navbar island. */
+export const COMPACT_CTA_LABELS: Record<CloudCtaVariant, string> = {
+  console: 'Try Cloud',
+  waitlist: 'Join waitlist',
+  capacity: 'Sign up',
+  hubspot_modal: 'Try Cloud',
+};
+
 const CTA_UTM_BASE = 'utm_source=agor.live&utm_medium=referral&utm_campaign=agor-cloud-cta';
 
 export function isTeamSignupStatus(value: unknown): value is TeamSignupStatus {
