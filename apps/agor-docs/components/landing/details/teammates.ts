@@ -2,6 +2,34 @@ import type { LandingDetail } from './types';
 
 export const teammatesDetails: LandingDetail[] = [
   {
+    id: 'shared-ownership',
+    navLabel: 'Shared ownership',
+    eyebrow: 'Owned by the team',
+    title: 'A teammate the whole {team} can [own]',
+    body: [
+      'The PR reviewer or reporting bot your team depends on shouldn’t live in one person’s private setup. In Agor, a teammate lives on a shared branch with its own board, so its instructions, memory, and history are there for the team to see.',
+      'Board and branch permissions decide who can see it, work with it, or manage it, and Knowledge namespaces have owners too. When someone is out, a colleague can pick up the work, read what happened, and keep improving it.',
+    ],
+    points: [
+      {
+        title: 'Visible by default',
+        body: 'Sessions keep the messages, tool calls, and model used, so anyone with access can see what the teammate did.',
+      },
+      {
+        title: 'Roles, not favors',
+        body: 'Viewer, Collaborator, and Manager roles on branches, and owners and admins on Knowledge namespaces.',
+      },
+      {
+        title: 'Improve it together',
+        body: 'Corrections go into its memory and runbooks, so what one person teaches carries forward for everyone.',
+      },
+    ],
+    links: [
+      { label: 'Why teams need modeled teammates', href: '/blog/claude-tag-vs-agor-assistants' },
+      { label: 'Permissions and isolation', href: '/guide/multiplayer-unix-isolation' },
+    ],
+  },
+  {
     id: 'memory',
     navLabel: 'Memory',
     eyebrow: 'Stop starting over',
@@ -29,72 +57,6 @@ export const teammatesDetails: LandingDetail[] = [
       { label: 'Knowledge', href: '/guide/knowledge' },
       { label: 'How teammates remember', href: '/guide/teammates' },
       { label: 'How Hodor keeps its memory', href: '/blog/meet-hodor' },
-    ],
-  },
-  {
-    id: 'onboarding',
-    navLabel: 'Onboarding',
-    eyebrow: 'Teach it by talking',
-    title: 'Onboard it like a new [teammate]',
-    body: [
-      'You don’t need a perfect system prompt on day one. A new teammate starts with a guided first conversation that works toward a real outcome for you, while it learns your goals, your context, and how you like to work.',
-      'From there, teaching is ordinary conversation. Correct a weak answer, point it at the right doc, or tighten how it reports, and it keeps what it learns in its memory for next time.',
-    ],
-    points: [
-      {
-        title: 'Start from a persona',
-        body: 'Pick a persona from the gallery or start blank, then give your teammate a name and its own board.',
-      },
-      {
-        title: 'Onboarding with a goal',
-        body: 'ONBOARDING.md steers early sessions toward something useful, not a configuration checklist.',
-      },
-      {
-        title: 'Keep correcting',
-        body: 'Review its output, correct it, and fold the fix into its runbook. That loop is how it gets better.',
-      },
-    ],
-    media: {
-      type: 'image',
-      src: '/screenshots/onboarding-name-teammate.png',
-      alt: 'Onboarding step titled Name your AI teammate, naming a teammate ReleaseBot, which gets its own board',
-    },
-    links: [
-      { label: 'Raising your first teammate', href: '/guide/first-teammate' },
-      { label: 'Raise a team helper agent', href: '/blog/raise-team-helper-agent' },
-    ],
-  },
-  {
-    id: 'skills-and-mcp',
-    navLabel: 'Skills & tools',
-    eyebrow: 'Teach skills, connect tools',
-    title: 'Teach it the {way} your team [works]',
-    body: [
-      'Package the steps your team repeats as skills: a release check, a review checklist, a weekly report. Skills live with the teammate, so the method is written down instead of living in one person’s head.',
-      'Then connect the systems it needs. Skills and MCP servers let a teammate work with tools like Slack, GitHub, Linear, and Datadog, and Agor’s own MCP server lets it create branches, spawn sessions, and organize boards.',
-    ],
-    points: [
-      {
-        title: 'Skills',
-        body: 'Repeatable methods for SaaS tools, command-line tools, and APIs, defined alongside the teammate.',
-      },
-      {
-        title: 'MCP Catalog',
-        body: 'Reviewed remote servers you connect once, with OAuth or a key, then attach to sessions.',
-      },
-      {
-        title: 'Agor’s own MCP',
-        body: 'Through Agor’s built-in MCP server, a teammate works with the same API you do: spawning sessions, moving branches, scheduling runs, all within your permissions.',
-      },
-    ],
-    media: {
-      type: 'image',
-      src: '/screenshots/onboarding-mcp-tools.png',
-      alt: 'Onboarding step Connect your tools via MCP, recommending Slack, HubSpot, Amplitude, and Figma',
-    },
-    links: [
-      { label: 'MCP servers and Catalog', href: '/guide/mcp-servers' },
-      { label: 'Agor MCP server', href: '/guide/internal-mcp' },
     ],
   },
   {
@@ -163,6 +125,72 @@ export const teammatesDetails: LandingDetail[] = [
     ],
   },
   {
+    id: 'skills-and-mcp',
+    navLabel: 'Skills & tools',
+    eyebrow: 'Teach skills, connect tools',
+    title: 'Teach it the {way} your team [works]',
+    body: [
+      'Package the steps your team repeats as skills: a release check, a review checklist, a weekly report. Skills live with the teammate, so the method is written down instead of living in one person’s head.',
+      'Then connect the systems it needs. Skills and MCP servers let a teammate work with tools like Slack, GitHub, Linear, and Datadog, and Agor’s own MCP server lets it create branches, spawn sessions, and organize boards.',
+    ],
+    points: [
+      {
+        title: 'Skills',
+        body: 'Repeatable methods for SaaS tools, command-line tools, and APIs, defined alongside the teammate.',
+      },
+      {
+        title: 'MCP Catalog',
+        body: 'Reviewed remote servers you connect once, with OAuth or a key, then attach to sessions.',
+      },
+      {
+        title: 'Agor’s own MCP',
+        body: 'Through Agor’s built-in MCP server, a teammate works with the same API you do: spawning sessions, moving branches, scheduling runs, all within your permissions.',
+      },
+    ],
+    media: {
+      type: 'image',
+      src: '/screenshots/onboarding-mcp-tools.png',
+      alt: 'Onboarding step Connect your tools via MCP, recommending Slack, HubSpot, Amplitude, and Figma',
+    },
+    links: [
+      { label: 'MCP servers and Catalog', href: '/guide/mcp-servers' },
+      { label: 'Agor MCP server', href: '/guide/internal-mcp' },
+    ],
+  },
+  {
+    id: 'onboarding',
+    navLabel: 'Onboarding',
+    eyebrow: 'Teach it by talking',
+    title: 'Onboard it like a new [teammate]',
+    body: [
+      'You don’t need a perfect system prompt on day one. A new teammate starts with a guided first conversation that works toward a real outcome for you, while it learns your goals, your context, and how you like to work.',
+      'From there, teaching is ordinary conversation. Correct a weak answer, point it at the right doc, or tighten how it reports, and it keeps what it learns in its memory for next time.',
+    ],
+    points: [
+      {
+        title: 'Start from a persona',
+        body: 'Pick a persona from the gallery or start blank, then give your teammate a name and its own board.',
+      },
+      {
+        title: 'Onboarding with a goal',
+        body: 'ONBOARDING.md steers early sessions toward something useful, not a configuration checklist.',
+      },
+      {
+        title: 'Keep correcting',
+        body: 'Review its output, correct it, and fold the fix into its runbook. That loop is how it gets better.',
+      },
+    ],
+    media: {
+      type: 'image',
+      src: '/screenshots/onboarding-name-teammate.png',
+      alt: 'Onboarding step titled Name your AI teammate, naming a teammate ReleaseBot, which gets its own board',
+    },
+    links: [
+      { label: 'Raising your first teammate', href: '/guide/first-teammate' },
+      { label: 'Raise a team helper agent', href: '/blog/raise-team-helper-agent' },
+    ],
+  },
+  {
     id: 'identity',
     navLabel: 'Boundaries',
     eyebrow: 'Identity and boundaries',
@@ -189,34 +217,6 @@ export const teammatesDetails: LandingDetail[] = [
       { label: 'Agent modeling 101', href: '/blog/agent-modeling-101' },
       { label: 'The agor-teammate framework', href: 'https://github.com/preset-io/agor-teammate' },
       { label: 'Agor and OpenClaw', href: '/blog/openclaw' },
-    ],
-  },
-  {
-    id: 'shared-ownership',
-    navLabel: 'Shared ownership',
-    eyebrow: 'Owned by the team',
-    title: 'A teammate the whole {team} can [own]',
-    body: [
-      'The PR reviewer or reporting bot your team depends on shouldn’t live in one person’s private setup. In Agor, a teammate lives on a shared branch with its own board, so its instructions, memory, and history are there for the team to see.',
-      'Board and branch permissions decide who can see it, work with it, or manage it, and Knowledge namespaces have owners too. When someone is out, a colleague can pick up the work, read what happened, and keep improving it.',
-    ],
-    points: [
-      {
-        title: 'Visible by default',
-        body: 'Sessions keep the messages, tool calls, and model used, so anyone with access can see what the teammate did.',
-      },
-      {
-        title: 'Roles, not favors',
-        body: 'Viewer, Collaborator, and Manager roles on branches, and owners and admins on Knowledge namespaces.',
-      },
-      {
-        title: 'Improve it together',
-        body: 'Corrections go into its memory and runbooks, so what one person teaches carries forward for everyone.',
-      },
-    ],
-    links: [
-      { label: 'Permissions and isolation', href: '/guide/multiplayer-unix-isolation' },
-      { label: 'Sessions', href: '/guide/sessions' },
     ],
   },
 ];

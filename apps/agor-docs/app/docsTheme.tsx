@@ -39,7 +39,16 @@ export const navbar = (
   </Navbar>
 );
 
-export const footer = <Footer>Open and self-hosted · BSL 1.1 © 2025 Preset, Inc.</Footer>;
+export const footer = (
+  <Footer>
+    <span>
+      Agor Community Edition is source-available under BSL 1.1 · © 2025 Preset, Inc.
+      <br />
+      Agor is not affiliated with or endorsed by the companies mentioned on this site. All product
+      names, logos, and brands are property of their respective owners.
+    </span>
+  </Footer>
+);
 
 export const sharedLayoutProps = {
   docsRepositoryBase: 'https://github.com/preset-io/agor/tree/main/apps/agor-docs',
