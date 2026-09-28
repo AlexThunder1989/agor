@@ -36,13 +36,16 @@ export function LandingPage() {
           ))}
         </nav>
       </LandingHero>
+      {/* Positioning order: Multiplayer AI, the board, teammates (with the
+          roster as their proof), then the builder and trust stories. Matches
+          the hero's hub links. */}
       <ProblemSection />
+      <MultiplayerSection sampler />
       <BoardSection sampler />
       <TeammatesSection sampler />
+      <RosterSection sampler />
       <CommandCenterSection sampler />
       <GovernanceSection sampler />
-      <MultiplayerSection sampler />
-      <RosterSection sampler />
     </LandingShell>
   );
 }

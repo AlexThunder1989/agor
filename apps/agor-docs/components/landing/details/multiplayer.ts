@@ -68,6 +68,39 @@ export const multiplayerDetails: LandingDetail[] = [
     links: [{ label: 'Multiplayer & social', href: '/guide/multiplayer-social' }],
   },
   {
+    id: 'shared-environments',
+    navLabel: 'Shared environments',
+    eyebrow: 'Shared dev environments',
+    title: 'One running build for the [whole team]',
+    body: [
+      'Every branch can run its own dev environment on its own ports, so five features can run side by side. Configure the environment once for the repo, and everyone on the team gets one-click start and stop on every branch.',
+      'Engineers, reviewers, PMs, and QA open the same running build instead of each spinning up their own to see it.',
+    ],
+    points: [
+      {
+        title: 'Configured once, in the repo',
+        body: 'An .agor.yml file describes the environment, so it’s reviewed and shared like any other code.',
+      },
+      {
+        title: 'No port fights',
+        body: 'Ports are derived from each branch, so parallel branches never collide.',
+      },
+      {
+        title: 'Shared terminals',
+        body: 'When two people open the same branch’s terminal, they see each other’s keystrokes live.',
+      },
+    ],
+    media: {
+      type: 'image',
+      src: '/screenshots/branch-anatomy.png',
+      alt: 'A branch card with its pull request, a running environment indicator, and a coordinator session with parallel review sessions from Codex, Claude, and Gemini',
+    },
+    links: [
+      { label: 'Environments', href: '/guide/environment-configuration' },
+      { label: 'Branches', href: '/guide/branches' },
+    ],
+  },
+  {
     id: 'shared-terminals',
     navLabel: 'Shared terminals',
     eyebrow: 'Hands on the same keyboard',
@@ -112,39 +145,6 @@ export const multiplayerDetails: LandingDetail[] = [
       alt: 'A teammate’s comment pinned to a branch card on the board, asking a question about the facepile while Gemini and Codex sessions run on that branch',
     },
     links: [{ label: 'Comments guide', href: '/guide/multiplayer-social' }],
-  },
-  {
-    id: 'shared-environments',
-    navLabel: 'Shared environments',
-    eyebrow: 'Shared dev environments',
-    title: 'One running build for the [whole team]',
-    body: [
-      'Every branch can run its own dev environment on its own ports, so five features can run side by side. Configure the environment once for the repo, and everyone on the team gets one-click start and stop on every branch.',
-      'Engineers, reviewers, PMs, and QA open the same running build instead of each spinning up their own to see it.',
-    ],
-    points: [
-      {
-        title: 'Configured once, in the repo',
-        body: 'An .agor.yml file describes the environment, so it’s reviewed and shared like any other code.',
-      },
-      {
-        title: 'No port fights',
-        body: 'Ports are derived from each branch, so parallel branches never collide.',
-      },
-      {
-        title: 'Shared terminals',
-        body: 'When two people open the same branch’s terminal, they see each other’s keystrokes live.',
-      },
-    ],
-    media: {
-      type: 'image',
-      src: '/screenshots/branch-anatomy.png',
-      alt: 'A branch card with its pull request, a running environment indicator, and a coordinator session with parallel review sessions from Codex, Claude, and Gemini',
-    },
-    links: [
-      { label: 'Environments', href: '/guide/environment-configuration' },
-      { label: 'Branches', href: '/guide/branches' },
-    ],
   },
   {
     id: 'any-agent',

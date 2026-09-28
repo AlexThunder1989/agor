@@ -63,6 +63,32 @@ export const governanceDetails: LandingDetail[] = [
     ],
   },
   {
+    id: 'model-choice',
+    navLabel: 'Model choice',
+    eyebrow: 'No frontier lock-in',
+    title: 'Run {any agent}, and switch when you need to',
+    body: [
+      'Claude Code, Codex, Gemini, GitHub Copilot, and OpenCode run side by side on the same board, with Cursor in beta. Pick the agent and model per session, and change model or reasoning effort mid-session where the agent supports it.',
+      'Your workflows stay on your board, not inside one provider’s product, so trying something new does not mean starting over.',
+    ],
+    points: [
+      {
+        title: 'Your keys, your bill',
+        body: 'Bring your own provider keys or subscriptions. Per-user keys take precedence over shared ones and are encrypted at rest.',
+      },
+      {
+        title: 'Compare on the same work',
+        body: 'Run several agents against one branch and review their results together.',
+      },
+    ],
+    media: {
+      type: 'image',
+      src: '/security_audit.png',
+      alt: 'Branch card with three sessions running the same security audit in Claude, Codex, and Gemini',
+    },
+    links: [{ label: 'Agent feature comparison', href: '/guide/sdk-comparison' }],
+  },
+  {
     id: 'isolation',
     navLabel: 'Isolation',
     eyebrow: 'Where agent code can reach',
@@ -91,32 +117,6 @@ export const governanceDetails: LandingDetail[] = [
         href: '/blog/why-agor-is-leaving-unix-impersonation-behind',
       },
     ],
-  },
-  {
-    id: 'model-choice',
-    navLabel: 'Model choice',
-    eyebrow: 'No frontier lock-in',
-    title: 'Run {any agent}, and switch when you need to',
-    body: [
-      'Claude Code, Codex, Gemini, GitHub Copilot, and OpenCode run side by side on the same board, with Cursor in beta. Pick the agent and model per session, and change model or reasoning effort mid-session where the agent supports it.',
-      'Your workflows stay on your board, not inside one provider’s product, so trying something new does not mean starting over.',
-    ],
-    points: [
-      {
-        title: 'Your keys, your bill',
-        body: 'Bring your own provider keys or subscriptions. Per-user keys take precedence over shared ones and are encrypted at rest.',
-      },
-      {
-        title: 'Compare on the same work',
-        body: 'Run several agents against one branch and review their results together.',
-      },
-    ],
-    media: {
-      type: 'image',
-      src: '/security_audit.png',
-      alt: 'Branch card with three sessions running the same security audit in Claude, Codex, and Gemini',
-    },
-    links: [{ label: 'Agent feature comparison', href: '/guide/sdk-comparison' }],
   },
   {
     id: 'self-hosted',

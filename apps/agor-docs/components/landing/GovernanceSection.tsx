@@ -11,8 +11,8 @@ import type { LandingPageId } from './pages';
 import { SectionHeroActions } from './SectionHeroActions';
 
 // The "Compound Amplifying Bus": six trust items on a vertical mint spine —
-// the deliberate counterpoint to the six amber problem cards piled up in the
-// section above (same count, calm straight line). These are the supporting
+// the deliberate counterpoint to the six amber problem cards piled up near the
+// top of the home page (same count, calm straight line). These are the supporting
 // trust layer: what's running, what it costs, who can do what. Ripple ring sizes
 // and delays are static literals (SSR-safe, no randomness): ring count and
 // size grow toward the bottom of the line — the "amplifying" effect. Delays

@@ -2,6 +2,42 @@ import type { LandingDetail } from './types';
 
 export const commandCenterDetails: LandingDetail[] = [
   {
+    id: 'parallel-agents',
+    navLabel: 'Parallel agents',
+    eyebrow: 'Run many at once',
+    title: 'Fan out the work, then [review it together]',
+    body: [
+      'Split a job across several agents and watch each result come back to the parent. Have one agent do the work and a different one review it, whether that is a code change, a contract redline, or a sales deck, so the reviewer is not defending its own choices.',
+      'Because every child is its own visible session, the review is something your team can open, question, and discuss, not a summary you have to take on faith.',
+    ],
+    points: [
+      {
+        title: 'Parallel test generation',
+        body: 'One parent spawns a child per file and collects the callbacks as they land.',
+      },
+      {
+        title: 'Cross-agent code review',
+        body: 'A second agent reads the change with fresh eyes and reports findings back with file and line.',
+      },
+      {
+        title: 'Research and collateral in parallel',
+        body: 'One child per competitor, account, or draft, each filing its findings to Knowledge, compared side by side on the board.',
+      },
+    ],
+    media: {
+      type: 'image',
+      src: '/screenshots/parallel-board-5-sessions.png',
+      alt: 'Branch card with a Claude Code parent session and five Codex child sessions writing unit tests in parallel',
+    },
+    links: [
+      { label: 'Real orchestration patterns', href: '/guide/sessions' },
+      {
+        label: 'Meet Wendy, who fans out research',
+        href: '/blog/meet-wendy-preset-ai-competitive-intelligence-analyst',
+      },
+    ],
+  },
+  {
     id: 'zones-and-prompts',
     navLabel: 'Zones & prompts',
     eyebrow: 'Organize the work',
@@ -65,42 +101,6 @@ export const commandCenterDetails: LandingDetail[] = [
     links: [{ label: 'Sessions & trees', href: '/guide/sessions' }],
   },
   {
-    id: 'parallel-agents',
-    navLabel: 'Parallel agents',
-    eyebrow: 'Run many at once',
-    title: 'Fan out the work, then [review it together]',
-    body: [
-      'Split a job across several agents and watch each result come back to the parent. Have one agent do the work and a different one review it, whether that is a code change, a contract redline, or a sales deck, so the reviewer is not defending its own choices.',
-      'Because every child is its own visible session, the review is something your team can open, question, and discuss, not a summary you have to take on faith.',
-    ],
-    points: [
-      {
-        title: 'Parallel test generation',
-        body: 'One parent spawns a child per file and collects the callbacks as they land.',
-      },
-      {
-        title: 'Cross-agent code review',
-        body: 'A second agent reads the change with fresh eyes and reports findings back with file and line.',
-      },
-      {
-        title: 'Research and collateral in parallel',
-        body: 'One child per competitor, account, or draft, each filing its findings to Knowledge, compared side by side on the board.',
-      },
-    ],
-    media: {
-      type: 'image',
-      src: '/screenshots/parallel-board-5-sessions.png',
-      alt: 'Branch card with a Claude Code parent session and five Codex child sessions writing unit tests in parallel',
-    },
-    links: [
-      { label: 'Real orchestration patterns', href: '/guide/sessions' },
-      {
-        label: 'Meet Wendy, who fans out research',
-        href: '/blog/meet-wendy-preset-ai-competitive-intelligence-analyst',
-      },
-    ],
-  },
-  {
     id: 'knowledge',
     navLabel: 'Knowledge',
     eyebrow: 'Keep context close',
@@ -129,39 +129,6 @@ export const commandCenterDetails: LandingDetail[] = [
       alt: 'Agor Knowledge graph view showing connected documents in a product and strategy space',
     },
     links: [{ label: 'Knowledge', href: '/guide/knowledge' }],
-  },
-  {
-    id: 'mcp',
-    navLabel: 'MCP',
-    eyebrow: 'Connect the tools',
-    title: 'Agents drive Agor through the [same API] as you',
-    body: [
-      'Every session gets its own scoped credentials for Agor’s built-in MCP server, so an agent knows which branch and board it is on and can act there: spawn peers, move cards, start an environment, file knowledge, or report back.',
-      'For the rest of your stack, attach external MCP servers to a session, either from the reviewed Catalog or from servers you configure yourself.',
-    ],
-    points: [
-      {
-        title: 'No separate server',
-        body: 'MCP is part of the Agor daemon. In-Agor agents need no setup.',
-      },
-      {
-        title: 'Same events as the UI',
-        body: 'When an agent moves a card, everyone watching the board sees it move.',
-      },
-      {
-        title: 'External servers per session',
-        body: 'Give each session the tools its job needs.',
-      },
-    ],
-    media: {
-      type: 'image',
-      src: '/screenshots/mcp_environment.png',
-      alt: 'Agor session where the agent uses Agor MCP tools to look up its session and start the branch environment',
-    },
-    links: [
-      { label: 'Agor MCP server', href: '/guide/internal-mcp' },
-      { label: 'External MCP servers', href: '/guide/mcp-servers' },
-    ],
   },
   {
     id: 'environments',
@@ -217,6 +184,39 @@ export const commandCenterDetails: LandingDetail[] = [
       alt: 'Agor board with live interactive artifacts that agents built directly on the canvas',
     },
     links: [{ label: 'Artifacts', href: '/guide/artifacts' }],
+  },
+  {
+    id: 'mcp',
+    navLabel: 'MCP',
+    eyebrow: 'Connect the tools',
+    title: 'Agents drive Agor through the [same API] as you',
+    body: [
+      'Every session gets its own scoped credentials for Agor’s built-in MCP server, so an agent knows which branch and board it is on and can act there: spawn peers, move cards, start an environment, file knowledge, or report back.',
+      'For the rest of your stack, attach external MCP servers to a session, either from the reviewed Catalog or from servers you configure yourself.',
+    ],
+    points: [
+      {
+        title: 'No separate server',
+        body: 'MCP is part of the Agor daemon. In-Agor agents need no setup.',
+      },
+      {
+        title: 'Same events as the UI',
+        body: 'When an agent moves a card, everyone watching the board sees it move.',
+      },
+      {
+        title: 'External servers per session',
+        body: 'Give each session the tools its job needs.',
+      },
+    ],
+    media: {
+      type: 'image',
+      src: '/screenshots/mcp_environment.png',
+      alt: 'Agor session where the agent uses Agor MCP tools to look up its session and start the branch environment',
+    },
+    links: [
+      { label: 'Agor MCP server', href: '/guide/internal-mcp' },
+      { label: 'External MCP servers', href: '/guide/mcp-servers' },
+    ],
   },
   {
     id: 'context-and-cost',

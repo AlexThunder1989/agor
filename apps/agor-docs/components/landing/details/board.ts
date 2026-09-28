@@ -70,6 +70,39 @@ export const boardDetails: LandingDetail[] = [
     ],
   },
   {
+    id: 'attention',
+    navLabel: 'What needs you',
+    eyebrow: 'Stay sane with many agents',
+    title: 'Know which agent [needs you]',
+    body: [
+      'Running many agents creates coordination work of its own. Which session is blocked? Which one finished? The board answers at a glance: a branch card glows when a session is ready for input or a long run has finished.',
+      'You don’t have to watch the board to keep up. Favicon status dots and completion chimes tell you when something needs you from another tab.',
+    ],
+    points: [
+      {
+        title: 'Attention glow',
+        body: 'Cards pulse when a session waits for input or a spawned child reports back.',
+      },
+      {
+        title: 'Status in the tab',
+        body: 'The favicon shows whether anything is running or waiting, even when Agor is in the background.',
+      },
+      {
+        title: 'Cost per prompt',
+        body: 'Token counts and estimated cost show on every message and roll up per session.',
+      },
+    ],
+    media: {
+      type: 'image',
+      src: '/screenshots/branch-highlighted.png',
+      alt: 'Two branch cards on an Agor board, one glowing teal because its session needs attention.',
+    },
+    links: [
+      { label: 'Attention pulse', href: '/guide/multiplayer-social' },
+      { label: 'Status indicators', href: '/guide/rich-chat-ux' },
+    ],
+  },
+  {
     id: 'sessions',
     navLabel: 'Agent sessions',
     eyebrow: 'Follow the agent',
@@ -105,65 +138,6 @@ export const boardDetails: LandingDetail[] = [
     ],
   },
   {
-    id: 'attention',
-    navLabel: 'What needs you',
-    eyebrow: 'Stay sane with many agents',
-    title: 'Know which agent [needs you]',
-    body: [
-      'Running many agents creates coordination work of its own. Which session is blocked? Which one finished? The board answers at a glance: a branch card glows when a session is ready for input or a long run has finished.',
-      'You don’t have to watch the board to keep up. Favicon status dots and completion chimes tell you when something needs you from another tab.',
-    ],
-    points: [
-      {
-        title: 'Attention glow',
-        body: 'Cards pulse when a session waits for input or a spawned child reports back.',
-      },
-      {
-        title: 'Status in the tab',
-        body: 'The favicon shows whether anything is running or waiting, even when Agor is in the background.',
-      },
-      {
-        title: 'Cost per prompt',
-        body: 'Token counts and estimated cost show on every message and roll up per session.',
-      },
-    ],
-    media: {
-      type: 'image',
-      src: '/screenshots/branch-highlighted.png',
-      alt: 'Two branch cards on an Agor board, one glowing teal because its session needs attention.',
-    },
-    links: [
-      { label: 'Attention pulse', href: '/guide/multiplayer-social' },
-      { label: 'Status indicators', href: '/guide/rich-chat-ux' },
-    ],
-  },
-  {
-    id: 'comments',
-    navLabel: 'Comments',
-    eyebrow: 'Shape it together',
-    title: 'Discuss the work [where it lives]',
-    body: [
-      'Agent conversations scroll away. Comments stay put. Pin a threaded comment to a board, a zone, a branch, or a session, right where the question comes up.',
-      'Mention a colleague, reply in a thread, and link straight to the session in question. The next person to open that branch finds the discussion next to the work instead of digging through a transcript.',
-    ],
-    points: [
-      {
-        title: 'Scoped threads',
-        body: 'Board, zone, branch, and session comments, organized by scope in one panel.',
-      },
-      {
-        title: '@mentions',
-        body: 'Pull a teammate into the exact spot that needs their eyes.',
-      },
-    ],
-    media: {
-      type: 'image',
-      src: '/screenshots/marketing/agor-marketing-social-comment-context.png',
-      alt: 'A comment from a teammate attached to a branch card on an Agor board, asking a question about the work in progress.',
-    },
-    links: [{ label: 'Spatial comments', href: '/guide/multiplayer-social' }],
-  },
-  {
     id: 'gateway',
     navLabel: 'Slack & more',
     eyebrow: 'No board required',
@@ -194,5 +168,31 @@ export const boardDetails: LandingDetail[] = [
       alt: 'A Slack thread where someone mentions an Agor teammate and the agent replies with a link to its session.',
     },
     links: [{ label: 'Message gateway', href: '/guide/message-gateway' }],
+  },
+  {
+    id: 'comments',
+    navLabel: 'Comments',
+    eyebrow: 'Shape it together',
+    title: 'Discuss the work [where it lives]',
+    body: [
+      'Agent conversations scroll away. Comments stay put. Pin a threaded comment to a board, a zone, a branch, or a session, right where the question comes up.',
+      'Mention a colleague, reply in a thread, and link straight to the session in question. The next person to open that branch finds the discussion next to the work instead of digging through a transcript.',
+    ],
+    points: [
+      {
+        title: 'Scoped threads',
+        body: 'Board, zone, branch, and session comments, organized by scope in one panel.',
+      },
+      {
+        title: '@mentions',
+        body: 'Pull a teammate into the exact spot that needs their eyes.',
+      },
+    ],
+    media: {
+      type: 'image',
+      src: '/screenshots/marketing/agor-marketing-social-comment-context.png',
+      alt: 'A comment from a teammate attached to a branch card on an Agor board, asking a question about the work in progress.',
+    },
+    links: [{ label: 'Spatial comments', href: '/guide/multiplayer-social' }],
   },
 ];
