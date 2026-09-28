@@ -5,6 +5,8 @@ const landingPageMeta = {
   display: 'hidden' as const,
   theme: {
     layout: 'full' as const,
+    // The page renders its own footer (LandingShell); the docs footer would stack under it.
+    footer: false,
   },
 };
 
@@ -27,6 +29,8 @@ export default {
     display: 'hidden',
     theme: {
       layout: 'full',
+      // AgorCloudLanding renders its own footer.
+      footer: false,
     },
   },
   // Contact / "Talk to us" landing page. A standalone destination that renders

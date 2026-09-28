@@ -3,13 +3,16 @@
 import {
   Activity,
   BookOpen,
+  Bot,
   Boxes,
   ChevronLeft,
   ChevronRight,
   Cloud,
+  Command,
   Eye,
   GitBranch,
   KeyRound,
+  LayoutDashboard,
   type LucideIcon,
   RefreshCw,
   ScrollText,
@@ -28,6 +31,8 @@ import Aurora from './Aurora/Aurora';
 import { CloudCtaLink } from './CloudCtaLink';
 import { HubSpotMeetingModal } from './HubSpotMeetingModal';
 import Lightfall from './Lightfall/Lightfall';
+import { LandingLink } from './landing/LandingLink';
+import { LANDING_PAGES, type LandingPageId } from './landing/pages';
 
 const basePath = getBasePath();
 
@@ -194,6 +199,14 @@ const security: Array<{ title: string; body: string }> = [
   },
 ];
 
+const PILLAR_ICONS: Record<LandingPageId, LucideIcon> = {
+  multiplayer: Users,
+  board: LayoutDashboard,
+  teammates: Bot,
+  'command-center': Command,
+  governance: ShieldCheck,
+};
+
 export function AgorCloudLanding() {
   const shellRef = useRef<HTMLElement>(null);
   const [isDemoOpen, setIsDemoOpen] = useState(false);
@@ -298,9 +311,9 @@ export function AgorCloudLanding() {
             Fully managed Agor for your <span className={styles.headingStrong}>whole team</span>
           </h1>
           <p className={styles.heroSub}>
-            Agor is yours to run. Agor Cloud is for teams who’d rather not. We operate a hardened,
-            always-current Agor for you, with scaling, isolation, governance, and observability
-            handled, so your team can focus on working together, not the platform underneath it.
+            Agor Community Edition is yours to run. Agor Cloud is for teams who’d rather spend that
+            time working together. We operate a hardened, always-current Agor for you, with scaling,
+            isolation, governance, and observability handled.
           </p>
           <div className={styles.heroActions}>
             <CloudCtaLink placement="cloud-page-hero" className={styles.primaryButton} />
@@ -317,6 +330,39 @@ export function AgorCloudLanding() {
             </Link>
           </div>
           <p className={styles.metaLine}>Built and operated by the team behind Preset Cloud.</p>
+        </div>
+      </section>
+
+      {/* --- What your team gets: the product pillars, each linking to its
+          landing page (hub-and-spoke, positioning order). --- */}
+      <section className={styles.section} data-reveal>
+        <div className={styles.sectionHead}>
+          <span className={styles.eyebrow}>What your team gets</span>
+          <h2>
+            All of Agor, <span className={styles.headingAccent}>run for you</span>
+          </h2>
+        </div>
+        <div className={`${styles.grid} ${styles.pillarGrid}`}>
+          {LANDING_PAGES.map((page) => {
+            const Icon = PILLAR_ICONS[page.id];
+            return (
+              <LandingLink
+                key={page.id}
+                page={page.id}
+                placement="cloud-page-pillars"
+                className={`${styles.card} ${styles.pillarCard}`}
+              >
+                <span className={styles.cardIcon}>
+                  <Icon size={20} aria-hidden="true" />
+                </span>
+                <h3>{page.navLabel}</h3>
+                <p>{page.tagline}</p>
+                <span className={styles.pillarMore}>
+                  Explore <span aria-hidden="true">→</span>
+                </span>
+              </LandingLink>
+            );
+          })}
         </div>
       </section>
 

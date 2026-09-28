@@ -5,6 +5,8 @@ export interface LandingPageEntry {
   href: `/${string}`;
   /** Home-hero hub button and "learn more" link text. */
   navLabel: string;
+  /** One-line promise, reused on cards that point at the page (e.g. /cloud). */
+  tagline: string;
   docs: Array<{ label: string; href: string }>;
 }
 
@@ -16,6 +18,7 @@ export const LANDING_PAGES: LandingPageEntry[] = [
     id: 'multiplayer',
     href: '/multiplayer',
     navLabel: 'Multiplayer AI',
+    tagline: 'Bring your team and agents together.',
     docs: [
       { label: 'Multiplayer & social features', href: '/guide/multiplayer-social' },
       { label: 'Branches & shared environments', href: '/guide/branches' },
@@ -26,6 +29,7 @@ export const LANDING_PAGES: LandingPageEntry[] = [
     id: 'board',
     href: '/board',
     navLabel: 'Live board',
+    tagline: 'See the work and shape it together.',
     docs: [
       { label: 'Boards & zones', href: '/guide/boards' },
       { label: 'Sessions & trees', href: '/guide/sessions' },
@@ -36,6 +40,7 @@ export const LANDING_PAGES: LandingPageEntry[] = [
     id: 'teammates',
     href: '/teammates',
     navLabel: 'AI teammates',
+    tagline: 'Raise AI teammates your team can teach.',
     docs: [
       { label: 'Teammates', href: '/guide/teammates' },
       { label: 'Knowledge', href: '/guide/knowledge' },
@@ -47,6 +52,7 @@ export const LANDING_PAGES: LandingPageEntry[] = [
     id: 'command-center',
     href: '/command-center',
     navLabel: 'Command center',
+    tagline: 'Stay sane with a lot of agents.',
     docs: [
       { label: 'Feature map', href: '/guide/features-overview' },
       { label: 'Artifacts', href: '/guide/artifacts' },
@@ -58,6 +64,7 @@ export const LANDING_PAGES: LandingPageEntry[] = [
     id: 'governance',
     href: '/governance',
     navLabel: 'Governance',
+    tagline: 'Know what’s running and who can do what.',
     docs: [
       { label: 'Security', href: '/security' },
       { label: 'RBAC & isolation', href: '/guide/multiplayer-unix-isolation' },
