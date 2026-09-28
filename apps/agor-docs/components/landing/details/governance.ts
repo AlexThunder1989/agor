@@ -136,6 +136,10 @@ export const governanceDetails: LandingDetail[] = [
         title: 'Per-person credentials',
         body: 'API keys and environment variables are stored per user, and reads expose only names and presence, never values.',
       },
+      {
+        title: 'Your analytics, your pipeline',
+        body: 'Off by default. Turn it on and Agor sends curated lifecycle events to the analytics destination you choose, filtered how you like.',
+      },
     ],
     media: {
       type: 'image',
@@ -145,6 +149,7 @@ export const governanceDetails: LandingDetail[] = [
     links: [
       { label: 'Install Community Edition', href: '/guide/getting-started' },
       { label: 'Deployment guidance', href: '/security' },
+      { label: 'Analytics configuration', href: '/guide/config-yaml' },
       { label: 'Containerized execution', href: '/guide/containerized-execution' },
     ],
   },
