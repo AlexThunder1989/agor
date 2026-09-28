@@ -1,3 +1,4 @@
+import { AI_ENABLEMENT_POST_URL } from '../../../lib/links';
 import type { LandingDetail } from './types';
 
 export const multiplayerDetails: LandingDetail[] = [
@@ -180,7 +181,8 @@ export const multiplayerDetails: LandingDetail[] = [
     eyebrow: 'For AI enablers',
     title: 'Turn one person’s wins into [team] practice',
     body: [
-      'Handing out AI accounts doesn’t change how a team works. If you’re the person already getting good results, Agor gives you a way to make that work visible, bring colleagues into it, and turn it into workflows the rest of the team can use and improve.',
+      'Handing out AI accounts doesn’t change how a team works. If you’re the person already getting great results, Agor gives you a way to make that work visible, bring colleagues into it, and turn it into workflows the rest of the team can use and improve.',
+      'That person is your AI enabler. At Preset we call the role the AI Enablement Engineer, and Agor is built to be their workbench.',
       'You don’t need the whole team on day one. Start on your own, then invite people in as the work becomes worth sharing.',
     ],
     points: [
@@ -198,6 +200,7 @@ export const multiplayerDetails: LandingDetail[] = [
       },
     ],
     links: [
+      { label: 'What is an AI Enablement Engineer?', href: AI_ENABLEMENT_POST_URL },
       { label: 'Get started', href: '/guide/getting-started' },
       { label: 'Your first teammate', href: '/guide/first-teammate' },
       { label: 'AI teammates', href: '/teammates' },

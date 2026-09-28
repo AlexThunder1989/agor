@@ -75,7 +75,13 @@ export function DetailSection({ detail }: { detail: LandingDetail }) {
         {detail.links?.length ? (
           <p className={styles.detailLinks}>
             {detail.links.map((link) => (
-              <Link key={link.href} href={link.href}>
+              <Link
+                key={link.href}
+                href={link.href}
+                {...(link.href.startsWith('http')
+                  ? { target: '_blank', rel: 'noopener noreferrer' }
+                  : {})}
+              >
                 {link.label} <span aria-hidden="true">→</span>
               </Link>
             ))}
