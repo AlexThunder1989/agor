@@ -2996,6 +2996,16 @@ export class BranchesService extends DrizzleService<Branch, Partial<Branch>, Bra
       };
     }
 
+    const sourceSync = branch.environment_instance?.source_sync;
+    if (
+      currentStatus === 'running' &&
+      sourceSync &&
+      sourceSync.desired_revision !== sourceSync.applied_revision
+    ) {
+      await this.reconcileEnvironmentSync(id, params);
+      branch = await this.withTenantDatabase(params, loadCurrent);
+    }
+
     // Active observations leave the database while doing HTTP. A durable
     // one-observation claim plus lifecycle generation fences the result from a
     // concurrent stop, archive, delete, URL change, daemon, or replica.
