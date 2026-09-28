@@ -178,7 +178,8 @@ export class EnvironmentHealthRepository {
         const now = await this.mutationNow(txDb, input.branchId);
         const syncAttempt = environment?.source_sync?.active_attempt;
         if (
-          syncAttempt?.environment_generation === row.environment_generation &&
+          syncAttempt &&
+          syncAttempt.environment_generation === row.environment_generation &&
           Date.parse(syncAttempt.lease_expires_at) > now.getTime()
         ) {
           return { outcome: 'not_due', next_observation_at: syncAttempt.lease_expires_at };
@@ -370,7 +371,8 @@ export class EnvironmentHealthRepository {
         const syncAttempt = activeEnvironment.source_sync?.active_attempt;
         if (
           input.observation.status === 'unhealthy' &&
-          syncAttempt?.environment_generation === row.environment_generation &&
+          syncAttempt &&
+          syncAttempt.environment_generation === row.environment_generation &&
           Date.parse(syncAttempt.lease_expires_at) > now.getTime()
         ) {
           // Sync can restart the app. Do not turn expected downtime into a

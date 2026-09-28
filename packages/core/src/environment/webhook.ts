@@ -226,6 +226,8 @@ function commandTypeLabel(commandType: ManagedEnvCommandType): string {
       return 'start';
     case 'stop':
       return 'stop';
+    case 'sync':
+      return 'sync';
     case 'nuke':
       return 'nuke';
     case 'logs':
