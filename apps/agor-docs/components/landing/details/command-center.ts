@@ -8,7 +8,7 @@ export const commandCenterDetails: LandingDetail[] = [
     title: 'Give every agent a [place], and every step a {prompt}',
     body: [
       'More agents means more coordination: which one is blocked, which one needs you, which review never started. On an Agor board every branch has a spot, so the state of the work is something you can see at a glance instead of reconstruct.',
-      'Zones turn that layout into a workflow. Draw a "Code review" or "Needs tests" zone once, give it a templated prompt, and dropping a branch in fills in the issue, PR, and environment details and sends it to an agent. The next person on your team gets the same process for free.',
+      'Zones turn that layout into a workflow. Draw a "Code review", "Contract review", or "Weekly digest" zone once, give it a templated prompt, and dropping a branch in fills in its details, like the issue, PR, or environment, and sends it to an agent. Everyone working on the board uses the same process.',
     ],
     points: [
       {
@@ -67,7 +67,7 @@ export const commandCenterDetails: LandingDetail[] = [
     eyebrow: 'Run many at once',
     title: 'Fan out the work, then [review it together]',
     body: [
-      'Split a job across several agents and watch each result come back to the parent. Have one agent write the code and a different one review it, so the reviewer is not defending its own choices.',
+      'Split a job across several agents and watch each result come back to the parent. Have one agent do the work and a different one review it, whether that is a code change, a contract redline, or a sales deck, so the reviewer is not defending its own choices.',
       'Because every child is its own visible session, the review is something your team can open, question, and discuss, not a summary you have to take on faith.',
     ],
     points: [
@@ -78,6 +78,10 @@ export const commandCenterDetails: LandingDetail[] = [
       {
         title: 'Cross-agent code review',
         body: 'A second agent reads the change with fresh eyes and reports findings back with file and line.',
+      },
+      {
+        title: 'Research and collateral in parallel',
+        body: 'One child per competitor, account, or draft, each filing its findings to Knowledge, compared side by side on the board.',
       },
     ],
     media: {
