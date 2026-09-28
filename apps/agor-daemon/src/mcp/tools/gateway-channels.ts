@@ -80,6 +80,7 @@ import { getDaemonUrl, requestExecutor } from '../../utils/spawn-executor.js';
 import { readTeamsGatewayDiagnostics } from '../../utils/teams-gateway-diagnostics.js';
 import { getUploadLimits } from '../../utils/upload.js';
 import { getUploadStagingStore } from '../../utils/upload-staging.js';
+import { resolveMcpCallerSandboxMounts } from '../caller-sandbox-mounts.js';
 import {
   mcpLimit,
   mcpOptionalId,
@@ -2491,6 +2492,7 @@ export function registerGatewayChannelTools(server: McpServer, ctx: McpContext):
             ctx.app.get('config').execution?.allow_superadmin === true
           )
         );
+        const sandboxMounts = await resolveMcpCallerSandboxMounts(ctx, branch);
         const result = await requestExecutor(
           {
             command: 'branch.gateway.slack-file-upload',
@@ -2512,6 +2514,7 @@ export function registerGatewayChannelTools(server: McpServer, ctx: McpContext):
               maxBytes: getUploadLimits().maxFileBytes,
               cwd: branch.path,
               principalBranchAccess: branchFsAccess,
+              ...sandboxMounts,
             },
           },
           {
