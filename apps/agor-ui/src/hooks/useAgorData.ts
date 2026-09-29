@@ -16,6 +16,7 @@
  * `../store/agorHydration`.
  */
 
+import type { BoardEntityObject } from '@agor/core/types';
 import type {
   AgorClient,
   Board,
@@ -61,6 +62,7 @@ import {
   tombstoneSession,
   untombstoneSession,
 } from '../store/realtimeBatch';
+import { isTransientConnectionError } from '../utils/authErrors';
 import { createInitialLoadDebugTimer, isInitialLoadDebugEnabled } from '../utils/initialLoadDebug';
 import { runLatestMCPOAuthStatusRequest } from '../utils/mcpOAuthAttempt';
 import { TOKENS_REFRESHED_EVENT } from '../utils/singleFlightRefresh';
@@ -85,6 +87,28 @@ import {
 // Canvas placements can outnumber active branches by orders of magnitude.
 // Keep each transport response bounded even when hydrating the global index.
 const BOARD_OBJECT_PAGE_LIMIT = 100;
+
+// Restart only this collection, from page one, when offset pagination observes
+// membership churn. Never retry authorization/transport failures here.
+async function readPlacements(
+  client: AgorClient,
+  query: Record<string, unknown>,
+  isCurrent: () => boolean
+): Promise<BoardEntityObject[]> {
+  for (let attempt = 0; ; attempt++) {
+    if (!isCurrent()) return [];
+    try {
+      return await client.service('board-objects').findAll({ query });
+    } catch (error) {
+      if (
+        attempt === 2 ||
+        !(error instanceof Error) ||
+        error.message !== 'Paginated findAll() changed while pages were being read'
+      )
+        throw error;
+    }
+  }
+}
 
 const INITIAL_LOAD_ITEMS = [
   { key: 'sessions', label: 'Sessions' },
@@ -128,6 +152,8 @@ interface UseAgorDataResult {
   loading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
+  placementRecoveryFailed: boolean;
+  retryPlacements: () => void;
 }
 
 // Parse the leading entity segment out of the current pathname, e.g.
@@ -329,6 +355,10 @@ export function useAgorData(
   const authorityScopeKeyRef = useRef(authorityScopeKey);
   authorityScopeKeyRef.current = authorityScopeKey;
 
+  const [placementFailureScope, setPlacementFailureScope] = useState<string | null>(null);
+  const retryPlacementsRef = useRef<() => void>(() => {});
+  const retryPlacements = useCallback(() => retryPlacementsRef.current(), []);
+
   // Advance the singleton realtime queue in the layout phase. React runs this
   // before the authority-transition map reset below and before the previous
   // subscription's passive cleanup, so that cleanup cannot flush a queued row
@@ -497,16 +527,19 @@ export function useAgorData(
           agorStore.getState().setItemCounts({});
         }
 
-        // Marks a tracked item complete (and captures its count from the
-        // resolved list length) when its promise resolves. No-ops on
-        // silent (reconnect) refetches so initial-load progress isn't mutated.
+        // A reconnect can be the first successful bootstrap after an error.
+        // Finish its checklist too, otherwise App's first-load gate stays closed.
+        const updateInitialProgress =
+          !silent ||
+          INITIAL_LOAD_ITEMS.some(({ key }) => agorStore.getState().itemCounts[key] === undefined);
+        // Routine reconnects leave the completed checklist alone.
         const track = <T extends ReadonlyArray<unknown>>(
           key: InitialLoadItemKey,
           p: Promise<T>
         ): Promise<T> => {
           const timedPromise = debugTimer?.track(key, p) ?? p;
           return timedPromise.then((r) => {
-            if (!silent && authorityIsCurrent())
+            if (updateInitialProgress && authorityIsCurrent())
               agorStore.getState().setItemCounts((prev) => ({ ...prev, [key]: r.length }));
             return r;
           });
@@ -723,13 +756,15 @@ export function useAgorData(
             // expected authorization failure here is not an essential bootstrap
             // failure. Keep the collection empty and don't subscribe below.
             canUseMemberWorkspaceServices
-              ? client.service('board-objects').findAll({
-                  query: {
+              ? readPlacements(
+                  client,
+                  {
                     exclude_archived_branches: true,
                     $limit: BOARD_OBJECT_PAGE_LIMIT,
                     ...(boardScope ? { board_id: boardScope } : {}),
                   },
-                })
+                  authorityIsCurrent
+                )
               : Promise.resolve([])
           ),
           track(
@@ -1054,9 +1089,11 @@ export function useAgorData(
               'board-objects',
               ['boardObjects'],
               () =>
-                client.service('board-objects').findAll({
-                  query: { exclude_archived_branches: true, $limit: BOARD_OBJECT_PAGE_LIMIT },
-                }),
+                readPlacements(
+                  client,
+                  { exclude_archived_branches: true, $limit: BOARD_OBJECT_PAGE_LIMIT },
+                  authorityIsCurrent
+                ),
               (allBoardObjects) =>
                 agorStore.getState().applyMaps((prev) => {
                   const base = buildBoardObjectMaps(allBoardObjects);
@@ -1113,6 +1150,8 @@ export function useAgorData(
               }))
           );
         }
+
+        agorStore.getState().setError(null);
 
         // Silent refetch succeeded — clear the retry flag so future token
         // refreshes don't trigger another wasted re-fetch.
@@ -1343,7 +1382,10 @@ export function useAgorData(
     }
 
     const subscriptionAuthorityScope = authorityScopeKey;
-    const subscriptionIsCurrent = () => authorityScopeKeyRef.current === subscriptionAuthorityScope;
+    let disposed = false;
+    const subscriptionIsCurrent = () =>
+      !disposed && authorityScopeKeyRef.current === subscriptionAuthorityScope;
+    setPlacementFailureScope(null);
     // All direct store handlers are authority-scoped too. Although only
     // sessions are frame-batched, an old Feathers listener remains live until
     // passive cleanup and must not write during the layout→cleanup overlap.
@@ -1398,21 +1440,52 @@ export function useAgorData(
     boardsService.on('removed', scopedRealtime.boardRemoved);
 
     // A removed/moved placement that races a targeted unarchive read must win.
-    const placementReads = new Map<string, { changed: boolean }>();
+    const placementReads = new Map<
+      string,
+      {
+        timer?: ReturnType<typeof setTimeout>;
+        failed: boolean;
+        attempt: number;
+      }
+    >();
+    const publishPlacementFailures = () => {
+      if (subscriptionIsCurrent())
+        setPlacementFailureScope(
+          [...placementReads.values()].some((pending) => pending.failed)
+            ? subscriptionAuthorityScope
+            : null
+        );
+    };
+    const cancelPlacementRead = (branchId: string) => {
+      const pending = placementReads.get(branchId);
+      if (pending?.timer) clearTimeout(pending.timer);
+      placementReads.delete(branchId);
+      publishPlacementFailures();
+    };
     const boardObjectRemoved = (object) => {
       if (!subscriptionIsCurrent()) return;
-      const pending = placementReads.get(object.branch_id);
-      if (pending) pending.changed = true;
+      cancelPlacementRead(object.branch_id);
       scopedRealtime.boardObjectRemoved(object);
+    };
+
+    const boardObjectCreated = (object) => {
+      if (!subscriptionIsCurrent()) return;
+      cancelPlacementRead(object.branch_id);
+      scopedRealtime.boardObjectCreated(object);
+    };
+    const boardObjectPatched = (object) => {
+      if (!subscriptionIsCurrent()) return;
+      cancelPlacementRead(object.branch_id);
+      scopedRealtime.boardObjectPatched(object);
     };
 
     // Subscribe to board object events
     const boardObjectsService = canUseMemberWorkspaceServices
       ? client.service('board-objects')
       : null;
-    boardObjectsService?.on('created', scopedRealtime.boardObjectCreated);
-    boardObjectsService?.on('patched', scopedRealtime.boardObjectPatched);
-    boardObjectsService?.on('updated', scopedRealtime.boardObjectPatched);
+    boardObjectsService?.on('created', boardObjectCreated);
+    boardObjectsService?.on('patched', boardObjectPatched);
+    boardObjectsService?.on('updated', boardObjectPatched);
     boardObjectsService?.on('removed', boardObjectRemoved);
 
     // Subscribe to repo events
@@ -1426,6 +1499,7 @@ export function useAgorData(
     const branchesService = client.service('branches');
     const branchRemovedSync = (branch: Branch) => {
       if (!subscriptionIsCurrent()) return;
+      cancelPlacementRead(branch.branch_id);
       scopedRealtime.branchRemoved(branch);
       // Branch deletion cascades tasks/messages without child Feathers events.
       // Comments survive those cascades with task_id/message_id SET NULL, but
@@ -1448,40 +1522,78 @@ export function useAgorData(
     // preserves its stored position without emitting a board-object event, so
     // recover only that branch's placement. Deduplicate paired patched/updated
     // events; never overwrite a newer live placement or cross an auth boundary.
+    const recoverPlacement = (branchId: string) => {
+      if (!subscriptionIsCurrent() || !boardObjectsService || placementReads.has(branchId)) return;
+      const pending = {
+        failed: false,
+        attempt: 0,
+        timer: undefined as ReturnType<typeof setTimeout> | undefined,
+      };
+      const stillNeeded = () => {
+        const state = agorStore.getState();
+        const branch = state.branchById.get(branchId);
+        return (
+          subscriptionIsCurrent() &&
+          placementReads.get(branchId) === pending &&
+          branch &&
+          !branch.archived &&
+          !state.boardObjectByBranchId.has(branchId)
+        );
+      };
+      placementReads.set(branchId, pending);
+      const attempt = async () => {
+        if (!stillNeeded()) {
+          if (placementReads.get(branchId) === pending) cancelPlacementRead(branchId);
+          return;
+        }
+        try {
+          const objects = await boardObjectsService.findAll({
+            query: {
+              branch_id: branchId,
+              exclude_archived_branches: true,
+              $limit: BOARD_OBJECT_PAGE_LIMIT,
+            },
+          });
+          if (!stillNeeded()) return;
+          const branch = agorStore.getState().branchById.get(branchId);
+          for (const object of objects) {
+            if (object.branch_id === branchId && object.board_id === branch.board_id)
+              scopedRealtime.boardObjectCreated(object);
+          }
+        } catch (error) {
+          if (!stillNeeded()) return;
+          if (isTransientConnectionError(error) && pending.attempt < 2) {
+            pending.timer = setTimeout(
+              () => {
+                pending.timer = undefined;
+                void attempt();
+              },
+              250 * 2 ** pending.attempt++
+            );
+            return;
+          }
+          pending.failed = true;
+          publishPlacementFailures();
+        } finally {
+          if (!pending.timer && !pending.failed && placementReads.get(branchId) === pending)
+            cancelPlacementRead(branchId);
+        }
+      };
+      void attempt();
+    };
+    retryPlacementsRef.current = () => {
+      if (!subscriptionIsCurrent()) return;
+      for (const [branchId, pending] of placementReads) {
+        if (!pending.failed) continue;
+        cancelPlacementRead(branchId);
+        recoverPlacement(branchId);
+      }
+    };
     const branchPatched = (branch: Branch) => {
       if (!subscriptionIsCurrent()) return;
       scopedRealtime.branchPatched(branch);
-      if (
-        branch.archived ||
-        !boardObjectsService ||
-        agorStore.getState().boardObjectByBranchId.has(branch.branch_id) ||
-        placementReads.has(branch.branch_id)
-      )
-        return;
-      const pending = { changed: false };
-      placementReads.set(branch.branch_id, pending);
-      void boardObjectsService
-        .findAll({
-          query: {
-            branch_id: branch.branch_id,
-            exclude_archived_branches: true,
-            $limit: BOARD_OBJECT_PAGE_LIMIT,
-          },
-        })
-        .then((objects) => {
-          if (!subscriptionIsCurrent() || pending.changed) return;
-          const state = agorStore.getState();
-          const currentBranch = state.branchById.get(branch.branch_id);
-          if (!currentBranch || state.boardObjectByBranchId.has(branch.branch_id)) return;
-          for (const object of objects) {
-            if (object.board_id === currentBranch.board_id)
-              scopedRealtime.boardObjectCreated(object);
-          }
-        })
-        .catch((error) => {
-          console.warn('[useAgorData] placement recovery failed:', error);
-        })
-        .finally(() => placementReads.delete(branch.branch_id));
+      if (branch.archived) cancelPlacementRead(branch.branch_id);
+      else recoverPlacement(branch.branch_id);
     };
     branchesService.on('created', scopedRealtime.branchCreated);
     branchesService.on('patched', branchPatched);
@@ -1666,6 +1778,11 @@ export function useAgorData(
 
     // Cleanup listeners on unmount
     return () => {
+      disposed = true;
+      for (const pending of placementReads.values()) {
+        if (pending.timer) clearTimeout(pending.timer);
+      }
+      placementReads.clear();
       // APPLY only when this is a same-authority resubscribe. The layout-phase
       // scope transition has already discarded an identity/role/auth/connection
       // queue, and makes this old passive cleanup a no-op. This preserves live
@@ -1685,9 +1802,9 @@ export function useAgorData(
       boardsService.removeListener('updated', scopedRealtime.boardPatched);
       boardsService.removeListener('removed', scopedRealtime.boardRemoved);
 
-      boardObjectsService?.removeListener('created', scopedRealtime.boardObjectCreated);
-      boardObjectsService?.removeListener('patched', scopedRealtime.boardObjectPatched);
-      boardObjectsService?.removeListener('updated', scopedRealtime.boardObjectPatched);
+      boardObjectsService?.removeListener('created', boardObjectCreated);
+      boardObjectsService?.removeListener('patched', boardObjectPatched);
+      boardObjectsService?.removeListener('updated', boardObjectPatched);
       boardObjectsService?.removeListener('removed', boardObjectRemoved);
 
       reposService.removeListener('created', scopedRealtime.repoCreated);
@@ -1776,5 +1893,7 @@ export function useAgorData(
     loading: storeState.loading,
     error: storeState.error,
     refetch: fetchData,
+    placementRecoveryFailed: !!authorityScopeKey && placementFailureScope === authorityScopeKey,
+    retryPlacements,
   };
 }

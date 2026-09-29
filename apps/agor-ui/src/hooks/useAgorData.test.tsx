@@ -1312,6 +1312,175 @@ describe('useAgorData — network load contract', () => {
     }
   });
 
+  it('restarts only placement pagination on membership churn', async () => {
+    const mock = makeMockClient();
+    mock.onFetch('board-objects', 'findAll', (call) => {
+      if (call < 3) throw new Error('Paginated findAll() changed while pages were being read');
+    });
+    const { result } = renderHook(() => useAgorData(mock.client));
+    await waitForInitialLoad(result);
+    expect(mock.fetchCount('board-objects', 'findAll')).toBe(3);
+    // One lean bootstrap read and one normal full background hydration.
+    expect(mock.fetchCount('boards', 'findAll')).toBe(2);
+    expect(mock.fetchArguments('board-objects', 'findAll')).toEqual(
+      Array(3).fill({ query: { exclude_archived_branches: true, $limit: 100 } })
+    );
+    expect(result.current.error).toBeNull();
+  });
+
+  it.each(['manual', 'reconnect'])(
+    'clears exhausted bootstrap errors on %s recovery',
+    async (recovery) => {
+      const mock = makeMockClient();
+      mock.onFetch('board-objects', 'findAll', () => {
+        throw new Error('Paginated findAll() changed while pages were being read');
+      });
+      const { result } = renderHook(() => useAgorData(mock.client));
+      await waitFor(() => expect(result.current.error).toContain('changed while pages'));
+      expect(mock.fetchCount('board-objects', 'findAll')).toBe(3);
+      mock.onFetch('board-objects', 'findAll', () => {});
+      if (recovery === 'manual')
+        await act(async () => {
+          await result.current.refetch();
+        });
+      else act(() => mock.emitIo('connect'));
+      await waitFor(() => expect(result.current.error).toBeNull());
+      expect(result.current.initialLoadComplete).toBe(true);
+      expect(mock.fetchCount('board-objects', 'findAll')).toBe(4);
+    }
+  );
+
+  it('does not retry unrelated placement bootstrap errors', async () => {
+    const mock = makeMockClient();
+    mock.onFetch('board-objects', 'findAll', () => {
+      throw new Error('Forbidden');
+    });
+    const { result } = renderHook(() => useAgorData(mock.client));
+    await waitFor(() => expect(result.current.error).toBe('Forbidden'));
+    expect(mock.fetchCount('board-objects', 'findAll')).toBe(1);
+  });
+
+  it('does not restart pagination under replacement authority', async () => {
+    const mock = makeMockClient();
+    const gate = deferred();
+    mock.onFetch('board-objects', 'findAll', async () => {
+      await gate.promise;
+      throw new Error('Paginated findAll() changed while pages were being read');
+    });
+    const { rerender } = renderHook(({ client }) => useAgorData(client), {
+      initialProps: { client: mock.client },
+    });
+    await waitFor(() => expect(mock.fetchCount('board-objects', 'findAll')).toBe(1));
+    rerender({ client: null as never });
+    gate.resolve();
+    await flush();
+    expect(mock.fetchCount('board-objects', 'findAll')).toBe(1);
+    expect(agorStore.getState().boardObjectById.size).toBe(0);
+  });
+
+  it.each(['recovered', 'exhausted', 'forbidden'])(
+    'recovers targeted failures: %s',
+    async (outcome) => {
+      const exhausted = outcome !== 'recovered';
+      const seed: Record<string, unknown[]> = {};
+      const mock = makeMockClient(seed);
+      const { result, unmount } = renderHook(() => useAgorData(mock.client));
+      await waitForInitialLoad(result);
+      const before = mock.fetchCount('board-objects', 'findAll');
+      const boardsBefore = mock.fetchCount('boards', 'findAll');
+      seed['board-objects'] = [makeBoardObject({ board_id: 'board-1' })];
+      mock.onFetch('board-objects', 'findAll', (call) => {
+        if (exhausted || call === before + 1)
+          throw Object.assign(new Error(outcome === 'forbidden' ? 'Forbidden' : 'timeout'), {
+            code: outcome === 'forbidden' ? 403 : 408,
+          });
+      });
+      vi.useFakeTimers();
+      try {
+        await act(async () => {
+          mock.emit('branches', 'patched', makeBranch({ board_id: 'board-1' }));
+          mock.emit('branches', 'updated', makeBranch({ board_id: 'board-1' }));
+          await vi.advanceTimersByTimeAsync(2000);
+        });
+        expect(mock.fetchCount('board-objects', 'findAll')).toBe(
+          before + (outcome === 'forbidden' ? 1 : exhausted ? 3 : 2)
+        );
+        expect(result.current.placementRecoveryFailed).toBe(exhausted);
+        if (exhausted) {
+          mock.onFetch('board-objects', 'findAll', () => {});
+          await act(async () => {
+            result.current.retryPlacements();
+          });
+        }
+        expect(result.current.placementRecoveryFailed).toBe(false);
+        expect(agorStore.getState().boardObjectByBranchId.get('b-1')).toMatchObject({
+          board_id: 'board-1',
+        });
+        expect(mock.fetchCount('boards', 'findAll')).toBe(boardsBefore);
+      } finally {
+        unmount();
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it.each(['authority', 'remove', 'archive', 'placement', 'unmount'])(
+    'cancels queued placement retries on %s',
+    async (change) => {
+      const mock = makeMockClient();
+      const { result, rerender, unmount } = renderHook(
+        ({ generation }) =>
+          useAgorData(mock.client, {
+            authenticatedUserId: generation === 1 ? 'tenant-a-user' : 'tenant-b-user',
+            authenticatedUserRole: 'member',
+            authGeneration: generation,
+          }),
+        { initialProps: { generation: 1 } }
+      );
+      await waitForInitialLoad(result);
+      let targetedCalls = 0;
+      mock.onFetch('board-objects', 'findAll', () => {
+        targetedCalls++;
+        throw new Error('timeout');
+      });
+      vi.useFakeTimers();
+      try {
+        const branch = makeBranch({ board_id: 'board-1' });
+        await act(async () => mock.emit('branches', 'patched', branch));
+        expect(targetedCalls).toBe(1);
+        if (change === 'authority') {
+          // New authority's bootstrap is separate; the old retry must never use it.
+          mock.onFetch('board-objects', 'findAll', () => {});
+          rerender({ generation: 2 });
+        } else if (change === 'remove') act(() => mock.emit('branches', 'removed', branch));
+        else if (change === 'archive')
+          act(() => mock.emit('branches', 'patched', { ...branch, archived: true }));
+        else if (change === 'placement')
+          act(() =>
+            mock.emit('board-objects', 'created', makeBoardObject({ board_id: 'board-1' }))
+          );
+        else unmount();
+        const before = mock.fetchCount('board-objects', 'findAll');
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(2000);
+        });
+        // Authority replacement may finish its own bootstrap, but never the old targeted read.
+        if (change !== 'authority')
+          expect(mock.fetchCount('board-objects', 'findAll')).toBe(before);
+        else
+          expect(
+            mock
+              .fetchArguments('board-objects', 'findAll')
+              .filter((args) => (args as { query?: { branch_id?: string } }).query?.branch_id)
+          ).toHaveLength(1);
+        expect(result.current.placementRecoveryFailed).toBe(false);
+      } finally {
+        unmount();
+        vi.useRealTimers();
+      }
+    }
+  );
+
   it('recovers an unarchived placement once and ignores a delayed response after logout', async () => {
     const seed: Record<string, unknown[]> = {};
     const mock = makeMockClient(seed);
