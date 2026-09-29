@@ -64,14 +64,36 @@ export function assertBranchActivityAllowed(
 
 /** Resolve membership before taking the Branch lock; never lock Session first. */
 export async function lockSessionBranchForAdmission(db: Database, sessionId: string) {
+  return lockSessionBranch(db, sessionId, true);
+}
+
+/** Closure of already-admitted work must remain possible during maintenance/deletion. */
+export async function lockSessionBranchForExistingWork(db: Database, sessionId: string) {
+  return lockSessionBranch(db, sessionId, false);
+}
+
+async function lockSessionBranch(db: Database, sessionId: string, requireActivity: boolean) {
   const session = await select(db, { branch_id: sessions.branch_id })
     .from(sessions)
     .where(eq(sessions.session_id, sessionId))
     .one();
   if (!session) throw new EntityNotFoundError('Session', sessionId);
-  const branch = await lockBranchForAdmission(db, session.branch_id, {
-    requireRecoveryReady: true,
-  });
+  // Existing work must be able to close during branch maintenance. New work
+  // retains the current recovery-readiness and activity admission checks.
+  let branch: typeof branches.$inferSelect;
+  if (requireActivity) {
+    branch = await lockBranchForAdmission(db, session.branch_id, {
+      requireRecoveryReady: true,
+    });
+  } else {
+    await lockRowForUpdate(db, db, branches, eq(branches.branch_id, session.branch_id));
+    const current = await select(db)
+      .from(branches)
+      .where(eq(branches.branch_id, session.branch_id))
+      .one();
+    if (!current) throw new EntityNotFoundError('Branch', session.branch_id);
+    branch = current;
+  }
   await lockRowForUpdate(db, db, sessions, eq(sessions.session_id, sessionId));
   const current = await select(db, { branch_id: sessions.branch_id })
     .from(sessions)

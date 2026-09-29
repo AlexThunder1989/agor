@@ -11,6 +11,7 @@ import {
   BRANCH_ARCHIVE_COMMAND,
   BRANCH_CLEANUP_COMMAND,
   BRANCH_DELETION_COMMAND,
+  OPENCODE_SESSION_STATE_DELETE_COMMAND,
 } from '@agor/core/types';
 import { ToolRegistry } from '../handlers/sdk/tool-registry.js';
 import type {
@@ -49,6 +50,7 @@ import {
   handleGitRepoRealignOrigin,
 } from './git.js';
 import { handleBranchKnowledgeRead, handleBranchKnowledgeWrite } from './knowledge.js';
+import { handleOpenCodeSessionStateDelete } from './opencode-session-state-delete.js';
 import { handleBranchUploadMaterialize } from './upload.js';
 import { handleZellijAttach, handleZellijTab } from './zellij.js';
 
@@ -277,3 +279,4 @@ registerCommand('zellij.attach', handleZellijAttach);
 registerCommand('zellij.tab', handleZellijTab);
 registerCommand('codex.auth-file', handleCodexAuthFile);
 registerCommand('claude.auth-file', handleClaudeAuthFile);
+registerCommand(OPENCODE_SESSION_STATE_DELETE_COMMAND, handleOpenCodeSessionStateDelete);

@@ -264,6 +264,7 @@ import {
 } from './utils/mcp-runtime-hints.js';
 import { canConfigureMcpServers } from './utils/mcp-server-authorization.js';
 import { authorizeMcpSessionConfigAccess } from './utils/mcp-session-config-authorization.js';
+import { mapNativeStateHandoffError } from './utils/native-state-handoff-error';
 import { patchUnlessRemoved } from './utils/patch-unless-removed.js';
 import { runPromptAdmissionTransaction } from './utils/prompt-admission-transaction.js';
 import { promptDatabaseErrorAround } from './utils/prompt-database-error.js';
@@ -2031,16 +2032,18 @@ export async function registerRoutes(ctx: RegisterRoutesContext): Promise<void> 
           // count, so it lands the system error at the true tail whether
           // the user-message row exists or not (no gap, no collision).
           const errorContent = `⚠️ The agent failed to start.\n\n${errorMessage}`;
-          await appendSystemMessage({
-            app,
-            db,
-            sessionId,
-            taskId,
-            content: errorContent,
-            role: MessageRole.ASSISTANT,
-            metadata: { is_meta: true },
-            params: failureParams,
-          });
+          await runWithTenantDatabaseScope(db, tenantId, () =>
+            appendSystemMessage({
+              app,
+              db,
+              sessionId,
+              taskId,
+              content: errorContent,
+              role: MessageRole.ASSISTANT,
+              metadata: { is_meta: true },
+              params: failureParams,
+            })
+          );
         } catch (sysErr) {
           console.warn(
             '[Daemon] Failed to write system error message after spawn failure:',
@@ -6884,6 +6887,9 @@ export async function registerRoutes(ctx: RegisterRoutesContext): Promise<void> 
     },
     before: {
       all: [enforcePasswordChange],
+    },
+    error: {
+      all: [mapNativeStateHandoffError],
     },
   });
 

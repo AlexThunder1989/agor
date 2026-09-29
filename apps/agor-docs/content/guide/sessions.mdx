@@ -56,6 +56,28 @@ Session: "Built user authentication feature"
 
 Use forks when downstream work needs the _same starting knowledge_ but different focus. Agor supports session forks for Claude Code and Codex. Gemini, OpenCode, GitHub Copilot, and Cursor do not currently support session forks in Agor.
 
+### Shared prompting and saved OpenCode state
+
+When sharing is enabled for a branch, teammates granted prompt access can continue a
+branch-scoped managed OpenCode Session. Sharing the conversation does not share the
+Session creator's credentials: each task uses the identity and credentials of the
+teammate who submitted it. These Sessions keep their saved conversation state under a
+protected root for that Session. Execution-home Sessions remain owner-bound, and local
+native-file authentication does not gain shared-session support. OpenCode does not
+support Session forks in Agor; moving saved state with a Branch or Workspace is not a
+supported portability or backup method.
+
+Managed OpenCode state has no idle cleanup timer or idle-retention promise. To remove
+a Session, stop unfinished tasks and use the ordinary remove action with the usual
+Session and Branch deletion permission. Prompt-sharing permission alone does not
+grant deletion authority. If Agor cannot prove that every executor using the saved
+state has closed, removal remains pending and the state is retained; retry the same
+remove action after closure evidence becomes available. Each retry rechecks current
+permissions and keeps the same deletion operation. Old results cannot clear the
+Session's state. There is no force-delete or timeout-to-closed path. If closure remains
+unknown, retain the state and report the blocker. Removing live files does not erase
+copies already held under the Workspace backup retention policy.
+
 ### Spawn — delegate with fresh context
 
 A **spawn** creates a child session with a **fresh context window**. The parent decides what context to pass via the spawn prompt; the child is a focused subagent.

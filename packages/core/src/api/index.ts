@@ -118,6 +118,7 @@ const USERS_SERVICE_EXTENDED = Symbol('agor.usersServiceExtended');
 const REPOS_SERVICE_EXTENDED = Symbol('agor.reposServiceExtended');
 const BRANCHES_SERVICE_EXTENDED = Symbol('agor.branchesServiceExtended');
 const TASKS_SERVICE_EXTENDED = Symbol('agor.tasksServiceExtended');
+const OPENCODE_NATIVE_STATE_SERVICE_EXTENDED = Symbol('agor.opencodeNativeStateServiceExtended');
 const SERVICE_FIND_ALL_EXTENDED = Symbol('agor.serviceFindAllExtended');
 const CLIENT_SERVICE_FACTORY_EXTENDED = Symbol('agor.clientServiceFactoryExtended');
 const CLIENT_SESSIONS_HELPERS_EXTENDED = Symbol('agor.clientSessionsHelpersExtended');
@@ -322,6 +323,7 @@ export interface ServiceTypes {
   templates: TemplateRenderResponse;
   'agentic-tool-settings': TenantAgenticToolSettings;
   'agentic-tool-presets': AgenticToolPreset;
+  'opencode-native-state': import('../types').OpenCodeCheckpointAdmission;
   'opencode-auth': OpenCodeProviderSettings;
   'opencode-models': OpenCodeModelCatalog;
   'executor-git-environment': ExecutorGitEnvironment;
@@ -466,6 +468,43 @@ export interface OpenCodeAuthService {
     params?: Params
   ): Promise<OpenCodeOAuthAttempt>;
   remove(providerId: string, params?: Params): Promise<OpenCodeProviderSettings>;
+}
+
+/** Executor-only managed OpenCode coordination boundary. */
+export interface OpenCodeNativeStateService {
+  prepareSessionDeleteCommand(
+    data: import('../types').OpenCodeSessionDeleteInput,
+    params?: Params
+  ): Promise<import('../types').OpenCodeSessionDeleteFiles>;
+  acknowledgeSessionDelete(
+    data: import('../types').OpenCodeSessionDeleteReceipt,
+    params?: Params
+  ): Promise<void>;
+  begin(
+    data: import('../types').OpenCodeCheckpointBeginInput,
+    params?: Params
+  ): Promise<import('../types').OpenCodeCheckpointAdmission>;
+  closeRead(
+    data: import('../types').OpenCodeCheckpointCloseReadInput,
+    params?: Params
+  ): Promise<void>;
+  seal(data: import('../types').OpenCodeCheckpointSealInput, params?: Params): Promise<void>;
+  abandon(data: import('../types').OpenCodeCheckpointHolderInput, params?: Params): Promise<void>;
+  prepareCleanup(
+    data: import('../types').OpenCodeCheckpointHolderInput,
+    params?: Params
+  ): Promise<import('../types').OpenCodeCheckpointCleanupWork>;
+  observe(
+    data: import('../types').OpenCodeCheckpointHolderInput & { attempt_id: string },
+    params?: Params
+  ): Promise<void>;
+  acknowledgeDelete(
+    data: import('../types').OpenCodeCheckpointHolderInput & {
+      object: { storeId: string; taskId: string };
+      result: { outcome: 'deleted' } | { outcome: 'failed'; errorCode: string };
+    },
+    params?: Params
+  ): Promise<void>;
 }
 
 export interface OpenCodeModelsService {
@@ -867,6 +906,7 @@ export interface AgorClient
   service(path: 'agentic-tool-settings'): AgenticToolSettingsService;
   service(path: 'agentic-tool-presets'): AgenticToolPresetsService;
   service(path: 'opencode-auth'): OpenCodeAuthService;
+  service(path: 'opencode-native-state'): OpenCodeNativeStateService;
   service(path: 'opencode-models'): OpenCodeModelsService;
   service(path: `board-comments/${string}/reposition`): BoardCommentRepositionService;
 
@@ -1385,6 +1425,28 @@ function extendTasksService(client: AgorClient): void {
   tasksService[TASKS_SERVICE_EXTENDED] = true;
 }
 
+function extendOpenCodeNativeStateService(client: AgorClient): void {
+  const service = client.service('opencode-native-state') as OpenCodeNativeStateService & {
+    [OPENCODE_NATIVE_STATE_SERVICE_EXTENDED]?: boolean;
+    methods?: (...names: string[]) => unknown;
+  };
+  if (service[OPENCODE_NATIVE_STATE_SERVICE_EXTENDED]) return;
+  if (typeof service.methods === 'function') {
+    service.methods(
+      'begin',
+      'closeRead',
+      'seal',
+      'abandon',
+      'prepareCleanup',
+      'observe',
+      'acknowledgeDelete',
+      'prepareSessionDeleteCommand',
+      'acknowledgeSessionDelete'
+    );
+  }
+  service[OPENCODE_NATIVE_STATE_SERVICE_EXTENDED] = true;
+}
+
 function extendServiceFactory(client: AgorClient): void {
   const augmentedClient = client as AgorClient & {
     [CLIENT_SERVICE_FACTORY_EXTENDED]?: boolean;
@@ -1556,6 +1618,7 @@ export async function createRestClient(
   extendReposService(client);
   extendBranchesService(client);
   extendTasksService(client);
+  extendOpenCodeNativeStateService(client);
   extendSessionsHelpers(client);
   extendTasksHelpers(client);
 
@@ -1676,6 +1739,7 @@ export function createClient(
   extendReposService(client);
   extendBranchesService(client);
   extendTasksService(client);
+  extendOpenCodeNativeStateService(client);
   extendSessionsHelpers(client);
   extendTasksHelpers(client);
 

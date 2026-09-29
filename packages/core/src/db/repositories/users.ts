@@ -16,19 +16,35 @@ import type {
   UserID,
   UUID,
 } from '@agor/core/types';
-import { toAgenticToolsStatus } from '@agor/core/types';
-import { eq, like, sql } from 'drizzle-orm';
+import { isTerminalTaskStatus, toAgenticToolsStatus } from '@agor/core/types';
+import { and, eq, like, or, sql } from 'drizzle-orm';
 import { normalizeStoredEnvMap, type RawStoredEnvVar } from '../../config/env-vars';
 import { generateId, shortId } from '../../lib/ids';
 import { isValidExecutionHomeKey } from '../../types/user';
 import type { Database } from '../client';
-import { deleteFrom, insert, lockRowForUpdate, select, update } from '../database-wrapper';
+import {
+  deleteFrom,
+  insert,
+  jsonExtract,
+  lockRowForUpdate,
+  select,
+  update,
+} from '../database-wrapper';
 import { decryptApiKeyAsync, encryptApiKey } from '../encryption';
-import { type UserInsert as SchemaUserInsert, type UserRow, users } from '../schema';
+import {
+  opencodeCheckpointAttempts,
+  type UserInsert as SchemaUserInsert,
+  sessions,
+  tasks,
+  type UserRow,
+  users,
+} from '../schema';
+import { getCurrentTenantId } from '../tenant-context';
 import { isExecutionHomeKeyAvailable } from '../user-execution-home';
 import {
   type BaseRepository,
   EntityNotFoundError,
+  OpenCodeNativeStateHandoffRequiredError,
   RESOLVE_SHORT_ID_FETCH_LIMIT,
   RepositoryError,
   resolveByShortIdPrefix,
@@ -579,8 +595,106 @@ export class UsersRepository
    */
   async delete(id: string): Promise<void> {
     const fullId = await this.resolveId(id);
+    await this.assertNativeStateHandoffClear(fullId);
 
     await deleteFrom(this.db, users).where(eq(users.user_id, fullId)).run();
+  }
+
+  /** Owner deletion cannot revoke old HOME-mounted process authority. */
+  async assertNativeStateHandoffClear(id: string): Promise<void> {
+    const fullId = await this.resolveId(id);
+    const tenant = getCurrentTenantId() ?? 'default';
+    const attempt = await select(this.db, { attempt_id: opencodeCheckpointAttempts.attempt_id })
+      .from(opencodeCheckpointAttempts)
+      .where(
+        and(
+          eq(opencodeCheckpointAttempts.tenant_id, tenant),
+          eq(opencodeCheckpointAttempts.owner_user_id, fullId)
+        )
+      )
+      .limit(1)
+      .one();
+    const actorAttempts = await select(this.db, {
+      attempt: {
+        tenant_id: opencodeCheckpointAttempts.tenant_id,
+        session_id: opencodeCheckpointAttempts.session_id,
+        task_id: opencodeCheckpointAttempts.task_id,
+        store_id: opencodeCheckpointAttempts.store_id,
+        holder_instance_id: opencodeCheckpointAttempts.holder_instance_id,
+        binding: opencodeCheckpointAttempts.binding,
+        holder_closed_observed_at: opencodeCheckpointAttempts.holder_closed_observed_at,
+        input_task_id: opencodeCheckpointAttempts.input_task_id,
+        input_read_closed_at: opencodeCheckpointAttempts.input_read_closed_at,
+        write_state: opencodeCheckpointAttempts.write_state,
+      },
+      task: {
+        task_id: tasks.task_id,
+        session_id: tasks.session_id,
+        created_by: tasks.created_by,
+        status: tasks.status,
+      },
+    })
+      .from(opencodeCheckpointAttempts)
+      .leftJoin(
+        tasks,
+        and(
+          eq(tasks.task_id, opencodeCheckpointAttempts.task_id),
+          eq(tasks.session_id, opencodeCheckpointAttempts.session_id)
+        )
+      )
+      .where(
+        and(
+          eq(opencodeCheckpointAttempts.tenant_id, tenant),
+          or(
+            eq(tasks.created_by, fullId),
+            eq(jsonExtract(this.db, opencodeCheckpointAttempts.binding, 'ownerUserId'), fullId)
+          )
+        )
+      )
+      .all();
+    for (const { attempt: actorAttempt, task } of actorAttempts) {
+      const binding = actorAttempt.binding;
+      if (
+        !binding ||
+        !task ||
+        task.created_by !== fullId ||
+        binding.tenantId !== tenant ||
+        binding.sessionId !== actorAttempt.session_id ||
+        binding.taskId !== actorAttempt.task_id ||
+        binding.storeId !== actorAttempt.store_id ||
+        binding.holderInstanceId !== actorAttempt.holder_instance_id ||
+        binding.ownerUserId !== task.created_by ||
+        binding.protocol !== 3 ||
+        !isTerminalTaskStatus(task.status) ||
+        !actorAttempt.holder_closed_observed_at ||
+        (actorAttempt.input_task_id !== null && !actorAttempt.input_read_closed_at) ||
+        actorAttempt.write_state === 'open'
+      ) {
+        throw new OpenCodeNativeStateHandoffRequiredError('user');
+      }
+    }
+    // The Postgres schema is tenant-keyed; the SQLite dev schema is intentionally
+    // single-tenant. Keep this narrow projected column typed from their common
+    // UUID/text identifier rather than asking the dialect-union `users` table
+    // type for a column it does not expose on SQLite.
+    const sessionTenantId = (sessions as unknown as { tenant_id?: typeof sessions.session_id })
+      .tenant_id;
+    const pointer = await select(this.db, { session_id: sessions.session_id })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.created_by, fullId),
+          ...(sessionTenantId ? [eq(sessionTenantId, tenant)] : []),
+          sql`(${sessions.data} -> 'sdk_native_state' IS NOT NULL
+          OR ${sessions.data} -> 'sdk_native_state_store_id' IS NOT NULL
+          OR ${sessions.data} -> 'sdk_native_state_layout' IS NOT NULL)`
+        )
+      )
+      .limit(1)
+      .one();
+    if (attempt || pointer) {
+      throw new OpenCodeNativeStateHandoffRequiredError('user');
+    }
   }
 
   /**

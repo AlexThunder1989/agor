@@ -41,6 +41,7 @@ import {
   EXECUTOR_RESPONSE_PROTOCOL,
   type ExecutorCommandResult,
 } from '@agor/core/executor-protocol';
+import { OPENCODE_SESSION_STATE_DELETE_COMMAND } from '@agor/core/types';
 import { isValidExecutionHomeKey } from '@agor/core/unix';
 import { getCurrentLogLevel } from '@agor/core/utils/logger';
 import type { SignOptions } from 'jsonwebtoken';
@@ -156,6 +157,8 @@ export interface ExecutorTemplateVariables {
   command?: string;
   unix_user?: string;
   session_id?: string;
+  /** Stable operation identity for taskless retryable lifecycle commands. */
+  operation_id?: string;
   branch_id?: string;
   /** Trusted Agor user UUID used by external launchers for identity-scoped storage. */
   user_id?: string;
@@ -331,6 +334,7 @@ export function substituteTemplateVariables(
     command: variables.command,
     unix_user: variables.unix_user,
     session_id: variables.session_id,
+    operation_id: variables.operation_id,
     branch_id: variables.branch_id,
     user_id: variables.user_id,
     branch_fs_access: variables.branch_fs_access,
@@ -346,7 +350,7 @@ export function substituteTemplateVariables(
   // may originate in external auth claims; branch_sdk_home is a filesystem path
   // that must not word-split or glob. Templates should use them unquoted, e.g.
   // `launcher --tenant-id {tenant_id} --sdk-home {branch_sdk_home}`.
-  const shellEscapedKeys = new Set(['tenant_id', 'branch_sdk_home']);
+  const shellEscapedKeys = new Set(['tenant_id', 'branch_sdk_home', 'operation_id']);
   for (const [key, value] of Object.entries(substitutions)) {
     if (value !== undefined) {
       const placeholder = new RegExp(`\\{${key}\\}`, 'g');
@@ -1290,7 +1294,10 @@ export async function requestExecutor(
         executorCommandTemplate,
         templateVariables: {
           command: payload.command as string,
-          task_id: generateTaskId(),
+          task_id:
+            payload.command === OPENCODE_SESSION_STATE_DELETE_COMMAND
+              ? undefined
+              : generateTaskId(),
           unix_user: options.delegatedHomeKey || undefined,
           log_level: resolveExecutorLogLevel(
             options.env ?? (process.env as Record<string, string>)

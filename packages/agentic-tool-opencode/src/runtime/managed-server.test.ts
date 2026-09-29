@@ -1,5 +1,14 @@
 import { EventEmitter } from 'node:events';
-import { chmod, mkdir, mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -10,6 +19,7 @@ import {
   startManagedOpenCodeServer,
   verifyOpenCodeAuthFileBoundary,
 } from './managed-server';
+import { prepareOpenCodeScratch, resolveOpenCodeNativeStateLayout } from './native-state';
 
 const roots: string[] = [];
 
@@ -105,6 +115,66 @@ describe('OpenCode native data boundary', () => {
 });
 
 describe('managed OpenCode readiness', () => {
+  it('writes hosted auth and config into private scratch files, not the child environment', async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'agor-opencode-hosted-files-')));
+    roots.push(root);
+    const sessionId = '01a08d5f-775f-73f6-86a1-624b43050180';
+    const layout = resolveOpenCodeNativeStateLayout({
+      namespaceKey: 'e'.repeat(64),
+      agorSessionId: sessionId,
+      taskId: '01a08d5f-7773-77fa-a7dc-2575cfe6727e',
+      storeId: '01a08d5f-7773-77fa-a7dc-2575cfe67260',
+      homeDir: join(root, 'home'),
+      sessionRoot: join(root, 'opencode-sessions', sessionId),
+      scratchRoot: join(root, 'scratch'),
+    });
+    await prepareOpenCodeScratch(layout);
+    const config = JSON.stringify({ mcp: {}, permission: { '*': 'ask' } });
+    const auth = JSON.stringify({ anthropic: { type: 'api', key: 'sk-hosted-secret' } });
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null as number | null,
+      kill: () => true,
+    }) satisfies ManagedChild;
+    const spawn = vi.fn(() => child);
+    const started = startManagedOpenCodeServer(
+      {
+        directory: tmpdir(),
+        hostedLayout: layout,
+        environment: {
+          OPENCODE_CONFIG_CONTENT: config,
+          OPENCODE_AUTH_CONTENT: auth,
+          OPENCODE_PERMISSION: '{"*":"ask"}',
+        },
+      },
+      {
+        resolveBinary: async () => '/packaged/opencode',
+        spawn,
+        fetch: vi.fn(async () => new Response('{}', { status: 200 })),
+      }
+    );
+
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(1));
+    child.stdout.write('opencode server listening on http://127.0.0.1:43210\n');
+    const server = await started;
+    const environment = spawn.mock.calls[0]?.[2]?.env as NodeJS.ProcessEnv;
+    const authPath = join(layout.xdg.data, 'opencode', 'auth.json');
+    const configPath = environment.OPENCODE_CONFIG;
+
+    expect(environment.OPENCODE_AUTH_CONTENT).toBeUndefined();
+    expect(environment.OPENCODE_CONFIG_CONTENT).toBeUndefined();
+    expect(configPath).toBe(join(layout.xdg.config, 'opencode.json'));
+    expect(await readFile(authPath, 'utf8')).toBe(auth);
+    expect(await readFile(configPath!, 'utf8')).toBe(config);
+    expect((await stat(authPath)).mode & 0o777).toBe(0o600);
+    expect((await stat(configPath!)).mode & 0o777).toBe(0o600);
+
+    child.exitCode = 0;
+    child.emit('exit', 0, null);
+    await server.close();
+  });
+
   it('namespaces every OpenCode XDG root under the private native-data home', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agor-opencode-xdg-'));
     roots.push(root);
@@ -112,9 +182,9 @@ describe('managed OpenCode readiness', () => {
     const child = Object.assign(new EventEmitter(), {
       stdout: new PassThrough(),
       stderr: new PassThrough(),
-      exitCode: null,
+      exitCode: null as number | null,
       kill: () => true,
-    }) as ManagedChild;
+    }) satisfies ManagedChild;
     const spawn = vi.fn(() => child);
 
     const started = startManagedOpenCodeServer(
@@ -160,9 +230,9 @@ describe('managed OpenCode readiness', () => {
     const child = Object.assign(new EventEmitter(), {
       stdout: new PassThrough(),
       stderr: new PassThrough(),
-      exitCode: null,
+      exitCode: null as number | null,
       kill: () => true,
-    }) as ManagedChild;
+    }) satisfies ManagedChild;
     const fetchHealth = vi
       .fn<typeof globalThis.fetch>()
       .mockRejectedValueOnce(new TypeError('fetch failed'))
@@ -189,5 +259,22 @@ describe('managed OpenCode readiness', () => {
         headers: { Authorization: server.authorization },
       })
     );
+  });
+});
+
+describe('managed OpenCode sanitizer', () => {
+  it('redacts projected auth content and each individual key from diagnostics', async () => {
+    const { createOpenCodeSanitizer } = await import('./managed-server.js');
+    const content = JSON.stringify({ anthropic: { type: 'api', key: 'sk-ant-secret-1' } });
+    const sanitizer = createOpenCodeSanitizer(['sk-ant-secret-1', content], {
+      OPENCODE_AUTH_CONTENT: content,
+      HARMLESS: 'keep-me',
+      TEMPLATE_CONTENT: 'startup',
+    });
+    const message = `startup failed with ${content} and bare sk-ant-secret-1 while HARMLESS=keep-me`;
+    expect(sanitizer.text(message)).toBe(
+      'startup failed with [REDACTED] and bare [REDACTED] while HARMLESS=keep-me'
+    );
+    expect(sanitizer.error(new Error(message)).message).not.toContain('sk-ant-secret-1');
   });
 });

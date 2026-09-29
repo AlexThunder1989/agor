@@ -13,7 +13,7 @@ import type {
   SessionUpdate,
   UUID,
 } from '@agor/core/types';
-import { SessionStatus } from '@agor/core/types';
+import { SessionStatus, TaskStatus } from '@agor/core/types';
 import {
   and,
   asc,
@@ -25,11 +25,16 @@ import {
   isNull,
   like,
   lte,
+  notInArray,
   or,
   sql,
 } from 'drizzle-orm';
 import { getBaseUrl } from '../../config/config-manager';
 import { generateId, shortId } from '../../lib/ids';
+import {
+  OPENCODE_SESSION_DELETE_DATA_KEY,
+  OPENCODE_SESSION_DELETE_STATUSES,
+} from '../../types/opencode-native-state.js';
 import { getSessionUrl } from '../../utils/url';
 import { lockBranchForAdmission } from '../branch-admission';
 import type { Database } from '../client';
@@ -47,22 +52,26 @@ import { sanitizeDbError } from '../sanitize-error';
 import {
   branches,
   messages,
+  opencodeCheckpointAttempts,
   type SessionInsert,
   type SessionRow,
   sessions,
   tasks,
 } from '../schema';
+import { getCurrentTenantId } from '../tenant-context';
 import { tenantInventoryCondition } from '../tenant-inventory-condition';
 import {
   AmbiguousIdError,
   attachHiddenTenant,
   type BaseRepository,
   EntityNotFoundError,
+  OpenCodeNativeStateHandoffRequiredError,
   RESOLVE_SHORT_ID_FETCH_LIMIT,
   RepositoryError,
   resolveByShortIdPrefix,
 } from './base';
 import { inVisibleBranchSet } from './branch-access';
+import { BranchRepository } from './branches';
 import { deepMerge } from './merge-utils';
 import {
   extractMessageText,
@@ -75,6 +84,61 @@ import {
  */
 export interface SessionWithLastMessage extends Session {
   last_message?: string;
+}
+
+type SessionDeleteData = {
+  operation_id: string;
+  status: (typeof OPENCODE_SESSION_DELETE_STATUSES)[number];
+  launch_user_id?: string;
+  receipt?: string[];
+  token_fingerprint?: string;
+  run_id?: string;
+};
+export type SessionDeleteCredentialState = {
+  tokenFingerprint: string | null;
+  runId: string | null;
+};
+export interface SessionDeleteClaim {
+  sessionId: string;
+  branchId: string;
+  createdBy: string;
+  operationId: string;
+  launchUserId?: string;
+  status: SessionDeleteData['status'];
+  hasNativeState: boolean;
+  layout?: string;
+  storeId?: string;
+}
+
+function sessionDeleteData(data: Record<string, unknown>): SessionDeleteData | undefined {
+  const raw = data[OPENCODE_SESSION_DELETE_DATA_KEY];
+  if (raw === undefined) return undefined;
+  if (
+    !raw ||
+    typeof raw !== 'object' ||
+    Array.isArray(raw) ||
+    typeof (raw as Record<string, unknown>).operation_id !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+      (raw as Record<string, unknown>).operation_id as string
+    ) ||
+    !OPENCODE_SESSION_DELETE_STATUSES.includes(
+      String((raw as Record<string, unknown>).status) as SessionDeleteData['status']
+    ) ||
+    ((raw as Record<string, unknown>).launch_user_id !== undefined &&
+      (typeof (raw as Record<string, unknown>).launch_user_id !== 'string' ||
+        !(raw as Record<string, unknown>).launch_user_id)) ||
+    ((raw as Record<string, unknown>).token_fingerprint !== undefined &&
+      (typeof (raw as Record<string, unknown>).token_fingerprint !== 'string' ||
+        !/^[a-f0-9]{64}$/.test((raw as Record<string, unknown>).token_fingerprint as string))) ||
+    ((raw as Record<string, unknown>).run_id !== undefined &&
+      (typeof (raw as Record<string, unknown>).run_id !== 'string' ||
+        !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(
+          (raw as Record<string, unknown>).run_id as string
+        )))
+  ) {
+    throw new RepositoryError('Session deletion fence is malformed; recovery is required');
+  }
+  return raw as SessionDeleteData;
 }
 
 export interface IncompleteScheduledSessionRef {
@@ -153,8 +217,18 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
     const genealogyData = row.data.genealogy || { children: [] };
     // Older rows may still contain the former session-level git_state JSON.
     // Task snapshots are authoritative; do not expose the legacy projection.
-    const { git_state: _legacyGitState, ...sessionData } = row.data as typeof row.data & {
+    const {
+      git_state: _legacyGitState,
+      sdk_native_state_store_id: _internalStoreId,
+      sdk_native_state_layout: _internalStateLayout,
+      sdk_native_state_deletion_status: _reportedDeleteStatus,
+      opencode_cleanup_cursor: _internalCleanupCursor,
+      [OPENCODE_SESSION_DELETE_DATA_KEY]: _internalDeleteState,
+      ...sessionData
+    } = row.data as typeof row.data & {
       git_state?: unknown;
+      sdk_native_state_deletion_status?: unknown;
+      [OPENCODE_SESSION_DELETE_DATA_KEY]?: unknown;
     };
     const sessionId = row.session_id as SessionID;
     const boardId = branchBoardId ?? null;
@@ -204,6 +278,7 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
         scheduler_init_attempt_count: row.scheduler_init_attempt_count,
         scheduler_init_retry_at: row.scheduler_init_retry_at?.toISOString(),
         ready_for_prompt: row.ready_for_prompt ?? false,
+        sdk_native_state_deletion_status: sessionDeleteData(row.data)?.status,
         archived: Boolean(row.archived), // Convert SQLite integer (0/1) to boolean
         // Active rows have no semantic archive cause. Ignore stale values
         // left by historical callers that cleared `archived` with undefined;
@@ -308,11 +383,31 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
    */
   async create(data: Partial<Session>): Promise<Session> {
     try {
+      for (const key of [
+        'sdk_native_state',
+        'sdk_native_state_layout',
+        'sdk_native_state_store_id',
+        'sdk_native_state_deletion_status',
+        'opencode_cleanup_cursor',
+      ] as const) {
+        if (Object.hasOwn(data, key)) throw new RepositoryError(`Session ${key} is server-managed`);
+      }
       const insertData = this.sessionToInsert(data);
       await runDatabaseTransaction(
         this.db,
         async (tx) => {
           await lockBranchForAdmission(tx, insertData.branch_id);
+          if (insertData.parent_session_id || insertData.forked_from_session_id) {
+            const parentId = insertData.parent_session_id ?? insertData.forked_from_session_id!;
+            await lockRowForUpdate(tx, this.db, sessions, eq(sessions.session_id, parentId));
+            const parent = await select(tx)
+              .from(sessions)
+              .where(eq(sessions.session_id, parentId))
+              .one();
+            if (!parent) throw new EntityNotFoundError('Session', parentId);
+            if (sessionDeleteData(parent.data))
+              throw new RepositoryError('Cannot attach a child while Session deletion is pending');
+          }
           await insert(tx, sessions).values(insertData).run();
         },
         { sqliteImmediate: true, sqliteBusyRetries: 9 }
@@ -712,6 +807,287 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
     }
   }
 
+  /** Claim every Session in a requested removal tree without holding locks over I/O. */
+  async claimDeletionTree(id: string): Promise<SessionDeleteClaim[]> {
+    return this.claimDeletionTrees([id]);
+  }
+
+  async claimDeletionTrees(
+    ids: string[],
+    options: {
+      requireNoTasks?: boolean;
+      refuseNativeState?: boolean;
+      launchUserId?: string;
+      authorize?: (sessions: Session[], branches: BranchRepository) => Promise<void>;
+    } = {}
+  ): Promise<SessionDeleteClaim[]> {
+    const rootIds = await Promise.all(ids.map((id) => this.resolveId(id)));
+    return runDatabaseTransaction(
+      this.db,
+      async (tx) => {
+        const txDb = txAsDb(tx);
+        const rows: SessionRow[] = [];
+        const seen = new Set<string>();
+        const collect = async (sessionId: string): Promise<void> => {
+          if (seen.has(sessionId)) return;
+          seen.add(sessionId);
+          await lockRowForUpdate(txDb, this.db, sessions, eq(sessions.session_id, sessionId));
+          const row = await select(txDb)
+            .from(sessions)
+            .where(eq(sessions.session_id, sessionId))
+            .one();
+          if (!row) throw new EntityNotFoundError('Session', sessionId);
+          rows.push(row);
+          // The parent row lock serializes with SessionRepository.create's child
+          // attachment check, so a child cannot appear behind this inventory.
+          const children = await select(txDb, { session_id: sessions.session_id })
+            .from(sessions)
+            .where(
+              or(
+                eq(sessions.parent_session_id, sessionId),
+                eq(sessions.forked_from_session_id, sessionId)
+              )
+            )
+            .all();
+          for (const child of children
+            .map((entry: { session_id: string }) => entry.session_id)
+            .sort())
+            await collect(child);
+        };
+        for (const rootId of rootIds) await collect(rootId);
+
+        // Automatic removals such as scheduled retention have no actor to
+        // authorize native-state deletion. Reuse the read-only handoff guard
+        // while the full subtree is locked, before writing any deletion fence.
+        if (options.refuseNativeState) {
+          for (const row of rows) await this.assertNativeStateHandoffClearIn(txDb, row);
+        }
+
+        // Recheck the complete locked inventory, not stale request-hook caches.
+        // Refusal rolls back the whole claim before any external work starts.
+        await options.authorize?.(
+          rows.map((row) => this.rowToSession(row)),
+          new BranchRepository(txDb)
+        );
+
+        const ids = rows.map((row) => row.session_id);
+        if (options.requireNoTasks) {
+          const anyTask = await select(txDb, { task_id: tasks.task_id })
+            .from(tasks)
+            .where(inArray(tasks.session_id, ids))
+            .limit(1)
+            .one();
+          if (anyTask)
+            throw new RepositoryError('Tool switch cannot remove a Session with task history');
+        }
+        const unfinished = await select(txDb, { task_id: tasks.task_id })
+          .from(tasks)
+          .where(
+            and(
+              inArray(tasks.session_id, ids),
+              notInArray(tasks.status, [
+                TaskStatus.TIMED_OUT,
+                TaskStatus.COMPLETED,
+                TaskStatus.FAILED,
+                TaskStatus.STOPPED,
+              ])
+            )
+          )
+          .limit(1)
+          .one();
+        if (unfinished) {
+          throw new RepositoryError(
+            'Cannot delete this Session tree while it has unfinished tasks. Stop them first.'
+          );
+        }
+
+        // Plan the complete subtree before mutating any Session, so a later
+        // descendant or ordinary authorization failure cannot leave an
+        // earlier Session with a transient deletion fence.
+        const planned: Array<{
+          row: SessionRow;
+          prior: SessionDeleteData | undefined;
+          claim: SessionDeleteClaim;
+        }> = [];
+        for (const row of rows) {
+          const prior = sessionDeleteData(row.data);
+          const attempt = await select(txDb, { attempt_id: opencodeCheckpointAttempts.attempt_id })
+            .from(opencodeCheckpointAttempts)
+            .where(
+              and(
+                eq(opencodeCheckpointAttempts.session_id, row.session_id),
+                eq(opencodeCheckpointAttempts.tenant_id, getCurrentTenantId() ?? 'default')
+              )
+            )
+            .limit(1)
+            .one();
+          const hasNativeState = Boolean(
+            attempt ||
+              row.data.sdk_native_state ||
+              row.data.sdk_native_state_store_id ||
+              row.data.sdk_native_state_layout ||
+              (prior && prior.status !== 'state_cleared')
+          );
+          if (hasNativeState && !prior && row.data.sdk_native_state_layout !== 'session_root_v1') {
+            throw new OpenCodeNativeStateHandoffRequiredError('session');
+          }
+          if (prior?.status === 'state_cleared' && hasNativeState) {
+            throw new RepositoryError('Session deletion receipt conflicts with native state');
+          }
+          const operationId = prior?.operation_id ?? generateId();
+          const status =
+            prior?.status === 'state_cleared'
+              ? 'state_cleared'
+              : hasNativeState
+                ? 'pending'
+                : 'state_cleared';
+          planned.push({
+            row,
+            prior,
+            claim: {
+              sessionId: row.session_id,
+              branchId: row.branch_id,
+              createdBy: row.created_by,
+              operationId,
+              ...((prior?.launch_user_id ?? options.launchUserId)
+                ? { launchUserId: prior?.launch_user_id ?? options.launchUserId }
+                : {}),
+              status,
+              hasNativeState,
+              ...(row.data.sdk_native_state_layout
+                ? { layout: String(row.data.sdk_native_state_layout) }
+                : {}),
+              ...(row.data.sdk_native_state_store_id
+                ? { storeId: String(row.data.sdk_native_state_store_id) }
+                : {}),
+            },
+          });
+        }
+        const now = new Date();
+        for (const { row, prior, claim } of planned) {
+          await update(txDb, sessions)
+            .set({
+              data: {
+                ...row.data,
+                [OPENCODE_SESSION_DELETE_DATA_KEY]: prior
+                  ? {
+                      ...prior,
+                      ...(claim.launchUserId ? { launch_user_id: claim.launchUserId } : {}),
+                      status: claim.status,
+                    }
+                  : {
+                      operation_id: claim.operationId,
+                      ...(claim.launchUserId ? { launch_user_id: claim.launchUserId } : {}),
+                      status: claim.status,
+                    },
+              },
+              updated_at: now,
+            })
+            .where(eq(sessions.session_id, row.session_id))
+            .run();
+        }
+        return planned.map(({ claim }) => claim);
+      },
+      { sqliteImmediate: true, sqliteBusyRetries: 9 }
+    );
+  }
+
+  /** Read the durable prior invocation before minting a retry token. */
+  async getDeletionCredentialState(
+    sessionId: string,
+    operationId: string
+  ): Promise<SessionDeleteCredentialState> {
+    const row = await select(this.db)
+      .from(sessions)
+      .where(eq(sessions.session_id, sessionId))
+      .one();
+    const marker = row && sessionDeleteData(row.data);
+    if (!marker || marker.operation_id !== operationId || marker.status === 'state_cleared') {
+      throw new RepositoryError('Session deletion operation is no longer current');
+    }
+    return {
+      tokenFingerprint: marker.token_fingerprint ?? null,
+      runId: marker.run_id ?? null,
+    };
+  }
+
+  /** CAS the candidate token for a stable Cloud run. Cloud proves prior closure
+   * before dispatching a retry; stale callbacks also lose the DB fingerprint.
+   */
+  async reserveDeletionCredential(
+    sessionId: string,
+    operationId: string,
+    fingerprint: string,
+    expected: SessionDeleteCredentialState
+  ): Promise<void> {
+    if (!/^[a-f0-9]{64}$/.test(fingerprint))
+      throw new RepositoryError('Invalid deletion credential fingerprint');
+    await runDatabaseTransaction(
+      this.db,
+      async (tx) => {
+        const db = txAsDb(tx);
+        await lockRowForUpdate(db, this.db, sessions, eq(sessions.session_id, sessionId));
+        const row = await select(db).from(sessions).where(eq(sessions.session_id, sessionId)).one();
+        const marker = row && sessionDeleteData(row.data);
+        if (
+          !row ||
+          !marker ||
+          marker.operation_id !== operationId ||
+          marker.status === 'state_cleared'
+        ) {
+          throw new RepositoryError('Session deletion operation is no longer current');
+        }
+        if (
+          (marker.token_fingerprint ?? null) !== expected.tokenFingerprint ||
+          (marker.run_id ?? null) !== expected.runId
+        ) {
+          throw new RepositoryError('Session deletion credential changed during recovery');
+        }
+        await update(db, sessions)
+          .set({
+            data: {
+              ...row.data,
+              [OPENCODE_SESSION_DELETE_DATA_KEY]: {
+                ...marker,
+                token_fingerprint: fingerprint,
+              },
+            },
+            updated_at: new Date(),
+          })
+          .where(eq(sessions.session_id, sessionId))
+          .run();
+      },
+      { sqliteImmediate: true, sqliteBusyRetries: 9 }
+    );
+  }
+
+  async markDeletionError(sessionId: string, operationId: string): Promise<void> {
+    const fullId = await this.resolveId(sessionId);
+    await runDatabaseTransaction(
+      this.db,
+      async (tx) => {
+        const txDb = txAsDb(tx);
+        await lockRowForUpdate(txDb, this.db, sessions, eq(sessions.session_id, fullId));
+        const row = await select(txDb).from(sessions).where(eq(sessions.session_id, fullId)).one();
+        if (!row) throw new EntityNotFoundError('Session', fullId);
+        const marker = sessionDeleteData(row.data);
+        if (!marker || marker.operation_id !== operationId || marker.status === 'state_cleared')
+          return;
+        await update(txDb, sessions)
+          .set({
+            data: {
+              ...row.data,
+              [OPENCODE_SESSION_DELETE_DATA_KEY]: { ...marker, status: 'error' },
+            },
+            updated_at: new Date(),
+          })
+          .where(eq(sessions.session_id, fullId))
+          .run();
+      },
+      { sqliteImmediate: true, sqliteBusyRetries: 9 }
+    );
+  }
+
   /**
    * Find all branch-local descendants for a session with one branch-scoped read.
    *
@@ -860,6 +1236,16 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
       if (Object.hasOwn(updates, 'sdk_home_scope')) {
         throw new RepositoryError('Session sdk_home_scope is immutable after creation');
       }
+      for (const key of [
+        'sdk_native_state',
+        'sdk_native_state_layout',
+        'sdk_native_state_store_id',
+        'sdk_native_state_deletion_status',
+        'opencode_cleanup_cursor',
+      ] as const) {
+        if (Object.hasOwn(updates, key))
+          throw new RepositoryError(`Session ${key} is server-managed`);
+      }
       const fullId = await this.resolveId(id);
       const baseUrl = await getBaseUrl(this.db);
 
@@ -892,6 +1278,33 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
         const boardId = (currentResult.branches?.board_id ?? null) as UUID | null;
         const current = this.rowToSession(currentRow, boardId, baseUrl);
 
+        if (
+          Object.hasOwn(updates, 'branch_id') &&
+          updates.branch_id !== currentRow.branch_id &&
+          current.agentic_tool === 'opencode'
+        ) {
+          const attempt = await select(txAsDb(tx), {
+            attempt_id: opencodeCheckpointAttempts.attempt_id,
+          })
+            .from(opencodeCheckpointAttempts)
+            .where(
+              and(
+                eq(opencodeCheckpointAttempts.session_id, fullId),
+                eq(opencodeCheckpointAttempts.tenant_id, getCurrentTenantId() ?? 'default')
+              )
+            )
+            .limit(1)
+            .one();
+          if (
+            attempt ||
+            currentRow.data.sdk_native_state ||
+            currentRow.data.sdk_native_state_store_id ||
+            currentRow.data.sdk_native_state_layout
+          ) {
+            throw new OpenCodeNativeStateHandoffRequiredError('session');
+          }
+        }
+
         // STEP 2: Deep merge updates into current session (in memory)
         // IMPORTANT: Receiver-side merge for nested objects (permission_config, model_config, etc.)
         // This prevents partial updates from losing existing nested fields.
@@ -913,6 +1326,35 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
         }
 
         const insertData = this.sessionToInsert(merged);
+        // These native-state protocol fields are not part of the public Session
+        // projection. Preserve them verbatim under the Session lock so an
+        // unrelated metadata patch cannot reset the immutable checkpoint,
+        // store identity, or cursor.
+        insertData.data = {
+          ...insertData.data,
+          ...(currentRow.data.sdk_native_state
+            ? { sdk_native_state: currentRow.data.sdk_native_state }
+            : {}),
+          ...(currentRow.data.sdk_native_state_store_id
+            ? { sdk_native_state_store_id: currentRow.data.sdk_native_state_store_id }
+            : {}),
+          ...(currentRow.data.sdk_native_state_layout
+            ? { sdk_native_state_layout: currentRow.data.sdk_native_state_layout }
+            : {}),
+          ...(currentRow.data.opencode_cleanup_cursor
+            ? { opencode_cleanup_cursor: currentRow.data.opencode_cleanup_cursor }
+            : {}),
+          ...(currentRow.data[OPENCODE_SESSION_DELETE_DATA_KEY]
+            ? {
+                [OPENCODE_SESSION_DELETE_DATA_KEY]:
+                  currentRow.data[OPENCODE_SESSION_DELETE_DATA_KEY],
+              }
+            : {}),
+        };
+
+        if (sessionDeleteData(currentRow.data)) {
+          throw new RepositoryError('Cannot update a Session while deletion is pending');
+        }
 
         // STEP 3: Write merged session (within same transaction)
         // Pass all columns via insertData (matches branch repo pattern).
@@ -1075,12 +1517,53 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
     return Number(result?.count ?? 0);
   }
 
+  /** Session deletion cannot discard live or retired checkpoint authority. */
+  async assertNativeStateHandoffClear(sessionId: string): Promise<void> {
+    const fullId = await this.resolveId(sessionId);
+    const row = await select(this.db).from(sessions).where(eq(sessions.session_id, fullId)).one();
+    if (!row) throw new EntityNotFoundError('Session', sessionId);
+    await this.assertNativeStateHandoffClearIn(this.db, row);
+  }
+
+  private async assertNativeStateHandoffClearIn(
+    database: Database,
+    row: SessionRow
+  ): Promise<void> {
+    const deleteState = sessionDeleteData(row.data);
+    if (deleteState && deleteState.status !== 'state_cleared') {
+      throw new OpenCodeNativeStateHandoffRequiredError('session');
+    }
+    const attempt = await select(database, {
+      attempt_id: opencodeCheckpointAttempts.attempt_id,
+    })
+      .from(opencodeCheckpointAttempts)
+      .where(
+        and(
+          eq(opencodeCheckpointAttempts.session_id, row.session_id),
+          eq(opencodeCheckpointAttempts.tenant_id, getCurrentTenantId() ?? 'default')
+        )
+      )
+      .limit(1)
+      .one();
+    if (
+      attempt ||
+      row.data.sdk_native_state ||
+      row.data.sdk_native_state_store_id ||
+      row.data.sdk_native_state_layout
+    ) {
+      throw new OpenCodeNativeStateHandoffRequiredError('session');
+    }
+  }
+
   /**
    * Delete session by ID
    */
   async delete(id: string): Promise<void> {
     try {
       const fullId = await this.resolveId(id);
+      // Keep the guard in the repository as well as the recursive service path:
+      // direct callers must not erase legacy pointers or acknowledged tombstones.
+      await this.assertNativeStateHandoffClear(fullId);
 
       const result = await deleteFrom(this.db, sessions)
         .where(eq(sessions.session_id, fullId))
@@ -1090,6 +1573,7 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
         throw new EntityNotFoundError('Session', id);
       }
     } catch (error) {
+      if (error instanceof OpenCodeNativeStateHandoffRequiredError) throw error;
       console.error(`❌ [SessionRepo] Failed to delete session ${id}:`, sanitizeDbError(error));
       if (error instanceof EntityNotFoundError) throw error;
       throw new RepositoryError(

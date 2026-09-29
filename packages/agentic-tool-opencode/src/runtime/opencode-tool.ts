@@ -22,6 +22,7 @@ import {
   MCP_CLIENT_HINTS,
   type MCPServer,
   type MessageID,
+  type OpenCodeNativeStateAttempt,
   type PermissionMode,
   type SessionID,
   shortId,
@@ -37,6 +38,7 @@ import {
   type OpenCodeEventEffect,
   reconcileOpenCodeMessages,
 } from './event-translator.js';
+import { assertHostedOpenCodeInvocationConfig } from './hosted-config.js';
 import {
   createOpenCodeSanitizer,
   type ManagedChild,
@@ -46,6 +48,7 @@ import {
   resolvePackagedOpenCodeBinary,
   startManagedOpenCodeServer,
 } from './managed-server.js';
+import { type OpenCodeNativeStateLayout, publishOpenCodeCheckpoint } from './native-state.js';
 import { loadOpenCodeSdk } from './sdk-loader.js';
 
 export { resolvePackagedOpenCodeBinary };
@@ -96,6 +99,19 @@ export type RunOpenCodeTurnInput = {
   mcpToken?: string;
   permissionMode?: PermissionMode;
   dataHome?: string;
+  /**
+   * Hosted managed-projection inputs (`context/explorations/opencode-cloud.md`
+   * §4–§5): the projected `OPENCODE_AUTH_CONTENT` map with its individual key
+   * values for redaction, and the Job-local scratch layout whose checkpoint is
+   * published after a successful turn.
+   */
+  managed?: {
+    authContent?: string;
+    authSecrets: readonly string[];
+    nativeState: OpenCodeNativeStateLayout;
+    /** Input is returned only by the committed DB holder grant. */
+    input: OpenCodeNativeStateAttempt | null;
+  };
   signal: AbortSignal;
   persistOpenCodeSessionId: (sessionId: string) => Promise<void>;
 };
@@ -103,6 +119,8 @@ export type RunOpenCodeTurnInput = {
 export type OpenCodeTurnResult = {
   openCodeSessionId: string;
   sessionWasCreated: boolean;
+  /** Present only for managed-projection turns; reported with completion. */
+  nativeStateAttempt?: OpenCodeNativeStateAttempt;
   finalMessage: {
     content: string;
     contentBlocks: ContentBlock[];
@@ -643,7 +661,9 @@ export class OpenCodeTool {
   ): Promise<{ openCodeSessionId: string; sessionWasCreated: boolean }> {
     if (!input.existingOpenCodeSessionId) {
       const openCodeSessionId = await this.createSession(client, input.title, input.directory);
-      await input.persistOpenCodeSessionId(openCodeSessionId);
+      // Managed turns publish the native session id only with the accepted
+      // checkpoint, so a failed first turn never leaves a dangling id behind.
+      if (!input.managed) await input.persistOpenCodeSessionId(openCodeSessionId);
       return { openCodeSessionId, sessionWasCreated: true };
     }
 
@@ -672,6 +692,11 @@ export class OpenCodeTool {
     const preliminarySanitizer = createOpenCodeSanitizer([
       input.mcpToken ?? '',
       input.dataHome ?? '',
+      input.managed?.nativeState.homeDir ?? '',
+      input.managed?.nativeState.attemptsDir ?? '',
+      input.managed?.nativeState.scratchRoot ?? '',
+      input.managed?.nativeState.liveDbPath ?? '',
+      ...(input.managed?.authSecrets ?? []),
     ]);
     let resolvedInvocationConfig: OpenCodeInvocationConfig;
     try {
@@ -679,9 +704,9 @@ export class OpenCodeTool {
     } catch (error) {
       throw preliminarySanitizer.error(error);
     }
-    // OPENCODE_CONFIG_CONTENT is the highest-precedence, invocation-scoped
-    // configuration. Force every interceptable permission through Agor even if
-    // the repository's opencode.json contains permissive rules.
+    // Local mode still merges repository configuration; hosted mode seals
+    // discovery at server startup. Force interceptable permissions in both.
+    if (input.managed) assertHostedOpenCodeInvocationConfig(resolvedInvocationConfig);
     const invocationConfig = this.protectedInvocationConfig(resolvedInvocationConfig);
     const configContent = JSON.stringify(invocationConfig);
     let managedServer: ManagedOpenCodeServer;
@@ -690,14 +715,29 @@ export class OpenCodeTool {
         {
           directory: input.directory,
           dataHome: input.dataHome,
+          hostedLayout: input.managed?.nativeState,
           environment: {
             OPENCODE_CONFIG_CONTENT: configContent,
             // OpenCode resolves this dedicated runtime override when creating
             // session permission rules. Keep it alongside the config content so
             // permissive project/agent rules cannot bypass Agor interception.
             OPENCODE_PERMISSION: JSON.stringify(AGOR_PERMISSION_INTERCEPTION),
+            // Scratch/config roots are pinned by the hosted server boundary;
+            // credentials are projected only onto this child, never to disk.
+            ...(input.managed?.authContent
+              ? { OPENCODE_AUTH_CONTENT: input.managed.authContent }
+              : {}),
           },
-          secrets: [input.mcpToken ?? '', configContent, invocationConfig],
+          secrets: [
+            input.mcpToken ?? '',
+            configContent,
+            invocationConfig,
+            ...(input.managed?.authSecrets ?? []),
+            input.managed?.nativeState.homeDir ?? '',
+            input.managed?.nativeState.attemptsDir ?? '',
+            input.managed?.nativeState.scratchRoot ?? '',
+            input.managed?.nativeState.liveDbPath ?? '',
+          ],
         },
         {
           resolveBinary: this.dependencies.resolveBinary,
@@ -800,6 +840,19 @@ export class OpenCodeTool {
 
     if (turnFailure) throw turnFailure;
     if (!outcome) throw new Error('OpenCode turn ended without a result');
+    if (input.managed) {
+      // Durability barrier after the server has exited: checkpoint, verify,
+      // publish immutably. A failure here makes the turn fail; nothing is
+      // published and the daemon keeps the previously accepted checkpoint.
+      try {
+        outcome.nativeStateAttempt = await publishOpenCodeCheckpoint(input.managed.nativeState, {
+          taskId: input.taskId,
+          openCodeSessionId: outcome.openCodeSessionId,
+        });
+      } catch (error) {
+        throw sanitizer.error(error);
+      }
+    }
     return outcome;
   }
 

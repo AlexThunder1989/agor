@@ -8,6 +8,7 @@ import {
   isTaskScopedExecutorRequest,
   matchesExecutorCommandRuntimeScope,
   matchesTaskExecutorRuntimeScope,
+  requireOpenCodeSessionDeleteCommandToken,
   requireTaskScopedExecutorRuntimeToken,
 } from './executor-runtime-scope.js';
 
@@ -217,5 +218,35 @@ describe('requireTaskScopedExecutorRuntimeToken', () => {
       params: requestParams as Params,
     });
     await expect(guard(ctx)).rejects.toThrow(/scoped to this executor task/);
+  });
+});
+
+describe('requireOpenCodeSessionDeleteCommandToken', () => {
+  const guard = requireOpenCodeSessionDeleteCommandToken();
+  const operationId = '018f0000-0000-7000-8000-000000000001';
+  const command = params({
+    type: 'executor-session',
+    purpose: 'executor-command',
+    session_id: `opencode.session-state-delete:${operationId}`,
+    branch_id: 'branch-1',
+  });
+
+  it('accepts only the matching taskless command token and operation', async () => {
+    const ctx = context({
+      path: 'opencode-native-state',
+      method: 'prepareSessionDeleteCommand',
+      data: { session_id: 'session-1', operation_id: operationId },
+      params: command,
+    });
+    await expect(guard(ctx)).resolves.toBe(ctx);
+    await expect(
+      guard({
+        ...ctx,
+        data: { ...ctx.data, operation_id: '018f0000-0000-7000-8000-000000000002' },
+      } as HookContext)
+    ).rejects.toThrow(/scoped to this OpenCode Session delete operation/);
+    await expect(guard({ ...ctx, params: params() } as HookContext)).rejects.toThrow(
+      /scoped to this OpenCode Session delete operation/
+    );
   });
 });

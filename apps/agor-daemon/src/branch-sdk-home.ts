@@ -55,9 +55,9 @@ export function hasSecureLocalCredentialOverlay(config: Pick<AgorConfig, 'execut
  *
  * A genealogical child may explicitly inherit its parent's scope because it
  * continues the parent's SDK lineage. Every independent Session follows the
- * branch's sticky intent first, then the live deployment default. `adoptBranch`
- * lets the caller persist branch intent in the same transaction as Session
- * creation.
+ * branch's sticky intent first, then the live deployment default.
+ * `adoptBranch` lets the caller persist branch intent in the same transaction
+ * as Session creation.
  */
 export function resolveNewSessionSdkHomeScope(input: {
   branchSdkHomeIntent: 'per_branch' | null;

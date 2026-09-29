@@ -90,6 +90,61 @@ export interface TenantFilesystemInventory {
   unsafeSymlinkCount: number;
 }
 
+/** One deterministic, contents-free walk that can be reused across preflight/copy. */
+export interface TenantFilesystemWalk {
+  entries: TenantFilesystemEntry[];
+  skippedSpecialCount: number;
+  unsafeSymlinkCount: number;
+  /** Relative paths are retained for fail-closed checks; they are not archived. */
+  unsafeSymlinkPaths: string[];
+}
+
+/**
+ * The managed OpenCode native-state tree is deliberately not portable. Accept
+ * both the current `homes/` layout and the legacy singular `home/` spelling;
+ * callers use this against complete inventories and archive manifests, so an
+ * orphaned directory/file is detected even when no Session pointer remains.
+ */
+export function isOpenCodeNativeStateFilesystemPath(path: string): boolean {
+  const normalizedPath = path.replaceAll('\\', '/');
+  return /^(?:home|homes)\/[^/]+\/\.local\/share\/agor\/opencode(?:\/|$)/.test(normalizedPath);
+}
+
+export function hasOpenCodeNativeStateFilesystemEntries(
+  entries: readonly { path: string; type?: TenantFilesystemEntryType }[],
+  unsafeSymlinkPaths: readonly string[] = []
+): boolean {
+  const sessionRootResidue = (entry: { path: string; type?: TenantFilesystemEntryType }) => {
+    const path = entry.path.replaceAll('\\', '/');
+    if (path === 'opencode-sessions') return entry.type !== 'directory';
+    if (!path.startsWith('opencode-sessions/')) return false;
+    const parts = path.split('/');
+    if (parts.length !== 2) return true;
+    return (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(parts[1]!) ||
+      entry.type !== 'directory'
+    );
+  };
+  const mayHideNativeState = (path: string) => {
+    const normalizedPath = path.replaceAll('\\', '/');
+    return (
+      /^(?:home|homes)(?:\/[^/]+(?:\/\.local(?:\/share(?:\/agor(?:\/opencode)?)?)?)?)?$/.test(
+        normalizedPath
+      ) ||
+      normalizedPath === 'opencode-sessions' ||
+      /^opencode-sessions\/[0-9a-f-]+$/.test(normalizedPath)
+    );
+  };
+  return (
+    entries.some(
+      (entry) =>
+        isOpenCodeNativeStateFilesystemPath(entry.path) ||
+        sessionRootResidue(entry) ||
+        (entry.type === 'symlink' && mayHideNativeState(entry.path))
+    ) || unsafeSymlinkPaths.some(mayHideNativeState)
+  );
+}
+
 /**
  * Structural equality of two filesystem entries describing the SAME path:
  * identical type, size, permission mode, content hash, and link target. Path is
@@ -340,6 +395,7 @@ interface WalkAccumulator {
   entries: TenantFilesystemEntry[];
   skippedSpecialCount: number;
   unsafeSymlinkCount: number;
+  unsafeSymlinkPaths: string[];
 }
 
 /**
@@ -401,6 +457,7 @@ async function walkDirectory(
       const linkTarget = internalSymlinkRelativeTarget(root, absoluteDir, rawTarget);
       if (linkTarget === null) {
         acc.unsafeSymlinkCount += 1;
+        acc.unsafeSymlinkPaths.push(relPath);
         continue;
       }
       acc.entries.push({
@@ -464,25 +521,27 @@ async function rootExists(root: string): Promise<boolean> {
  * entries (files carry their SHA-256). Returns an empty list when the root is
  * absent. Never follows symlinks.
  */
-export async function walkTenantFilesystemTree(root: string): Promise<{
-  entries: TenantFilesystemEntry[];
-  skippedSpecialCount: number;
-  unsafeSymlinkCount: number;
-}> {
+export async function walkTenantFilesystemTree(root: string): Promise<TenantFilesystemWalk> {
   if (!(await rootExists(root))) {
-    return { entries: [], skippedSpecialCount: 0, unsafeSymlinkCount: 0 };
+    return { entries: [], skippedSpecialCount: 0, unsafeSymlinkCount: 0, unsafeSymlinkPaths: [] };
   }
   // Canonicalise the root once. Every file we open must resolve to an inode
   // inside this path, or the read is refused (fail closed on an ancestor-symlink
   // swap that would route a read outside the tenant root).
   const allowedRoot = await realpath(root);
-  const acc: WalkAccumulator = { entries: [], skippedSpecialCount: 0, unsafeSymlinkCount: 0 };
+  const acc: WalkAccumulator = {
+    entries: [],
+    skippedSpecialCount: 0,
+    unsafeSymlinkCount: 0,
+    unsafeSymlinkPaths: [],
+  };
   await walkDirectory(root, allowedRoot, root, '', 0, acc);
   acc.entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return {
     entries: acc.entries,
     skippedSpecialCount: acc.skippedSpecialCount,
     unsafeSymlinkCount: acc.unsafeSymlinkCount,
+    unsafeSymlinkPaths: acc.unsafeSymlinkPaths,
   };
 }
 
@@ -593,13 +652,10 @@ async function materializeEntries(
  */
 export async function copyTenantFilesystemInto(
   root: string,
-  destinationFilesDir: string
-): Promise<{
-  entries: TenantFilesystemEntry[];
-  skippedSpecialCount: number;
-  unsafeSymlinkCount: number;
-}> {
-  const walk = await walkTenantFilesystemTree(root);
+  destinationFilesDir: string,
+  precomputedWalk?: TenantFilesystemWalk
+): Promise<TenantFilesystemWalk> {
+  const walk = precomputedWalk ?? (await walkTenantFilesystemTree(root));
   await mkdir(destinationFilesDir, { recursive: true });
   // Canonical root once, so each opened file is proven to resolve inside it.
   // Skip resolution when there is nothing to read (absent/empty root would make

@@ -1075,6 +1075,25 @@ describe('configured executor spawning', () => {
     });
   });
 
+  it('launches Session deletion with its operation and no synthetic Task', async () => {
+    const proc = createMockProcess();
+    spawnMock.mockReturnValue(proc);
+    const { requestExecutor } = await import('./spawn-executor');
+    const operationId = '018f0000-0000-7000-8000-000000000114';
+    const promise = requestExecutor(
+      { command: 'opencode.session-state-delete' },
+      {
+        executorCommandTemplate: 'launch --task {task_id} --operation {operation_id}',
+        templateVariables: { operation_id: operationId },
+      }
+    );
+    expect(spawnMock.mock.calls.at(-1)?.[1]).toContain(
+      `launch --task {task_id} --operation '${operationId}'`
+    );
+    await deliverExecutorResponse(proc, { success: true });
+    await expect(promise).resolves.toMatchObject({ success: true });
+  });
+
   it('does not treat a templated launcher exit as the remote executor result', async () => {
     const proc = createMockProcess();
     spawnMock.mockReturnValue(proc);

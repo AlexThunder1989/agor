@@ -132,6 +132,22 @@ export function createMigrationImpactRegistry(
 }
 
 const MIGRATION_IMPACT_REGISTRY = createMigrationImpactRegistry([
+  ...['0116_opencode_checkpoint_attempts', '0117_opencode_checkpoint_attempts'].map(
+    (name) =>
+      [
+        name,
+        {
+          requiresOfflineCutover: true,
+          impact: defineMigrationImpact({
+            classification: 'protocol',
+            userAction: 'required',
+            rollbackCompatibility: 'incompatible',
+            summary:
+              'Adds OpenCode ledgers. Stop old daemon writers before migration; old session updates discard native-state pointers. PostgreSQL builds unique indexes without CONCURRENTLY, blocking writes.',
+          }),
+        },
+      ] as const
+  ),
   [
     '0113_session_recency_not_null',
     {

@@ -41,6 +41,31 @@ describe('sessionUsesBranchSdkHome', () => {
 });
 
 describe('resolveNewSessionSdkHomeScope', () => {
+  it('follows sticky branch intent for every independent Session and preserves inherited lineage', () => {
+    for (const branchSdkHomeIntent of [null, 'per_branch'] as const) {
+      expect(
+        resolveNewSessionSdkHomeScope({
+          branchSdkHomeIntent,
+          enabledForNewSessions: true,
+        })
+      ).toEqual({ scope: 'branch', adoptBranch: !branchSdkHomeIntent });
+      expect(
+        resolveNewSessionSdkHomeScope({
+          branchSdkHomeIntent,
+          enabledForNewSessions: true,
+          inheritedScope: 'branch',
+        })
+      ).toEqual({ scope: 'branch', adoptBranch: false });
+      expect(
+        resolveNewSessionSdkHomeScope({
+          branchSdkHomeIntent,
+          enabledForNewSessions: true,
+          inheritedScope: 'execution_home',
+        })
+      ).toEqual({ scope: 'execution_home', adoptBranch: false });
+    }
+  });
+
   it('backfills compatibility by keeping fresh sessions in the execution home by default', () => {
     expect(
       resolveNewSessionSdkHomeScope({

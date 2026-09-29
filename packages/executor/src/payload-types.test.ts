@@ -792,3 +792,24 @@ describe('getSupportedCommands', () => {
     expect(commands.length).toBe(31);
   });
 });
+
+// Shape emitted by gateway-channels' staged-upload materialization producer.
+it('parses the existing taskless upload materialization payload without deletion-only fields', () => {
+  expect(
+    parseExecutorPayload(
+      JSON.stringify({
+        command: 'branch.upload.materialize',
+        sessionToken: 'command-token',
+        daemonUrl: 'http://daemon.invalid',
+        params: {
+          branchId: '550e8400-e29b-41d4-a716-446655440000',
+          sessionId: '550e8400-e29b-41d4-a716-446655440001',
+          uploadRef: 'upl_550e8400-e29b-41d4-a716-446655440002',
+          filename: 'input.csv',
+          cwd: '/workspace',
+          principalBranchAccess: 'write',
+        },
+      })
+    ).command
+  ).toBe('branch.upload.materialize');
+});

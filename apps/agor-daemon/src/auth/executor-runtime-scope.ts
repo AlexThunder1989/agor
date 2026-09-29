@@ -160,6 +160,22 @@ export function authenticatedExecutorCommandRuntimeScope(
     : null;
 }
 
+/** Bearer fingerprint comes only from verified REST/immutable socket authority. */
+export function authenticatedExecutorCommandFingerprint(params?: Params): string | null {
+  const scope = authenticatedExecutorCommandRuntimeScope(params);
+  if (!scope) return null;
+  const connection = getAuthenticatedConnectionAuthority(params?.connection);
+  if (connection) {
+    return connection.principal.kind === 'executor' && !connection.principal.taskId
+      ? connection.principal.tokenFingerprint
+      : null;
+  }
+  const token = (params as AuthenticatedParams | undefined)?.authentication?.accessToken;
+  return typeof token === 'string' && token
+    ? createHash('sha256').update(token).digest('hex')
+    : null;
+}
+
 /** Exact action/branch check for a one-purpose executor callback. */
 export function matchesExecutorCommandRuntimeScope(
   params: Params | undefined,
@@ -235,6 +251,24 @@ export function requireTaskScopedExecutorRuntimeToken() {
     const taskId = executorOperationTaskId(context);
     if (!taskId || !isTaskScopedExecutorRequest(context, taskId)) {
       throw new Forbidden('A token scoped to this executor task is required');
+    }
+    return context;
+  };
+}
+
+/** Guard the two taskless native-state delete RPCs with the operation token purpose. */
+export function requireOpenCodeSessionDeleteCommandToken() {
+  return async (context: HookContext): Promise<HookContext> => {
+    const argument = Array.isArray(context.data) ? context.data[0] : context.data;
+    const operationId = (argument as { operation_id?: unknown } | undefined)?.operation_id;
+    const scope = authenticatedExecutorCommandRuntimeScope(context.params);
+    if (
+      typeof operationId !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(operationId) ||
+      !scope?.branchId ||
+      scope.commandId !== `opencode.session-state-delete:${operationId}`
+    ) {
+      throw new Forbidden('A token scoped to this OpenCode Session delete operation is required');
     }
     return context;
   };

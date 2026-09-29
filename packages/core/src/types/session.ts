@@ -245,6 +245,13 @@ export interface Session {
   agentic_tool_version?: string;
   /** SDK session ID for maintaining conversation history (Claude Agent SDK, Codex SDK, etc.) */
   sdk_session_id?: string;
+  /**
+   * Accepted hosted OpenCode checkpoint (managed-projection deployments).
+   * Server-managed: written only by the task completion transition.
+   */
+  sdk_native_state?: import('./opencode-native-state').OpenCodeNativeStateAttempt;
+  /** Server-derived status of the explicit OpenCode checkpoint delete operation. */
+  sdk_native_state_deletion_status?: import('./opencode-native-state').OpenCodeSessionDeleteStatus;
   /** MCP authentication token for Agor self-access */
   mcp_token?: string;
   status: SessionStatus;
@@ -643,6 +650,7 @@ export type CreateSessionInput = Omit<
   | 'agentic_tool_preset_id'
   | 'model_config'
   | 'sdk_home_scope'
+  | 'sdk_native_state_deletion_status'
   | 'usage_summary'
   | 'mcp_defaults_skipped'
 > & {
@@ -656,7 +664,12 @@ export type CreateSessionInput = Omit<
 /** Session patch semantics: omit/undefined preserves, string sets, null clears. */
 export type SessionUpdate = Omit<
   Partial<Session>,
-  'sdk_session_id' | 'sdk_home_scope' | 'usage_summary' | 'mcp_defaults_skipped'
+  | 'sdk_session_id'
+  | 'sdk_home_scope'
+  | 'sdk_native_state'
+  | 'sdk_native_state_deletion_status'
+  | 'usage_summary'
+  | 'mcp_defaults_skipped'
 > & {
   sdk_session_id?: string | null;
 };

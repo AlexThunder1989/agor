@@ -22,6 +22,7 @@ import {
   BRANCH_CLEANUP_COMMAND_MAX_LENGTH,
   BRANCH_DELETION_COMMAND,
   ENVIRONMENT_COMMAND_BUDGET as ENV_BUDGET,
+  OPENCODE_SESSION_STATE_DELETE_COMMAND,
 } from '@agor/core/types';
 import { z } from 'zod';
 
@@ -932,6 +933,20 @@ export const ClaudeAuthFilePayloadSchema = BasePayloadSchema.extend({
 
 export type ClaudeAuthFilePayload = z.infer<typeof ClaudeAuthFilePayloadSchema>;
 
+export const OpenCodeSessionStateDeletePayloadSchema = BasePayloadSchema.extend({
+  command: z.literal(OPENCODE_SESSION_STATE_DELETE_COMMAND),
+  daemonUrl: z.string().url(),
+  sessionToken: z.string().min(1),
+  params: z.object({
+    branchId: z.string().uuid(),
+    sessionId: z.string().uuid(),
+    operationId: z.string().uuid(),
+  }),
+});
+export type OpenCodeSessionStateDeletePayload = z.infer<
+  typeof OpenCodeSessionStateDeletePayloadSchema
+>;
+
 // ═══════════════════════════════════════════════════════════
 // Union Payload Type
 // ═══════════════════════════════════════════════════════════
@@ -993,6 +1008,7 @@ const ExecutorPayloadUnionSchema = z.discriminatedUnion('command', [
   ZellijTabPayloadSchema,
   CodexAuthFilePayloadSchema,
   ClaudeAuthFilePayloadSchema,
+  OpenCodeSessionStateDeletePayloadSchema,
 ]);
 
 export const ExecutorPayloadSchema = ExecutorPayloadUnionSchema.superRefine((payload, ctx) => {

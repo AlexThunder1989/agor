@@ -9,6 +9,10 @@ import type { Session, UUID } from '@agor/core/types';
 import { MessageRole, SessionStatus, TaskStatus } from '@agor/core/types';
 import { describe, expect, it, vi } from 'vitest';
 import { generateId, shortId, toShortId } from '../../lib/ids';
+import {
+  OPENCODE_SESSION_DELETE_DATA_KEY,
+  OPENCODE_SESSION_DELETE_STATUSES,
+} from '../../types/opencode-native-state.js';
 import type { SessionRow } from '../schema';
 import { ownedDbTest as dbTest } from '../test-helpers';
 import { AmbiguousIdError, EntityNotFoundError, getHiddenTenantId, RepositoryError } from './base';
@@ -148,6 +152,37 @@ describe('SessionRepository row mapping', () => {
 
     expect(rowToSessionForTest(repo, row)).not.toHaveProperty('git_state');
   });
+
+  it.each(OPENCODE_SESSION_DELETE_STATUSES)(
+    'projects only the server-owned Session deletion status (%s)',
+    (status) => {
+      const repo = new SessionRepository({} as never);
+      const row = createPostgresStyleSessionRow({
+        data: {
+          genealogy: { children: [] },
+          contextFiles: [],
+          tasks: [],
+          sdk_native_state_deletion_status: 'error',
+          [OPENCODE_SESSION_DELETE_DATA_KEY]: {
+            operation_id: generateId(),
+            status,
+          },
+        } as SessionRow['data'],
+      });
+
+      const session = rowToSessionForTest(repo, row);
+
+      expect(session.sdk_native_state_deletion_status).toBe(status);
+      expect(session).not.toHaveProperty(OPENCODE_SESSION_DELETE_DATA_KEY);
+      expect(JSON.stringify(session)).not.toContain('operation_id');
+    }
+  );
+  it('does not trust a stored projection without the private deletion fence', () => {
+    const repo = new SessionRepository({} as never);
+    const row = createPostgresStyleSessionRow();
+    Object.assign(row.data, { sdk_native_state_deletion_status: 'state_cleared' });
+    expect(rowToSessionForTest(repo, row).sdk_native_state_deletion_status).toBeUndefined();
+  });
 });
 
 // ============================================================================
@@ -155,6 +190,23 @@ describe('SessionRepository row mapping', () => {
 // ============================================================================
 
 describe('SessionRepository.create', () => {
+  dbTest('rejects server-owned native state on direct repository creation', async ({ db }) => {
+    const repo = new SessionRepository(db);
+    const branch = await createTestBranch(db);
+    for (const key of [
+      'sdk_native_state',
+      'sdk_native_state_store_id',
+      'sdk_native_state_deletion_status',
+      'opencode_cleanup_cursor',
+    ]) {
+      await expect(
+        repo.create({
+          ...createSessionData({ branch_id: branch.branch_id }),
+          [key]: { version: 3 },
+        } as never)
+      ).rejects.toThrow(/server-managed/);
+    }
+  });
   dbTest('should create session with all fields', async ({ db }) => {
     const repo = new SessionRepository(db);
     const branch = await createTestBranch(db);
@@ -1153,6 +1205,19 @@ describe('SessionRepository.findAncestors', () => {
 // ============================================================================
 
 describe('SessionRepository.update', () => {
+  dbTest('rejects a forged deletion-status projection', async ({ db }) => {
+    const repo = new SessionRepository(db);
+    const branch = await createTestBranch(db);
+    const session = await repo.create(createSessionData({ branch_id: branch.branch_id }));
+    await expect(
+      repo.update(session.session_id, {
+        sdk_native_state_deletion_status: 'state_cleared',
+      } as never)
+    ).rejects.toThrow(/server-managed/);
+    expect(
+      (await repo.findById(session.session_id))?.sdk_native_state_deletion_status
+    ).toBeUndefined();
+  });
   dbTest('rejects attempts to mutate the immutable SDK-home scope', async ({ db }) => {
     const repo = new SessionRepository(db);
     const branch = await createTestBranch(db);

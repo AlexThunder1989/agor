@@ -21,6 +21,8 @@ import type { HookContext, UserID } from '@agor/core/types';
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import { DrizzleService } from '../src/adapters/drizzle.js';
+import { getOrCreateExecutorConnectionRevocationFence } from '../src/auth/executor-connection-admission.js';
+import { requireOpenCodeSessionDeleteCommandToken } from '../src/auth/executor-runtime-scope.js';
 import { RuntimeJWTStrategy } from '../src/auth/runtime-jwt-strategy.js';
 import { setupMCPRoutes } from '../src/mcp/server.js';
 import { type RegisterHooksContext, registerHooks } from '../src/register-hooks.js';
@@ -29,6 +31,9 @@ import { createBoardsService } from '../src/services/boards.js';
 import { BranchesService } from '../src/services/branches.js';
 import { setupCapabilityPolicyServices } from '../src/services/capability-policies.js';
 import { setupBoardEffectiveAccessService } from '../src/services/groups.js';
+import { OpenCodeNativeStateService } from '../src/services/opencode-native-state.js';
+import { SessionTokenService } from '../src/services/session-token-service.js';
+import { SessionsService } from '../src/services/sessions.js';
 import { TASKS_SERVICE_TRANSPORT_METHODS, TasksService } from '../src/services/tasks.js';
 import { createUsersService } from '../src/services/users.js';
 import { configureChannels, createSocketIOConfig } from '../src/setup/socketio.js';
@@ -42,8 +47,12 @@ export async function boardMetadataTestApp(
   withSocketIO = false,
   withMcp = false,
   withTasks = false,
-  configure?: (app: Application) => Promise<void>
+  configureOrWithSessions: boolean | ((app: Application) => Promise<void>) = false,
+  withNativeState = false
 ) {
+  const withSessions = configureOrWithSessions === true;
+  const configure =
+    typeof configureOrWithSessions === 'function' ? configureOrWithSessions : undefined;
   const app = feathersExpress(feathers());
   app.use(express.json());
   app.configure(rest());
@@ -80,11 +89,40 @@ export async function boardMetadataTestApp(
     );
     app.use('tasks', new TasksService(db, app), { methods: [...TASKS_SERVICE_TRANSPORT_METHODS] });
   }
+  if (withSessions) {
+    app.unuse('sessions');
+    app.use('sessions', new SessionsService(db, app));
+  }
   app.use('users', createUsersService(db, app, config));
+  const tokenService = withNativeState
+    ? new SessionTokenService(
+        { expiration_ms: 60_000, max_uses: -1 },
+        { db, startCleanupTimer: false }
+      )
+    : undefined;
+  tokenService?.setJwtSecret(JWT_SECRET);
+  if (withNativeState) {
+    app.use(
+      'opencode-native-state',
+      new OpenCodeNativeStateService({ db, getConfig: () => config }) as never,
+      { methods: ['prepareSessionDeleteCommand', 'acknowledgeSessionDelete'] }
+    );
+    app
+      .service('opencode-native-state')
+      .hooks({ before: { all: [requireOpenCodeSessionDeleteCommandToken()] } });
+  }
   const authentication = new AuthenticationService(app);
   authentication.register(
     'jwt',
-    new RuntimeJWTStrategy({ multiTenancy: resolveMultiTenancyConfig(config) })
+    new RuntimeJWTStrategy({
+      multiTenancy: resolveMultiTenancyConfig(config),
+      ...(tokenService
+        ? {
+            sessionTokenService: tokenService,
+            executorRevocationFence: getOrCreateExecutorConnectionRevocationFence(app),
+          }
+        : {}),
+    })
   );
   app.use('authentication', authentication);
   if (withSocketIO) {
@@ -120,9 +158,10 @@ export async function boardMetadataTestApp(
     boardsService: boardsService as unknown as RegisterHooksContext['boardsService'],
     branchRepository: new BranchRepository(db),
     usersRepository: new UsersRepository(db),
-    sessionsRepository: withTasks
-      ? sessionsRepository
-      : ({} as RegisterHooksContext['sessionsRepository']),
+    sessionsRepository:
+      withTasks || withSessions
+        ? sessionsRepository
+        : ({} as RegisterHooksContext['sessionsRepository']),
   });
   if (withMcp) setupMCPRoutes(app, db, true, config);
   app.use(errorHandler());
@@ -131,6 +170,7 @@ export async function boardMetadataTestApp(
   if (!address || typeof address === 'string') throw new Error('Expected test TCP server');
   return {
     app,
+    tokenService,
     url: `http://127.0.0.1:${address.port}`,
     headers(userId: UserID, tenantId?: string) {
       const token = jwt.sign(

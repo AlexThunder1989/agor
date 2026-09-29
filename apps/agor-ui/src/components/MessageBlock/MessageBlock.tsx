@@ -510,6 +510,7 @@ const MessageBlockInner: React.FC<MessageBlockProps> = ({
   ) {
     return (
       <MissingCredentialPanel
+        sessionId={sessionId}
         tool={message.metadata.tool}
         client={client}
         onOpenAgenticToolSettings={onOpenAgenticToolSettings}

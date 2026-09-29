@@ -1,9 +1,12 @@
 import { spawn as nodeSpawn, type SpawnOptions } from 'node:child_process';
 import { randomBytes as nodeRandomBytes } from 'node:crypto';
-import { chmod, lstat, mkdir } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { chmod, lstat, mkdir, open } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { OPENCODE_VERSION } from '../shared/known-models.js';
 import { type OpenCodeCommand, resolvePackagedOpenCodeBinary } from './binary.js';
+import { hostedOpenCodeEnvironment } from './hosted-config.js';
+import type { OpenCodeNativeStateLayout } from './native-state.js';
 
 export {
   assertOpenCodeBinaryCompatibility,
@@ -205,6 +208,53 @@ async function ensureOwnedPrivateDirectory(boundary: string, directory: string):
   assertOwnedPrivatePath(await lstat(directory), 0o700);
 }
 
+async function writeHostedConfigFiles(
+  layout: OpenCodeNativeStateLayout,
+  configContent: string,
+  authContent?: string
+): Promise<string> {
+  const root = await lstat(layout.scratchRoot);
+  assertOwnedPrivatePath(root, 0o700);
+  const authDirectory = join(layout.xdg.data, 'opencode');
+  await ensureOwnedPrivateDirectory(layout.scratchRoot, layout.xdg.data);
+  await ensureOwnedPrivateDirectory(layout.scratchRoot, layout.xdg.config);
+  await ensureOwnedPrivateDirectory(layout.scratchRoot, authDirectory);
+
+  const writePrivateFile = async (path: string, content: string) => {
+    if (typeof constants.O_NOFOLLOW !== 'number') {
+      throw new Error('Managed OpenCode scratch does not support no-follow file creation');
+    }
+    const file = await open(
+      path,
+      constants.O_CREAT | constants.O_WRONLY | constants.O_NOFOLLOW,
+      0o600
+    );
+    try {
+      let info = await file.stat();
+      if (!info.isFile() || info.nlink !== 1) {
+        throw new Error('Managed OpenCode scratch payload must be a single-link regular file');
+      }
+      await file.chmod(0o600);
+      await file.truncate(0);
+      await file.writeFile(content, 'utf8');
+      info = await file.stat();
+      assertOwnedPrivatePath(info, 0o600);
+      if (info.nlink !== 1) {
+        throw new Error('Managed OpenCode scratch payload must be a single-link regular file');
+      }
+    } finally {
+      await file.close();
+    }
+  };
+
+  const configPath = join(layout.xdg.config, 'opencode.json');
+  await writePrivateFile(configPath, configContent);
+  if (authContent !== undefined) {
+    await writePrivateFile(join(authDirectory, 'auth.json'), authContent);
+  }
+  return configPath;
+}
+
 export async function ensureOpenCodeDataHome(dataHome: string): Promise<void> {
   const boundary = resolveOpenCodeNativeBoundary(dataHome);
   await ensureOwnedPrivateDirectory(boundary.homeDir, boundary.opencodeRoot);
@@ -401,18 +451,20 @@ export async function startManagedOpenCodeServer(
     dataHome?: string;
     environment?: NodeJS.ProcessEnv;
     secrets?: readonly unknown[];
+    hostedLayout?: OpenCodeNativeStateLayout;
   },
   dependencies: ManagedOpenCodeServerDependencies = {}
 ): Promise<ManagedOpenCodeServer> {
-  const nativeEnvironment = input.dataHome
-    ? {
-        XDG_DATA_HOME: input.dataHome,
-        XDG_CONFIG_HOME: join(input.dataHome, 'xdg-config'),
-        XDG_CACHE_HOME: join(input.dataHome, 'xdg-cache'),
-        XDG_STATE_HOME: join(input.dataHome, 'xdg-state'),
-      }
-    : {};
-  if (input.dataHome) {
+  const nativeEnvironment =
+    input.dataHome && !input.hostedLayout
+      ? {
+          XDG_DATA_HOME: input.dataHome,
+          XDG_CONFIG_HOME: join(input.dataHome, 'xdg-config'),
+          XDG_CACHE_HOME: join(input.dataHome, 'xdg-cache'),
+          XDG_STATE_HOME: join(input.dataHome, 'xdg-state'),
+        }
+      : {};
+  if (input.dataHome && !input.hostedLayout) {
     const boundary = resolveOpenCodeNativeBoundary(input.dataHome);
     await prepareOpenCodeNativeState(boundary.dataHome);
     await Promise.all(
@@ -426,10 +478,25 @@ export async function startManagedOpenCodeServer(
   const password = randomBytes(32).toString('base64url');
   const username = 'agor';
   const authorization = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
+  const suppliedEnvironment = { ...input.environment };
+  let hostedConfigPath: string | undefined;
+  if (input.hostedLayout) {
+    const configContent = suppliedEnvironment.OPENCODE_CONFIG_CONTENT;
+    if (configContent === undefined) {
+      throw new Error('Hosted OpenCode requires generated configuration content');
+    }
+    const authContent = suppliedEnvironment.OPENCODE_AUTH_CONTENT;
+    delete suppliedEnvironment.OPENCODE_CONFIG_CONTENT;
+    delete suppliedEnvironment.OPENCODE_AUTH_CONTENT;
+    hostedConfigPath = await writeHostedConfigFiles(input.hostedLayout, configContent, authContent);
+  }
   const environment = {
-    ...process.env,
-    ...input.environment,
+    ...(input.hostedLayout
+      ? hostedOpenCodeEnvironment(input.hostedLayout, process.env)
+      : process.env),
+    ...suppliedEnvironment,
     ...nativeEnvironment,
+    ...(hostedConfigPath ? { OPENCODE_CONFIG: hostedConfigPath } : {}),
     OPENCODE_SERVER_USERNAME: username,
     OPENCODE_SERVER_PASSWORD: password,
   };

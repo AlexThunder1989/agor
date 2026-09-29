@@ -12,7 +12,10 @@ import { type FileHandle, mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { OPENCODE_DAEMON_CONTRIBUTION } from '@agor/agentic-tool-opencode/daemon';
+import {
+  OPENCODE_DAEMON_CONTRIBUTION,
+  resolveOpenCodeCapabilities,
+} from '@agor/agentic-tool-opencode/daemon';
 import { AGENTIC_TOOL_DISPLAY_NAMES } from '@agor/agentic-tools';
 import {
   ensureEmptyCredentialMountpoint,
@@ -150,7 +153,11 @@ import type { UnixUserMode } from '@agor/core/unix';
 import { type OutboundDnsLookup, safeOutboundFetch } from '@agor/core/utils/safe-outbound-fetch';
 import type express from 'express';
 import { getAgenticToolDaemonContribution } from './agentic-tool-daemon-contributions.js';
-import { authenticatedTaskExecutorRuntimeScope } from './auth/executor-runtime-scope.js';
+import {
+  authenticatedTaskExecutorRuntimeScope,
+  requireOpenCodeSessionDeleteCommandToken,
+  requireTaskScopedExecutorRuntimeToken,
+} from './auth/executor-runtime-scope.js';
 import {
   hasSecureLocalCredentialOverlay,
   resolveBranchSdkHomeCompatibility,
@@ -172,6 +179,7 @@ import {
   trackExecutorProcess,
 } from './executor-tracking.js';
 import { assertHaTaskPermissionSupported, isConstrainedHa } from './ha-support.js';
+import { createDeploymentToolUnsupportedGate } from './integrations/opencode/deployment-capabilities.js';
 import { registerOpenCodeServices } from './integrations/opencode/index.js';
 import {
   inOpenCodeNativeStateMutationSlot,
@@ -334,6 +342,7 @@ import {
 } from './services/mcp-slack-oauth-authority.js';
 import { createMessagesService, MESSAGES_SERVICE_TRANSPORT_METHODS } from './services/messages.js';
 import { performOAuthDisconnect } from './services/oauth-disconnect.js';
+import { OpenCodeNativeStateService } from './services/opencode-native-state.js';
 import { setupOwnershipTransferServices } from './services/ownership-transfer.js';
 import { createReposService } from './services/repos.js';
 import {
@@ -343,7 +352,7 @@ import {
 import { createSessionEnvSelectionsService } from './services/session-env-selections.js';
 import { createSessionMCPServersService } from './services/session-mcp-servers.js';
 import { createSessionStreamsService } from './services/session-streams.js';
-import { createSessionsService } from './services/sessions.js';
+import { createSessionsService, publishSessionDeletionStatus } from './services/sessions.js';
 import {
   createTasksService,
   TASKS_SERVICE_TRANSPORT_METHODS,
@@ -547,8 +556,11 @@ export async function registerServices(ctx: RegisterServicesContext): Promise<Re
   // Core services: sessions, tasks, messages
   // ============================================================================
 
-  const sessionsService = createSessionsService(db, app, (tool) =>
-    isDeploymentAgenticToolAvailable(tool, deploymentAgenticToolPolicy)
+  const sessionsService = createSessionsService(
+    db,
+    app,
+    (tool) => isDeploymentAgenticToolAvailable(tool, deploymentAgenticToolPolicy),
+    createDeploymentToolUnsupportedGate(config)
   ) as unknown as SessionsServiceImpl;
   const tasksService = createTasksService(db, app, sessionTokenService);
   app.use('/sessions', sessionsService, {
@@ -587,6 +599,44 @@ export async function registerServices(ctx: RegisterServicesContext): Promise<Re
     //   - 'tool:start' / 'tool:complete' / 'thinking:chunk': forwarded from
     //      the executor for live tool/thinking visualization.
     events: [...TASKS_SERVICE_CUSTOM_EVENTS],
+  });
+  app.use(
+    '/opencode-native-state',
+    new OpenCodeNativeStateService({
+      db,
+      getConfig: () => config,
+      executorCredentialRevoker: sessionTokenService,
+      onSessionDeletionChanged: (tenantId, sessionId) =>
+        publishSessionDeletionStatus(app, db, tenantId, sessionId),
+    }) as never,
+    {
+      methods: [
+        'begin',
+        'closeRead',
+        'seal',
+        'abandon',
+        'prepareCleanup',
+        'observe',
+        'acknowledgeDelete',
+        'prepareSessionDeleteCommand',
+        'acknowledgeSessionDelete',
+      ],
+    }
+  );
+  app.service('/opencode-native-state').hooks({
+    before: {
+      all: [
+        async (context) => {
+          if (
+            context.method === 'prepareSessionDeleteCommand' ||
+            context.method === 'acknowledgeSessionDelete'
+          ) {
+            return requireOpenCodeSessionDeleteCommandToken()(context);
+          }
+          return requireTaskScopedExecutorRuntimeToken()(context);
+        },
+      ],
+    },
   });
   app.use('/leaderboard', createLeaderboardService(db));
   const deliveryRepository = new DiscordMessageDeliveryRepository(db);
@@ -1304,7 +1354,7 @@ function createDeferredSignal() {
   return { promise, resolve, reject };
 }
 
-function createExecuteHandler(
+export function createExecuteHandler(
   ctx: RegisterServicesContext,
   sessionsService: SessionsServiceImpl,
   sessionTokenService: import('./services/session-token-service.js').SessionTokenService,
@@ -1375,6 +1425,7 @@ function createExecuteHandler(
         tenantId,
         config,
         modelConfig: session.model_config ?? undefined,
+        sessionScope: session.sdk_home_scope,
         sessionOwnerId: session.created_by,
         prompterUserId: userId,
       });
@@ -1490,81 +1541,89 @@ function createExecuteHandler(
       sessionScope: session.sdk_home_scope,
       branchSdkHomeIntent,
     });
+    const managedOpenCode =
+      sdkHomeTool === 'opencode' &&
+      resolveOpenCodeCapabilities(config).mode === 'managed-projection';
     if (useBranchSdkHome) {
       if (!session.branch_id) {
         throw new Error(`Branch-scoped session ${session.session_id} has no branch`);
       }
       const branchId = session.branch_id as string;
-      // A relocatable directory is necessary but not sufficient: OpenCode's
-      // current XDG data home also contains its native credential file. Until
-      // its actor credential namespace is split from branch-owned state, a
-      // branch home would either lose configured credentials or share them.
-      const compatibility = await runWithTenantDatabaseScope(db, tenantId, (tenantDb) =>
-        resolveBranchSdkHomeCompatibility({
-          tool: sdkHomeTool,
-          delegated: isDelegatedExecution,
-          secureLocalCredentialOverlay: hasSecureLocalCredentialOverlay(config),
-          userId,
-          db: tenantDb,
-        })
-      );
-      if (compatibility.unsupportedReason) {
-        throw new BadRequest(
-          `${AGENTIC_TOOL_DISPLAY_NAMES[sdkHomeTool]} cannot run in a branch-scoped session ` +
-            `because ${compatibility.unsupportedReason}. Use a supported tool or authentication mode.`
-        );
-      }
-      const branchHomeDir = getBranchHomePath(branchId, tenantId ?? undefined);
-      // Delegated mode: Agor mounts nothing; the external launcher owns
-      // enforcement and is told the path via `{branch_sdk_home}` (§7.4). We do
-      // not inject env, create dirs, or mount here.
-      branchSdkHomeTemplatePath = branchHomeDir;
-      if (!isDelegatedExecution) {
-        // Lazy-create the branch home + per-tool subdirs on first prompt
-        // (§6.2); idempotent, and the bwrap --bind source must exist pre-spawn
-        // (§7.2 — dropMasksForMissingTargets never drops a --bind).
-        await mkdir(branchHomeDir, { recursive: true });
-        const launch = resolveBranchSdkHomeLaunch({
-          tool: sdkHomeTool,
-          branchId,
-          tenantId: tenantId ?? undefined,
-        });
-        branchSdkHomeEnv = launch.envVars;
-        for (const dir of launch.ensureDirs) await mkdir(dir, { recursive: true });
-        if (compatibility.requiresLocalCodexAuthOverlay) {
-          if (!userId) throw new BadRequest('Codex subscription auth requires a prompt actor');
-          const credentialRoute = await resolveCodexCredentialRoute(
+      // Managed OpenCode's native state is isolated in its protected
+      // per-Session root. It follows sticky Branch intent for prompt sharing,
+      // but never receives a Branch SDK-home mount or launcher path.
+      if (!managedOpenCode) {
+        // A relocatable directory is necessary but not sufficient: OpenCode's
+        // current XDG data home also contains its native credential file. Until
+        // its actor credential namespace is split from branch-owned state, a
+        // branch home would either lose configured credentials or share them.
+        const compatibility = await runWithTenantDatabaseScope(db, tenantId, (tenantDb) =>
+          resolveBranchSdkHomeCompatibility({
+            tool: sdkHomeTool,
+            delegated: isDelegatedExecution,
+            secureLocalCredentialOverlay: hasSecureLocalCredentialOverlay(config),
             userId,
-            (work) => runWithTenantDatabaseScope(db, tenantId, work),
-            config
+            db: tenantDb,
+          })
+        );
+        if (compatibility.unsupportedReason) {
+          throw new BadRequest(
+            `${AGENTIC_TOOL_DISPLAY_NAMES[sdkHomeTool]} cannot run in a branch-scoped session ` +
+              `because ${compatibility.unsupportedReason}. Use a supported tool or authentication mode.`
           );
-          if (!credentialRoute.ok || !credentialRoute.codexHome) {
-            throw new BadRequest(
-              credentialRoute.ok
-                ? 'Codex subscription auth requires a persistent per-user credential home'
-                : credentialRoute.message
-            );
-          }
-          const branchCodexHome = launch.envVars.CODEX_HOME;
-          if (!branchCodexHome) {
-            throw new Error('Codex branch SDK-home launch is missing CODEX_HOME');
-          }
-          const destination = join(branchCodexHome, 'auth.json');
-          // Bubblewrap requires an existing file mountpoint. Keep the
-          // branch-owned inode deliberately empty: the caller credential is
-          // visible only as a per-executor mount and is never copied into
-          // shared branch state. Never replace this dentry: existing executors
-          // on this branch have their caller overlays attached to it. Unsafe
-          // or nonempty mountpoints fail closed rather than being repaired live.
-          await ensureEmptyCredentialMountpoint(destination);
-          branchCodexAuthBind = {
-            source: join(credentialRoute.codexHome, 'auth.json'),
-            destination,
-          };
         }
-        // Bind the branch home into the sandbox (consumed by buildSandboxWrap).
-        // Harmless when the sandbox is disabled (buildSandboxWrap returns null).
-        sandboxBranchSdkHome = branchHomeDir;
+        const branchHomeDir = getBranchHomePath(branchId, tenantId ?? undefined);
+        // Delegated mode: Agor mounts nothing; the external launcher owns
+        // enforcement and is told the path via `{branch_sdk_home}` (§7.4). We do
+        // not inject env, create dirs, or mount here.
+        branchSdkHomeTemplatePath = branchHomeDir;
+        if (!isDelegatedExecution) {
+          // Lazy-create the branch home + per-tool subdirs on first prompt
+          // (§6.2); idempotent, and the bwrap --bind source must exist pre-spawn
+          // (§7.2 — dropMasksForMissingTargets never drops a --bind).
+          await mkdir(branchHomeDir, { recursive: true });
+          const launch = resolveBranchSdkHomeLaunch({
+            tool: sdkHomeTool,
+            branchId,
+            tenantId: tenantId ?? undefined,
+          });
+          branchSdkHomeEnv = launch.envVars;
+          for (const dir of launch.ensureDirs) await mkdir(dir, { recursive: true });
+          if (compatibility.requiresLocalCodexAuthOverlay) {
+            if (!userId) throw new BadRequest('Codex subscription auth requires a prompt actor');
+            const credentialRoute = await resolveCodexCredentialRoute(
+              userId,
+              (work) => runWithTenantDatabaseScope(db, tenantId, work),
+              config
+            );
+            if (!credentialRoute.ok || !credentialRoute.codexHome) {
+              throw new BadRequest(
+                credentialRoute.ok
+                  ? 'Codex subscription auth requires a persistent per-user credential home'
+                  : credentialRoute.message
+              );
+            }
+            const branchCodexHome = launch.envVars.CODEX_HOME;
+            if (!branchCodexHome) {
+              throw new Error('Codex branch SDK-home launch is missing CODEX_HOME');
+            }
+            const destination = join(branchCodexHome, 'auth.json');
+            // Bubblewrap requires an existing file mountpoint. Keep the
+            // branch-owned inode deliberately empty: the caller credential is
+            // visible only as a per-executor mount and is never copied into
+            // shared branch state. Never replace this dentry: existing executors
+            // on this branch have their caller overlays attached to it. Unsafe
+            // or nonempty mountpoints fail closed rather than being repaired live.
+            await ensureEmptyCredentialMountpoint(destination);
+            branchCodexAuthBind = {
+              source: join(credentialRoute.codexHome, 'auth.json'),
+              destination,
+            };
+          }
+          // Bind the branch home into the sandbox (consumed by buildSandboxWrap).
+          // Harmless when the sandbox is disabled (buildSandboxWrap returns null).
+          sandboxBranchSdkHome = branchHomeDir;
+        }
       }
     }
 
@@ -1721,9 +1780,20 @@ function createExecuteHandler(
       return contribution.getExecutorLaunch({
         tenantId,
         session,
+        taskId: data.taskId,
         homeDir: executorHomeDir,
+        config,
       });
     })();
+
+    // Managed checkpoint coordination is a server-derived Task requirement,
+    // persisted before any executor token or payload can be issued. Local
+    // OpenCode and every other tool retain their existing lifecycle.
+    if (executorLaunch?.managedProtocolVersion === 3) {
+      await runWithTenantDatabaseScope(db, tenantId, () =>
+        tasksService.stampManagedOpenCodeProtocol(data.taskId)
+      );
+    }
 
     // Issue only after every launch prerequisite succeeds. The credential
     // scope repeats the locked, server-derived launch authority; token retries
@@ -1959,7 +2029,7 @@ function createExecuteHandler(
       },
     });
 
-    if (executorLaunch) {
+    if (executorLaunch?.requiresLocalContainment) {
       const ready = createDeferredSignal();
       const finished = createDeferredSignal();
       let spawned = false;

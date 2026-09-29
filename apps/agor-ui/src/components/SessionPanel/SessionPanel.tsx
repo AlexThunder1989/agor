@@ -84,6 +84,7 @@ import { ForkSpawnModal } from '../ForkSpawnModal/ForkSpawnModal';
 import type { ModelConfig } from '../ModelSelector';
 import { CreatedByTag } from '../metadata';
 import { getUrlDisplayLabel } from '../Pill/url-helpers';
+import { Tag } from '../Tag';
 import { ToolIcon } from '../ToolIcon';
 import {
   buildPromptWithAttachments,
@@ -1554,6 +1555,24 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
                 </Tooltip>
               )}
               <Badge status={getStatusColor()} text={session.status.toUpperCase()} />
+              {session.sdk_native_state_deletion_status && (
+                <Tag
+                  color={
+                    session.sdk_native_state_deletion_status === 'error'
+                      ? 'error'
+                      : session.sdk_native_state_deletion_status === 'pending'
+                        ? 'processing'
+                        : 'success'
+                  }
+                  style={{ marginTop: token.sizeUnit, whiteSpace: 'normal' }}
+                >
+                  {session.sdk_native_state_deletion_status === 'pending'
+                    ? 'OpenCode state deletion pending'
+                    : session.sdk_native_state_deletion_status === 'error'
+                      ? 'OpenCode state deletion failed — retry remove'
+                      : 'OpenCode state cleared — retry remove'}
+                </Tag>
+              )}
               {session.created_by && (
                 <div style={{ marginTop: token.sizeUnit }}>
                   <CreatedByTag

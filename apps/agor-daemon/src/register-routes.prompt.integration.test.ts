@@ -23,7 +23,7 @@ import type {
   Task,
   TaskID,
 } from '@agor/core/types';
-import { SessionStatus, TaskStatus } from '@agor/core/types';
+import { MessageRole, SessionStatus, TaskStatus } from '@agor/core/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type RegisterRoutesContext, registerRoutes } from './register-routes.js';
 import { TasksService } from './services/tasks.js';
@@ -38,7 +38,7 @@ async function fixture() {
   const rawDb = await createDatabaseAsync({ dialect: 'sqlite', url: ':memory:' });
   cleanup.push(() => (rawDb as unknown as { $client: { close(): void } }).$client.close());
   await runMigrations(rawDb);
-  const db = createTenantScopedDatabaseProxy(rawDb);
+  const db = createTenantScopedDatabaseProxy(rawDb, { requireScope: true });
   const scoped = <T>(work: () => Promise<T>) =>
     runWithTenantDatabaseScope(db, DEFAULT_STATIC_TENANT_ID, work);
   const sessionsRepository = new SessionRepository(db);
@@ -154,6 +154,7 @@ async function fixture() {
     session,
     actor,
     taskRepo,
+    app,
     messages,
     sessionsRepository,
     events,
@@ -167,6 +168,33 @@ async function fixture() {
 }
 
 describe('registered prompt route launch handoff', () => {
+  it('writes a transcript error inside a fresh tenant scope after a deferred launch refusal', async () => {
+    const f = await fixture();
+    // The fixture's bare service lacks production's tenant-scoping hooks.
+    const tasks = f.app.service('tasks');
+    const patch = tasks.patch.bind(tasks);
+    vi.spyOn(tasks, 'patch').mockImplementation((...args) => f.scoped(() => patch(...args)));
+    f.executeTask.mockRejectedValueOnce(new Error('owner-only launch refused'));
+    const task = await f.prompt({ prompt: 'must not launch under another owner' });
+    await vi.waitFor(async () => {
+      expect(await f.scoped(() => f.taskRepo.findById(task.task_id))).toMatchObject({
+        status: TaskStatus.FAILED,
+      });
+      expect(await f.scoped(() => f.sessionsRepository.countMessages(f.session.session_id))).toBe(
+        2
+      );
+    });
+    expect(f.events.filter((event) => event === 'message')).toHaveLength(2);
+    expect(await f.scoped(() => f.messages.findBySessionId(f.session.session_id))).toEqual([
+      expect.any(Object),
+      expect.objectContaining({
+        role: MessageRole.ASSISTANT,
+        content: expect.stringContaining('owner-only launch refused'),
+        metadata: { is_meta: true },
+      }),
+    ]);
+  });
+
   it('launches a fresh idle admission once after commit, without another claim or queued event', async () => {
     const f = await fixture();
     const task = await f.prompt({ prompt: 'disposable fixture' });

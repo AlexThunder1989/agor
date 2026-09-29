@@ -142,7 +142,7 @@ function renderPanel({
   open?: boolean;
   onClose?: ReturnType<typeof vi.fn>;
 } = {}) {
-  render(
+  const rendered = render(
     <ConnectionProvider value={connected}>
       <AppActionsProvider value={{ onOpenTerminal, onChooseAgenticTool }}>
         <AntApp>
@@ -157,7 +157,7 @@ function renderPanel({
       </AppActionsProvider>
     </ConnectionProvider>
   );
-  return { onOpenTerminal, onClose };
+  return { ...rendered, onOpenTerminal, onClose };
 }
 
 const findShortcuts = [
@@ -569,6 +569,24 @@ describe('SessionPanel mobile header', () => {
     renderPanel();
     expect(screen.getByRole('button', { name: 'Close panel' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
+  });
+});
+
+describe('SessionPanel native-state deletion status', () => {
+  it('keeps pending, failed, and cleared-awaiting-remove states visible', () => {
+    const statuses = [
+      ['pending', 'OpenCode state deletion pending'],
+      ['error', 'OpenCode state deletion failed — retry remove'],
+      ['state_cleared', 'OpenCode state cleared — retry remove'],
+    ] as const;
+
+    for (const [status, label] of statuses) {
+      const { unmount } = renderPanel({
+        activeSession: { ...session, sdk_native_state_deletion_status: status },
+      });
+      expect(screen.getByText(label)).toBeInTheDocument();
+      unmount();
+    }
   });
 });
 

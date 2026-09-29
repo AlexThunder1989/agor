@@ -102,8 +102,11 @@ describe('SessionsService.remove — swap-replace TOCTOU guard', () => {
       await createTask(db, sessionId);
 
       await expect(
-        service.remove(sessionId, { query: { _swapReplace: true } } as any)
-      ).rejects.toThrow(/gained.*task/i);
+        service.remove(sessionId, {
+          query: { _swapReplace: true },
+          tenant: { tenant_id: 'default' },
+        } as any)
+      ).rejects.toThrow(/task history/i);
 
       const sessionRepo = new SessionRepository(db);
       const stillThere = await sessionRepo.findById(sessionId);
@@ -118,6 +121,7 @@ describe('SessionsService.remove — swap-replace TOCTOU guard', () => {
 
     const removed = (await service.remove(sessionId, {
       query: { _swapReplace: true },
+      tenant: { tenant_id: 'default' },
     } as any)) as Session;
     expect(removed.session_id).toBe(sessionId);
 
@@ -133,7 +137,9 @@ describe('SessionsService.remove — swap-replace TOCTOU guard', () => {
       const sessionId = await createSession(db, branchId);
       const taskId = await createTask(db, sessionId);
 
-      await expect(service.remove(sessionId)).rejects.toThrow(/unfinished tasks/i);
+      await expect(
+        service.remove(sessionId, { tenant: { tenant_id: 'default' } } as any)
+      ).rejects.toThrow(/unfinished tasks/i);
 
       const sessionRepo = new SessionRepository(db);
       const taskRepo = new TaskRepository(db);
@@ -148,7 +154,9 @@ describe('SessionsService.remove — swap-replace TOCTOU guard', () => {
     const sessionId = await createSession(db, branchId);
     await createTask(db, sessionId, { status: TaskStatus.COMPLETED });
 
-    const removed = (await service.remove(sessionId)) as Session;
+    const removed = (await service.remove(sessionId, {
+      tenant: { tenant_id: 'default' },
+    } as any)) as Session;
     expect(removed.session_id).toBe(sessionId);
 
     const sessionRepo = new SessionRepository(db);

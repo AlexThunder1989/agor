@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 /**
  * Sessions Service
  *
@@ -5,6 +6,7 @@
  * Uses DrizzleService adapter with SessionRepository.
  */
 
+import { resolveOpenCodeCapabilities } from '@agor/agentic-tool-opencode/daemon';
 import { getAgenticToolModelConfiguration } from '@agor/agentic-tools';
 import {
   isResolvedAgenticToolModelConfiguration,
@@ -25,6 +27,9 @@ import {
   lockRowForUpdate,
   MCPServerRepository,
   mcpServers,
+  OpenCodeNativeStateHandoffRequiredError,
+  RepositoryError,
+  runWithTenantContext,
   runWithTenantDatabaseScope,
   runWithTenantDatabaseTransaction,
   SessionEnvSelectionRepository,
@@ -77,6 +82,7 @@ import {
   classifyBranchFilesystemReadiness,
   isAgenticToolDefaultConfigurationReference,
   isSessionExecuting,
+  OPENCODE_SESSION_STATE_DELETE_COMMAND,
   SessionStatus,
   USER_DEFAULT_AGENTIC_CONFIGURATION,
 } from '@agor/core/types';
@@ -92,6 +98,7 @@ import {
 import { requireActiveAgenticTool } from '../utils/agentic-tool-runtime.js';
 import {
   determineSpawnIdentity,
+  hasBranchPermission,
   isSuperAdmin,
   loadUnixUsernameForUser,
   PERMISSION_RANK,
@@ -99,6 +106,8 @@ import {
 } from '../utils/branch-authorization.js';
 import { emitServiceEvent } from '../utils/emit-service-event.js';
 import { parseLastMessageTruncationLength } from '../utils/query-params.js';
+import { getDaemonUrl, requestExecutor } from '../utils/spawn-executor.js';
+import { withFreshTenantWrite } from '../utils/tenant-db-scope.js';
 import { deploymentAgenticToolUnavailableMessage } from './agentic-tool-deployment.js';
 import {
   BTW_ARCHIVED_REASON,
@@ -110,6 +119,7 @@ import {
   type SessionArchiveReason,
   type SessionArchiveTarget,
 } from './session-archive.js';
+import { issueExecutorCommandToken } from './session-token-service.js';
 
 type MaterializedAgenticToolConfiguration = Awaited<
   ReturnType<typeof materializeAgenticToolConfiguration>
@@ -208,6 +218,26 @@ export type SessionParams = QueryParams<{
      */
     _sdkHomeScope?: SessionSdkHomeScope;
   };
+
+type SessionDeleteClaim = {
+  sessionId: string;
+  branchId: string;
+  createdBy: string;
+  operationId: string;
+  launchUserId?: string;
+  status: 'pending' | 'error' | 'state_cleared';
+  hasNativeState: boolean;
+  layout?: string;
+  storeId?: string;
+};
+
+type SessionDeletionRepository = SessionRepository & {
+  claimDeletionTrees(
+    ids: string[],
+    options?: Parameters<SessionRepository['claimDeletionTrees']>[1]
+  ): Promise<SessionDeleteClaim[]>;
+  markDeletionError(sessionId: string, operationId: string): Promise<void>;
+};
 
 /**
  * Whether a sessions `find` query should be served by `SessionRepository.findPage`
@@ -338,10 +368,19 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
   private taskRepo: TaskRepository;
   private db: TenantScopeAwareDatabase;
   private deploymentAvailable: (tool: AgenticToolName) => boolean;
+  private deploymentToolUnsupported: (tool: AgenticToolName) => BadRequest | undefined;
 
   private assertDeploymentToolConfigured(tool: AgenticToolName): void {
-    if (this.deploymentAvailable(tool)) return;
-    throw new BadRequest(deploymentAgenticToolUnavailableMessage(tool));
+    if (!this.deploymentAvailable(tool)) {
+      throw new BadRequest(deploymentAgenticToolUnavailableMessage(tool));
+    }
+    // An installed tool can still be unsupported by this deployment's execution
+    // topology (for example OpenCode in a hosted workspace without the hosted
+    // native-state contract). Refuse at creation with the same structured
+    // reason the settings and prompt paths report, instead of accepting a
+    // session whose first prompt can only fail.
+    const unsupported = this.deploymentToolUnsupported(tool);
+    if (unsupported) throw unsupported;
   }
 
   private assertSupportedModelConfig(
@@ -377,7 +416,8 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
   constructor(
     db: TenantScopeAwareDatabase,
     app: Application,
-    deploymentAvailable: (tool: AgenticToolName) => boolean = () => true
+    deploymentAvailable: (tool: AgenticToolName) => boolean = () => true,
+    deploymentToolUnsupported: (tool: AgenticToolName) => BadRequest | undefined = () => undefined
   ) {
     const sessionRepo = new SessionRepository(db);
     super(sessionRepo, {
@@ -393,6 +433,7 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
     this.sessionRepo = sessionRepo;
     this.db = db;
     this.deploymentAvailable = deploymentAvailable;
+    this.deploymentToolUnsupported = deploymentToolUnsupported;
     this.app = app;
     // Custom service-to-service methods such as setMCPServers() can run with
     // tenant identity but without a request-scoped database transaction. Bind
@@ -430,11 +471,17 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
     if (!existing || existing.agentic_tool === nextTool) return;
     requireActiveAgenticTool(existing.agentic_tool);
 
+    const config =
+      typeof (this.app as { get?: unknown }).get === 'function'
+        ? this.app.get('config')
+        : ({} as import('@agor/core/config').AgorConfig);
+    const managedOpenCode =
+      nextTool === 'opencode' && resolveOpenCodeCapabilities(config).mode === 'managed-projection';
     // A branch-scoped session cannot be switched to a tool whose native state
-    // cannot honor the branch-state/caller-credential split. Enforce this at
-    // the mutation boundary rather than waiting for a confusing launch-time
-    // refusal.
-    if (existing.sdk_home_scope === 'branch') {
+    // cannot honor the branch-state/caller-credential split. Managed OpenCode
+    // stores native state under its protected per-Session root and is the
+    // supported shared-session exception; local OpenCode remains fail-closed.
+    if (existing.sdk_home_scope === 'branch' && !managedOpenCode) {
       const unsupportedReason = branchSdkHomeUnsupportedReason(nextTool);
       if (unsupportedReason) {
         throw new BadRequest(
@@ -472,6 +519,16 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
     }
     if (Object.hasOwn(data, 'sdk_home_scope')) {
       throw new BadRequest('sdk_home_scope is server-managed and cannot be set by clients');
+    }
+    if (Object.hasOwn(data, 'sdk_native_state')) {
+      throw new BadRequest('sdk_native_state is server-managed and cannot be set by clients');
+    }
+    if (
+      Object.hasOwn(data, 'sdk_native_state_store_id') ||
+      Object.hasOwn(data, 'opencode_cleanup_cursor') ||
+      Object.hasOwn(data, 'sdk_native_state_deletion_status')
+    ) {
+      throw new BadRequest('OpenCode native-state coordination is server-managed');
     }
     const explicitMcpServerIds = normalizeCreateMcpServerIds(
       (data as { mcpServerIds?: unknown }).mcpServerIds
@@ -580,12 +637,15 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
           ? this.app.get('config')
           : ({} as import('@agor/core/config').AgorConfig);
       const sdkHomeConfig = resolveSdkHomeConfig(config);
+      const managedOpenCode =
+        agenticTool === 'opencode' &&
+        resolveOpenCodeCapabilities(config).mode === 'managed-projection';
       const admission = resolveNewSessionSdkHomeScope({
         branchSdkHomeIntent: branch.sdk_home ?? null,
         enabledForNewSessions: sdkHomeConfig.enabledForNewSessions,
         inheritedScope: params?._sdkHomeScope,
       });
-      if (admission.scope === 'branch') {
+      if (admission.scope === 'branch' && !managedOpenCode) {
         // Admission must reject credential/state combinations before it
         // performs the sticky branch transition. Otherwise a failed first
         // Codex-native Session would permanently adopt the branch even though
@@ -1271,7 +1331,11 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
         callback_config: callbackConfig,
         // Don't copy sdk_session_id - spawn will get its own via forkSession:true
       },
-      { ...params, _agenticConfigResolved: true, _sdkHomeScope: parent.sdk_home_scope }
+      {
+        ...params,
+        _agenticConfigResolved: true,
+        _sdkHomeScope: parent.sdk_home_scope,
+      }
     );
 
     // Cast spawnedSession to Session to handle return type (create returns Session | Session[])
@@ -1719,18 +1783,84 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
     params?: SessionParams
   ): Promise<Session | Session[]> {
     const tenantId = params?.tenant?.tenant_id ?? getCurrentTenantId();
-    const selected = id === null ? ((await super.find(params)) as Session[]) : null;
+    if (!tenantId) throw new Forbidden('Session deletion requires tenant scope');
+    const selected =
+      id === null
+        ? await runWithTenantDatabaseScope(this.db, tenantId, async () => {
+            // Like ordinary adapter multi-remove, select all matches, not a
+            // projected/paginated find page. Keep complete records for claims.
+            const query = (params?.query ?? {}) as Query;
+            const tenant = this.getTenant(params);
+            const records = (await this.sessionRepo.findAll()).filter((row) =>
+              this.rowBelongsToTenant(row, tenant)
+            );
+            return this.sortData(this.filterData(records, query), query.$sort);
+          })
+        : null;
+    const rootIds = selected ? selected.map((session) => session.session_id) : [String(id)];
+    const deletionRepo = this.sessionRepo as SessionDeletionRepository;
+    const claims = await withFreshTenantWrite(this.db, tenantId, () =>
+      deletionRepo.claimDeletionTrees(rootIds, {
+        authorize: (sessions, branches) => this.assertCanDeleteSessions(sessions, branches, params),
+        refuseNativeState: !params?.provider && !params?.user?.user_id,
+        launchUserId: params?.user?.user_id,
+        requireNoTasks: Boolean(
+          (params?.query as { _swapReplace?: boolean } | undefined)?._swapReplace
+        ),
+      })
+    ).catch((error: unknown) => {
+      // Preserve the ordinary remove conflict contract for Stop-first and
+      // zero-history guards now checked by the atomic subtree claim.
+      if (error instanceof OpenCodeNativeStateHandoffRequiredError) throw error;
+      if (error instanceof RepositoryError) throw new Conflict(error.message);
+      throw error;
+    });
+    const needsExplicitRetry = claims.some(
+      (claim) => claim.hasNativeState && claim.status !== 'state_cleared'
+    );
+    if (needsExplicitRetry) {
+      for (const claim of claims) {
+        await publishSessionDeletionStatus(this.app, this.db, tenantId, claim.sessionId);
+      }
+    }
+    for (const claim of claims) {
+      if (claim.status === 'state_cleared') continue;
+      try {
+        await this.dispatchSessionStateDelete(claim, params, tenantId);
+      } catch {
+        await withFreshTenantWrite(this.db, tenantId, () =>
+          deletionRepo.markDeletionError(claim.sessionId, claim.operationId)
+        );
+      }
+      await publishSessionDeletionStatus(this.app, this.db, tenantId, claim.sessionId);
+    }
+    if (needsExplicitRetry) {
+      throw new Conflict(
+        'Session deletion is pending: checkpoint closure and file removal are being verified. Retry the ordinary remove operation to finish.'
+      );
+    }
+
     return runWithTenantDatabaseTransaction(this.db, tenantId, async (scoped) => {
+      await assertTenantWritable(scoped, tenantId);
       const sessionRepo = new SessionRepository(scoped);
       const taskRepo = new TaskRepository(scoped);
       if (selected) {
-        const results: Session[] = [];
+        const removed = new Map<string, Session>();
+        const selectedIds = new Set(selected.map((session) => session.session_id));
         for (const session of selected) {
-          results.push(
-            await this.removeOne(session.session_id, params, false, sessionRepo, taskRepo)
-          );
+          if (!removed.has(session.session_id)) {
+            await this.removeOne(
+              session.session_id,
+              params,
+              false,
+              sessionRepo,
+              taskRepo,
+              removed,
+              selectedIds
+            );
+          }
         }
-        return results;
+        return selected.map((session) => removed.get(session.session_id)!);
       }
 
       // "Switch tool" (`chooseAgenticTool` in the UI) removes the session it's
@@ -1752,15 +1882,123 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
     });
   }
 
+  private async dispatchSessionStateDelete(
+    claim: SessionDeleteClaim,
+    params: SessionParams | undefined,
+    tenantId: string
+  ): Promise<void> {
+    if (!claim.hasNativeState) return;
+    if (claim.layout !== 'session_root_v1') {
+      throw new Conflict('Legacy or unknown native state has no authorized Session-local deleter');
+    }
+    if (!params?.user?.user_id) {
+      throw new Forbidden('Session delete retry requires an authenticated actor');
+    }
+    const launchUserId = claim.launchUserId;
+    if (!launchUserId) throw new Conflict('Session deletion launch identity is unavailable');
+    const commandSubjectUserId = params.user.user_id;
+    const nativeState = this.app.service('opencode-native-state') as unknown as {
+      observeSessionDelete(input: { session_id: string; operation_id: string }): Promise<void>;
+    };
+    await runWithTenantContext(tenantId, () =>
+      nativeState.observeSessionDelete({
+        session_id: claim.sessionId,
+        operation_id: claim.operationId,
+      })
+    );
+    const previous = await withFreshTenantWrite(this.db, tenantId, () =>
+      this.sessionRepo.getDeletionCredentialState(claim.sessionId, claim.operationId)
+    );
+    const commandId = `${OPENCODE_SESSION_STATE_DELETE_COMMAND}:${claim.operationId}`;
+    const sessionToken = await issueExecutorCommandToken(
+      this.app,
+      commandId,
+      commandSubjectUserId,
+      claim.branchId
+    );
+    await withFreshTenantWrite(this.db, tenantId, async () => {
+      await (this.sessionRepo as SessionDeletionRepository).claimDeletionTrees([claim.sessionId], {
+        authorize: (sessions, branches) => this.assertCanDeleteSessions(sessions, branches, params),
+      });
+      await this.sessionRepo.reserveDeletionCredential(
+        claim.sessionId,
+        claim.operationId,
+        createHash('sha256').update(sessionToken).digest('hex'),
+        previous
+      );
+    });
+    const result = await requestExecutor(
+      {
+        command: OPENCODE_SESSION_STATE_DELETE_COMMAND,
+        sessionToken,
+        daemonUrl: getDaemonUrl(),
+        params: {
+          branchId: claim.branchId,
+          tenantId,
+          sessionId: claim.sessionId,
+          operationId: claim.operationId,
+        },
+      },
+      {
+        logPrefix: `[Session ${claim.sessionId}]`,
+        sensitiveOutput: true,
+        templateVariables: {
+          user_id: launchUserId,
+          branch_id: claim.branchId,
+          session_id: claim.sessionId,
+          operation_id: claim.operationId,
+        },
+      }
+    );
+    if (!result.success) {
+      throw new Conflict('OpenCode Session checkpoint deletion could not be confirmed');
+    }
+  }
+
+  /** Fresh policy reads inside the repository's locked subtree claim. */
+  private async assertCanDeleteSessions(
+    sessions: Session[],
+    branches: BranchRepository,
+    params?: SessionParams
+  ): Promise<void> {
+    if (!params?.provider || params.user?._isServiceAccount) return;
+    if (!params.user?.user_id) throw new NotAuthenticated('Authentication required');
+    for (const branchId of new Set(sessions.map((session) => session.branch_id))) {
+      const branch = await branches.findById(branchId);
+      if (!branch) throw new Forbidden('Session branch is unavailable');
+      const userId = params.user.user_id as UUID;
+      if (
+        !hasBranchPermission(
+          branch,
+          userId,
+          await branches.isOwner(branchId, userId),
+          'all',
+          params.user.role,
+          this.shouldAllowSuperadminBypass(),
+          await branches.resolveUserPermission(branch, userId)
+        )
+      ) {
+        throw new Forbidden("You need 'all' permission to delete every Session in this tree.");
+      }
+    }
+  }
+
   private async removeOne(
     id: string,
     params: SessionParams | undefined,
     emitRemoved: boolean,
     sessionRepo: SessionRepository,
-    taskRepo: TaskRepository
+    taskRepo: TaskRepository,
+    removed = new Map<string, Session>(),
+    selectedIds = new Set<string>()
   ): Promise<Session> {
     const session = await sessionRepo.findById(id);
     if (!session) throw new NotFound(`Session not found: ${id}`);
+    await (
+      sessionRepo as SessionRepository & {
+        assertNativeStateHandoffClear(id: string): Promise<void>;
+      }
+    ).assertNativeStateHandoffClear(session.session_id);
     if (await taskRepo.hasNonterminalForSession(session.session_id)) {
       throw new Conflict(
         `Cannot delete session ${session.session_id} while it has unfinished tasks. Stop them first.`
@@ -1769,10 +2007,21 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
     const children = await sessionRepo.findChildren(id);
 
     for (const child of children) {
-      await this.removeOne(child.session_id, params, true, sessionRepo, taskRepo);
+      if (!removed.has(child.session_id)) {
+        await this.removeOne(
+          child.session_id,
+          params,
+          !selectedIds.has(child.session_id),
+          sessionRepo,
+          taskRepo,
+          removed,
+          selectedIds
+        );
+      }
     }
 
     await sessionRepo.delete(id);
+    removed.set(session.session_id, session);
 
     if (emitRemoved) {
       emitServiceEvent(this.app, {
@@ -1797,6 +2046,16 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
     params?: SessionParams
   ): Promise<Session | Session[]> {
     assertSessionArchiveStateUsesDedicatedOperation(data);
+    if (Object.hasOwn(data, 'sdk_native_state')) {
+      throw new BadRequest('sdk_native_state is server-managed and cannot be set by clients');
+    }
+    if (
+      Object.hasOwn(data, 'sdk_native_state_store_id') ||
+      Object.hasOwn(data, 'opencode_cleanup_cursor') ||
+      Object.hasOwn(data, 'sdk_native_state_deletion_status')
+    ) {
+      throw new BadRequest('OpenCode native-state coordination is server-managed');
+    }
     if (Object.hasOwn(data, 'sdk_home_scope')) {
       throw new BadRequest('sdk_home_scope is immutable and server-managed');
     }
@@ -2107,13 +2366,29 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
   }
 }
 
+/** Publish the persisted projection, never the private operation/token authority. */
+export async function publishSessionDeletionStatus(
+  app: Application,
+  db: TenantScopeAwareDatabase,
+  tenantId: string,
+  sessionId: string
+): Promise<void> {
+  await runWithTenantDatabaseScope(db, tenantId, async (scoped) => {
+    const session = await new SessionRepository(scoped).findById(sessionId);
+    if (session) {
+      emitServiceEvent(app, { path: 'sessions', event: 'patched', data: session, id: sessionId });
+    }
+  });
+}
+
 /**
  * Service factory function
  */
 export function createSessionsService(
   db: TenantScopeAwareDatabase,
   app: Application,
-  deploymentAvailable: (tool: AgenticToolName) => boolean = () => true
+  deploymentAvailable: (tool: AgenticToolName) => boolean = () => true,
+  deploymentToolUnsupported: (tool: AgenticToolName) => BadRequest | undefined = () => undefined
 ): SessionsService {
-  return new SessionsService(db, app, deploymentAvailable);
+  return new SessionsService(db, app, deploymentAvailable, deploymentToolUnsupported);
 }
