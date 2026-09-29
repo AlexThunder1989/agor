@@ -51,7 +51,7 @@ import {
   NotFound,
   Unavailable,
 } from '@agor/core/feathers';
-import { MCPServerNotUsableError } from '@agor/core/mcp';
+import { isMCPServerNotUsableError } from '@agor/core/mcp';
 import {
   formatModelToolMismatchWarning,
   getCodexModelSelectionError,
@@ -695,7 +695,7 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
       // deletion after resolution preserves the skipped-default count.
       const canonicalIds = new Map<MCPServerID, number>();
       const handleMcpError = (error: unknown, count: number) => {
-        if (error instanceof MCPServerNotUsableError) {
+        if (isMCPServerNotUsableError(error)) {
           throw new Forbidden('That MCP server is private to another user');
         }
         if (error instanceof EntityNotFoundError && error.entityType === 'MCPServer') {
