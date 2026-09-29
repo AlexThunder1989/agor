@@ -359,6 +359,29 @@ export function useAgorData(
   const retryPlacementsRef = useRef<() => void>(() => {});
   const retryPlacements = useCallback(() => retryPlacementsRef.current(), []);
 
+  const placementRecoveryRef = useRef<{
+    reads: Map<string, { timer?: ReturnType<typeof setTimeout>; failed: boolean; attempt: number }>;
+  } | null>(null);
+
+  // Recovery belongs to the authenticated client, not a listener registration.
+  // Navigation resubscribes listeners but must retain timers, in-flight reads,
+  // exhausted entries and Retry. Layout teardown fences true authority changes
+  // and unmount before any old passive listeners or responses can apply.
+  useLayoutEffect(() => {
+    setPlacementFailureScope(null);
+    if (!authorityScopeKey || !client) return;
+    const recovery: NonNullable<typeof placementRecoveryRef.current> = { reads: new Map() };
+    placementRecoveryRef.current = recovery;
+    return () => {
+      placementRecoveryRef.current = null;
+      retryPlacementsRef.current = () => {};
+      for (const pending of recovery.reads.values()) {
+        if (pending.timer) clearTimeout(pending.timer);
+      }
+      recovery.reads.clear();
+    };
+  }, [authorityScopeKey, client]);
+
   // Advance the singleton realtime queue in the layout phase. React runs this
   // before the authority-transition map reset below and before the previous
   // subscription's passive cleanup, so that cleanup cannot flush a queued row
@@ -1385,7 +1408,10 @@ export function useAgorData(
     let disposed = false;
     const subscriptionIsCurrent = () =>
       !disposed && authorityScopeKeyRef.current === subscriptionAuthorityScope;
-    setPlacementFailureScope(null);
+    const recovery = placementRecoveryRef.current!;
+    const recoveryIsCurrent = () =>
+      placementRecoveryRef.current === recovery &&
+      authorityScopeKeyRef.current === subscriptionAuthorityScope;
     // All direct store handlers are authority-scoped too. Although only
     // sessions are frame-batched, an old Feathers listener remains live until
     // passive cleanup and must not write during the layout→cleanup overlap.
@@ -1440,16 +1466,9 @@ export function useAgorData(
     boardsService.on('removed', scopedRealtime.boardRemoved);
 
     // A removed/moved placement that races a targeted unarchive read must win.
-    const placementReads = new Map<
-      string,
-      {
-        timer?: ReturnType<typeof setTimeout>;
-        failed: boolean;
-        attempt: number;
-      }
-    >();
+    const placementReads = recovery.reads;
     const publishPlacementFailures = () => {
-      if (subscriptionIsCurrent())
+      if (recoveryIsCurrent())
         setPlacementFailureScope(
           [...placementReads.values()].some((pending) => pending.failed)
             ? subscriptionAuthorityScope
@@ -1523,7 +1542,7 @@ export function useAgorData(
     // recover only that branch's placement. Deduplicate paired patched/updated
     // events; never overwrite a newer live placement or cross an auth boundary.
     const recoverPlacement = (branchId: string) => {
-      if (!subscriptionIsCurrent() || !boardObjectsService || placementReads.has(branchId)) return;
+      if (!recoveryIsCurrent() || !boardObjectsService || placementReads.has(branchId)) return;
       const pending = {
         failed: false,
         attempt: 0,
@@ -1533,7 +1552,7 @@ export function useAgorData(
         const state = agorStore.getState();
         const branch = state.branchById.get(branchId);
         return (
-          subscriptionIsCurrent() &&
+          recoveryIsCurrent() &&
           placementReads.get(branchId) === pending &&
           branch &&
           !branch.archived &&
@@ -1558,7 +1577,7 @@ export function useAgorData(
           const branch = agorStore.getState().branchById.get(branchId);
           for (const object of objects) {
             if (object.branch_id === branchId && object.board_id === branch.board_id)
-              scopedRealtime.boardObjectCreated(object);
+              realtime.boardObjectCreated(object);
           }
         } catch (error) {
           if (!stillNeeded()) return;
@@ -1582,7 +1601,7 @@ export function useAgorData(
       void attempt();
     };
     retryPlacementsRef.current = () => {
-      if (!subscriptionIsCurrent()) return;
+      if (!recoveryIsCurrent()) return;
       for (const [branchId, pending] of placementReads) {
         if (!pending.failed) continue;
         cancelPlacementRead(branchId);
@@ -1779,10 +1798,6 @@ export function useAgorData(
     // Cleanup listeners on unmount
     return () => {
       disposed = true;
-      for (const pending of placementReads.values()) {
-        if (pending.timer) clearTimeout(pending.timer);
-      }
-      placementReads.clear();
       // APPLY only when this is a same-authority resubscribe. The layout-phase
       // scope transition has already discarded an identity/role/auth/connection
       // queue, and makes this old passive cleanup a no-op. This preserves live

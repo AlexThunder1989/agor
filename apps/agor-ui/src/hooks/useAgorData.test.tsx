@@ -1424,6 +1424,106 @@ describe('useAgorData — network load contract', () => {
     }
   );
 
+  it.each(['queued', 'in-flight', 'failed'])(
+    'preserves %s unarchive recovery when opening a session',
+    async (phase) => {
+      const seed: Record<string, unknown[]> = {};
+      const mock = makeMockClient(seed);
+      const { result, rerender, unmount } = renderHook(
+        ({ directSessionId }) => useAgorData(mock.client, { directSessionId }),
+        { initialProps: { directSessionId: null as string | null } }
+      );
+      await waitForInitialLoad(result);
+      await flush();
+      const before = mock.fetchCount('board-objects', 'findAll');
+      const boardsBefore = mock.fetchCount('boards', 'findAll');
+      const gate = deferred();
+      const placement = makeBoardObject({ board_id: 'board-1' });
+      seed['board-objects'] = [placement];
+      mock.onFetch('board-objects', 'findAll', () => {
+        if (phase === 'in-flight') return gate.promise;
+        throw new Error('timeout');
+      });
+      vi.useFakeTimers();
+      try {
+        await act(async () => {
+          mock.emit('branches', 'patched', makeBranch({ board_id: 'board-1' }));
+          if (phase === 'failed') await vi.advanceTimersByTimeAsync(2000);
+        });
+        expect(mock.fetchCount('board-objects', 'findAll')).toBe(
+          before + (phase === 'failed' ? 3 : 1)
+        );
+        expect(result.current.placementRecoveryFailed).toBe(phase === 'failed');
+        rerender({ directSessionId: 'opened-session' });
+        expect(result.current.placementRecoveryFailed).toBe(phase === 'failed');
+        mock.onFetch('board-objects', 'findAll', () => {});
+        await act(async () => {
+          if (phase === 'failed') result.current.retryPlacements();
+          gate.resolve();
+          await vi.advanceTimersByTimeAsync(2000);
+        });
+        expect(agorStore.getState().boardObjectByBranchId.get('b-1')).toEqual(placement);
+        expect(result.current.placementRecoveryFailed).toBe(false);
+        expect(mock.fetchCount('board-objects', 'findAll')).toBe(
+          before + (phase === 'failed' ? 4 : phase === 'queued' ? 2 : 1)
+        );
+        expect(mock.fetchCount('boards', 'findAll')).toBe(boardsBefore);
+      } finally {
+        unmount();
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it.each(['authority', 'unmount'])(
+    'tears down failed recovery after navigation on %s',
+    async (change) => {
+      const mock = makeMockClient();
+      const { result, rerender, unmount } = renderHook(
+        ({ directSessionId, generation }) =>
+          useAgorData(mock.client, {
+            directSessionId,
+            authenticatedUserId: generation === 1 ? 'tenant-a-user' : 'tenant-b-user',
+            authenticatedUserRole: 'member',
+            authGeneration: generation,
+          }),
+        { initialProps: { directSessionId: null as string | null, generation: 1 } }
+      );
+      await waitForInitialLoad(result);
+      mock.onFetch('board-objects', 'findAll', () => {
+        throw new Error('timeout');
+      });
+      vi.useFakeTimers();
+      try {
+        await act(async () => {
+          mock.emit('branches', 'patched', makeBranch({ board_id: 'board-1' }));
+          await vi.advanceTimersByTimeAsync(2000);
+        });
+        rerender({ directSessionId: 'opened-session', generation: 1 });
+        expect(result.current.placementRecoveryFailed).toBe(true);
+        const retry = result.current.retryPlacements;
+        mock.onFetch('board-objects', 'findAll', () => {});
+        if (change === 'authority') {
+          rerender({ directSessionId: 'opened-session', generation: 2 });
+          expect(result.current.placementRecoveryFailed).toBe(false);
+        } else unmount();
+        await act(async () => {
+          retry();
+          await vi.advanceTimersByTimeAsync(2000);
+        });
+        expect(
+          mock
+            .fetchArguments('board-objects', 'findAll')
+            .filter((args) => (args as { query?: { branch_id?: string } }).query?.branch_id)
+        ).toHaveLength(3);
+        expect(agorStore.getState().boardObjectByBranchId.has('b-1')).toBe(false);
+      } finally {
+        unmount();
+        vi.useRealTimers();
+      }
+    }
+  );
+
   it.each(['authority', 'remove', 'archive', 'placement', 'unmount'])(
     'cancels queued placement retries on %s',
     async (change) => {
