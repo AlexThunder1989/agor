@@ -162,6 +162,7 @@ export type ManagedAgenticToolIntegration<T = unknown> = {
   AGOR_INTEGRATION_VERSION?: string;
   sdk?: T;
   sdkV2?: unknown;
+  readProviderCatalog?: () => Promise<unknown>;
 };
 
 export type ManagedAgenticToolAlignment = {

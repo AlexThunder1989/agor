@@ -331,9 +331,8 @@ export class UsersRepository
         // Encrypted per-tool credentials. Only forwarded when caller passes the
         // raw shape (internal credential mutators); regular updates leave it undefined,
         // letting the merge in `update()` reuse the existing on-disk blob.
-        // Cast: schema declares `opencode: Record<string, never>` (no fields by
-        // contract); StoredAgenticTools widens that to string values for shape
-        // uniformity. Runtime never writes opencode, so the cast is safe.
+        // The storage projection is encrypted strings for every tool, including
+        // opaque OpenCode per-provider entries.
         agentic_tools: user.agentic_tools_raw as SchemaUserInsert['data']['agentic_tools'],
         agentic_auth_methods: user.agentic_auth_methods,
         agentic_credential_sources: user.agentic_credential_sources,
@@ -762,22 +761,31 @@ export class UsersRepository
     tool: T,
     field: keyof NonNullable<AgenticToolsConfig[T]> & string
   ): Promise<string | null> {
+    return (await this.getToolConfigFieldResult(userId, tool, field)).value;
+  }
+
+  /** Read one encrypted field while preserving the distinction between absent and corrupt. */
+  async getToolConfigFieldResult<T extends AgenticToolName>(
+    userId: string,
+    tool: T,
+    field: keyof NonNullable<AgenticToolsConfig[T]> & string
+  ): Promise<{ value: string | null; stored: boolean; decryptionFailed: boolean }> {
     const row = await this.getRawRow(userId);
-    if (!row) return null;
+    if (!row) return { value: null, stored: false, decryptionFailed: false };
 
     const stored = row.data.agentic_tools as StoredAgenticTools | undefined;
     const encrypted = stored?.[tool]?.[field];
-    if (!encrypted) return null;
+    if (!encrypted) return { value: null, stored: false, decryptionFailed: false };
 
     try {
-      return await decryptApiKeyAsync(encrypted);
+      return { value: await decryptApiKeyAsync(encrypted), stored: true, decryptionFailed: false };
     } catch (error) {
       console.error(
         `[users] Failed to decrypt ${tool}.${field} for user ${shortId(userId)}: ${
           (error as Error).message
         }`
       );
-      return null;
+      return { value: null, stored: true, decryptionFailed: true };
     }
   }
 

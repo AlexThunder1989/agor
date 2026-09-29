@@ -220,6 +220,68 @@ describe('UsersRepository.setToolConfigField + getToolConfigField', () => {
     const got = await repo.getToolConfigField(userId, 'claude-code', 'ANTHROPIC_BASE_URL');
     expect(got).toBe('https://gateway.example.com');
   });
+
+  dbTest(
+    'stores opaque OpenCode provider entries independently and exposes presence only',
+    async ({ db }) => {
+      const repo = new UsersRepository(db);
+      const userId = await makeUser(repo);
+      const openai = 'provider:openai';
+      const anthropic = 'provider:anthropic';
+      const legacy = 'OPENCODE_API_KEY_OPENAI';
+      const firstOpenAI = JSON.stringify({ type: 'api', key: 'openai-secret' });
+      const anthropicEntry = JSON.stringify({ type: 'api', key: 'anthropic-secret' });
+
+      await repo.setToolConfigField(userId, 'opencode', openai, firstOpenAI);
+      await repo.setToolConfigField(userId, 'opencode', anthropic, anthropicEntry);
+      await repo.setToolConfigField(userId, 'opencode', legacy, 'legacy-openai-secret');
+      await repo.setToolConfigField(
+        userId,
+        'opencode',
+        openai,
+        JSON.stringify({ type: 'api', key: 'rotated-openai-secret' })
+      );
+
+      expect(await repo.getToolConfigField(userId, 'opencode', openai)).toBe(
+        JSON.stringify({ type: 'api', key: 'rotated-openai-secret' })
+      );
+      expect(await repo.getToolConfigField(userId, 'opencode', anthropic)).toBe(anthropicEntry);
+      expect(await repo.getToolConfigField(userId, 'opencode', legacy)).toBe(
+        'legacy-openai-secret'
+      );
+      const publicUser = await repo.findById(userId);
+      expect(publicUser?.agentic_tools?.opencode).toEqual({
+        [openai]: true,
+        [anthropic]: true,
+        [legacy]: true,
+      });
+      const raw = await select(db).from(users).where(eq(users.user_id, userId)).one();
+      expect(JSON.stringify(raw?.data)).not.toContain('rotated-openai-secret');
+      expect(JSON.stringify(raw?.data)).not.toContain('anthropic-secret');
+
+      await repo.deleteToolConfigField(userId, 'opencode', anthropic);
+      expect(await repo.getToolConfigField(userId, 'opencode', anthropic)).toBeNull();
+      expect(await repo.getToolConfigField(userId, 'opencode', openai)).toContain(
+        'rotated-openai-secret'
+      );
+      expect(await repo.getToolConfigField(userId, 'opencode', legacy)).toBe(
+        'legacy-openai-secret'
+      );
+    }
+  );
+
+  dbTest('reports a present OpenCode entry whose value cannot be decrypted', async ({ db }) => {
+    const repo = new UsersRepository(db);
+    const userId = await makeUser(repo);
+    await repo.setToolConfigField(userId, 'opencode', 'provider:openai', 'encrypted entry');
+    vi.spyOn(encryption, 'decryptApiKeyAsync').mockRejectedValueOnce(
+      new Error('synthetic failure')
+    );
+
+    await expect(
+      repo.getToolConfigFieldResult(userId, 'opencode', 'provider:openai')
+    ).resolves.toMatchObject({ value: null, stored: true, decryptionFailed: true });
+  });
 });
 
 describe('UsersRepository.getToolConfig', () => {

@@ -35,6 +35,8 @@ const UNSUPPORTED_MESSAGES: Record<OpenCodeUnsupportedCode, string> = {
     'OpenCode is not available in this deployment: delegated execution provides no native-state home boundary, and no hosted execution mode is enabled.',
   hosted_tenancy:
     'OpenCode is not available in this workspace: hosted multi-tenant mode has no daemon-local native-state home, and no hosted execution mode is enabled.',
+  provider_catalog_unavailable:
+    'The hosted OpenCode provider catalog is unavailable for this runtime version.',
 };
 
 function unsupported(

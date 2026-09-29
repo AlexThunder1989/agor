@@ -187,11 +187,22 @@ export function classifyMissingCredentialFailure(
 
       const tool = session.agentic_tool;
       if (!isAgenticToolName(tool)) return context;
-      // Provider-connection tools without a canonical key (OpenCode) are still
-      // credential-gated in hosted mode through their reviewed connection
-      // fields; probe with the first field so the scoped resolver answers.
       const keyName = TOOL_API_KEY_NAMES[tool] ?? firstProviderCredentialField(tool);
-      if (!keyName) return context;
+      if (!keyName) {
+        // Hosted OpenCode entries are dynamic provider IDs rather than
+        // ApiKeyName fields. Its executor marks only typed, pre-I/O
+        // MissingCredentialError failures; trust that executor-scoped signal
+        // after the task/session association above, not a static field probe.
+        if (tool === 'opencode' && isMissingCredentialFailure) {
+          context.data = classifyProviderFailure(
+            data,
+            tool,
+            toolDisplayNames[tool] ?? tool,
+            'missing_credential'
+          );
+        }
+        return context;
+      }
 
       if ((isZeroTurnResult || isProviderFailureResult) && !isMissingCredentialFailure) {
         const resolution = await resolveApiKey(keyName, {

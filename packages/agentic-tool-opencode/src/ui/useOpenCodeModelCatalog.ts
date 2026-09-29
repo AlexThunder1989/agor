@@ -1,7 +1,7 @@
 import type { AgorClient } from '@agor/core/client';
 import type { OpenCodeModelCatalog } from '@agor/core/types';
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
-import { createOpenCodeKnownModelCatalog, OPENCODE_VERSION } from '../shared/known-models.js';
+import { OPENCODE_VERSION } from '../shared/version.js';
 
 interface CatalogState {
   catalog: OpenCodeModelCatalog;
@@ -22,7 +22,7 @@ interface CatalogEntry {
 
 const IMMEDIATE_CATALOG: OpenCodeModelCatalog = {
   runtimeVersion: OPENCODE_VERSION,
-  providers: createOpenCodeKnownModelCatalog(null).providers,
+  providers: [],
 };
 const DISABLED_STATE: CatalogState = {
   catalog: IMMEDIATE_CATALOG,
@@ -116,7 +116,7 @@ export function invalidateOpenCodeModelCatalog(client: AgorClient): void {
   publish(entry, { ...DISABLED_STATE, stale: true });
 }
 
-/** Immediate fixed choices plus one shared, server-free configured-provider read. */
+/** An empty immediate state plus one shared read of configured OpenCode providers. */
 export function useOpenCodeModelCatalog(input: {
   client?: AgorClient | null;
   catalogEnabled: boolean;

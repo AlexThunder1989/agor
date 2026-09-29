@@ -240,19 +240,8 @@ export interface CursorConfig {
   CURSOR_API_KEY?: string;
 }
 
-/**
- * Hosted OpenCode provider keys (`managed-projection` credential authority).
- * One static, env-safe field per reviewed key-bearing provider; the OpenCode
- * executor converts the resolved connection into `OPENCODE_AUTH_CONTENT` and
- * these names never enter a process environment. Local (`native-file`)
- * deployments keep credentials in OpenCode's own `auth.json` and leave this
- * bucket empty. See `context/explorations/opencode-cloud.md` §4.
- */
-export interface OpenCodeConfig {
-  OPENCODE_API_KEY_ANTHROPIC?: string;
-  OPENCODE_API_KEY_OPENAI?: string;
-  OPENCODE_API_KEY_KIMI_FOR_CODING?: string;
-}
+/** Hosted OpenCode provider entries are opaque, encrypted per-provider values. */
+export type OpenCodeConfig = Record<string, string>;
 
 /**
  * Per-tool credential map. Each tool's config is independent and
@@ -273,8 +262,7 @@ export type AgenticToolConfigField =
   | keyof CodexConfig
   | keyof GeminiConfig
   | keyof CopilotConfig
-  | keyof CursorConfig
-  | keyof OpenCodeConfig;
+  | keyof CursorConfig;
 
 /**
  * Public DTO shape: per-tool credential presence flags.
@@ -333,10 +321,13 @@ export function toAgenticToolsStatus(
  * clears the field. Omitted fields are untouched. Used by PATCH /users/:id.
  */
 export type AgenticToolsUpdate = {
-  [Tool in keyof AgenticToolsConfig]?: AgenticToolsConfig[Tool] extends infer Cfg
+  [Tool in Exclude<
+    keyof AgenticToolsConfig,
+    'opencode'
+  >]?: AgenticToolsConfig[Tool] extends infer Cfg
     ? { [Field in keyof Cfg]?: string | null }
     : never;
-};
+} & { opencode?: Record<string, string | null> };
 
 /**
  * Per-tool whitelist of fields whose plaintext is safe to echo back to the

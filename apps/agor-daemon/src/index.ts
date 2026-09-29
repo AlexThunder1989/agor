@@ -850,6 +850,7 @@ async function startDaemonWithOwnedMetrics(
     config: effectiveConfig,
     jwtSecret,
     daemonUrl,
+    agorVersion: AGOR_VERSION,
     bundledUiAvailable,
     DAEMON_PORT,
     UI_PORT,

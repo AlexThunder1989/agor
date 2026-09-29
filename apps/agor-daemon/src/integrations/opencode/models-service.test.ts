@@ -65,6 +65,32 @@ function service() {
   return createOpenCodeModelsService(db, loadConfigSync());
 }
 
+const hostedArtifact = {
+  schemaVersion: 1 as const,
+  runtimeVersion: OPENCODE_VERSION,
+  connected: ['opencode'],
+  providers: ['openai', 'anthropic', 'opencode', 'oauth-only'].map((id) => ({
+    id,
+    name: id,
+    env: [],
+    defaultModel: id === 'openai' ? 'gpt-5.6-terra-pro' : `${id}-model`,
+    models: [
+      {
+        id: id === 'openai' ? 'gpt-5.6-terra-pro' : `${id}-model`,
+        name: id === 'openai' ? 'GPT-5.6 Terra Pro' : `${id} model`,
+        status: 'active' as const,
+      },
+    ],
+    authMethods: [
+      {
+        index: 0,
+        type: id === 'oauth-only' ? ('oauth' as const) : ('api' as const),
+        label: id === 'oauth-only' ? 'Sign in' : 'API key',
+      },
+    ],
+  })),
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   enabled.mockResolvedValue(true);
@@ -110,7 +136,7 @@ describe('OpenCode model catalog service', () => {
     );
   });
 
-  it('returns the known catalog marked unavailable with the structured reason when unsupported', async () => {
+  it('returns an empty catalog with a structured reason when unsupported', async () => {
     loadConfig.mockReturnValue({
       multi_tenancy: { mode: 'required_from_auth', auth_claim: 'tenant_id' },
       execution: { unix_user_mode: 'delegated', executor_command_template: 'launch' },
@@ -123,10 +149,7 @@ describe('OpenCode model catalog service', () => {
       message: expect.stringMatching(/not been enabled/),
     });
     expect(result.runtimeVersion).toBe(OPENCODE_VERSION);
-    expect(result.providers.length).toBeGreaterThan(0);
-    expect(result.providers.every((provider) => provider.availableForSelection === false)).toBe(
-      true
-    );
+    expect(result.providers).toEqual([]);
     expect(runCommand).not.toHaveBeenCalled();
   });
 
@@ -254,12 +277,18 @@ describe('OpenCode model catalog service (hosted managed projection)', () => {
       return {
         findById: vi.fn(async () => ({
           user_id: 'same-user',
-          agentic_tools: { opencode: { OPENCODE_API_KEY_OPENAI: true } },
+          agentic_tools: { opencode: { 'provider:openai': true } },
         })),
       };
     } as never);
 
-    const result = await runWithTenantContext('tenant-a', () => service().find(params));
+    const hosted = createOpenCodeModelsService(
+      db,
+      loadConfigSync(),
+      undefined,
+      async () => hostedArtifact
+    );
+    const result = await runWithTenantContext('tenant-a', () => hosted.find(params));
 
     expect(result.unsupported).toBeUndefined();
     expect(result.suggestedSelection).toEqual({
@@ -267,7 +296,7 @@ describe('OpenCode model catalog service (hosted managed projection)', () => {
       modelId: 'gpt-5.6-terra-pro',
     });
     expect(result.providers.find((p) => p.id === 'openai')?.availableForSelection).toBe(true);
-    expect(result.providers.find((p) => p.id === 'anthropic')?.availableForSelection).toBe(false);
+    expect(result.providers.find((p) => p.id === 'anthropic')?.availableForSelection).toBe(true);
     expect(runCommand).not.toHaveBeenCalled();
   });
 });

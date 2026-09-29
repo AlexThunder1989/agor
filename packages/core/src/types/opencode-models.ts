@@ -9,6 +9,8 @@ export interface OpenCodeCatalogModel {
   id: string;
   name: string;
   status: OpenCodeModelStatus;
+  limit?: { context?: number; input?: number; output?: number };
+  capabilities?: Record<string, unknown>;
 }
 
 export interface OpenCodeCatalogProvider {
@@ -16,6 +18,10 @@ export interface OpenCodeCatalogProvider {
   name: string;
   /** True when this configured or credentialless provider may be offered for selection. */
   availableForSelection: boolean;
+  /** Provider needs an API auth entry rather than an OpenCode OAuth flow. */
+  apiAuthAvailable?: boolean;
+  /** Public environment variable names declared by OpenCode for this provider. */
+  env?: string[];
   suggestedModel?: string;
   models: OpenCodeCatalogModel[];
 }

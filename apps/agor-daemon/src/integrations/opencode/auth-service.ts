@@ -1,11 +1,17 @@
+import type { OpenCodeApiEntry } from '@agor/agentic-tool-opencode';
 import {
   createOpenCodeHostedProviderDiscovery,
-  hostedCredentialFieldForProvider,
+  createOpenCodeModelCatalog,
+  LEGACY_OPENCODE_PROVIDER_FIELDS,
   OPENCODE_VERSION,
+  openCodeProviderEntryField,
+  parseOpenCodeApiEntry,
+  validateOpenCodeApiEntry,
 } from '@agor/agentic-tool-opencode';
 import { resolveOpenCodeCapabilities } from '@agor/agentic-tool-opencode/daemon';
 import type { AgorConfig } from '@agor/core/config';
 import type { TenantScopeAwareDatabase } from '@agor/core/db';
+import { runWithTenantDatabaseScope, UsersRepository } from '@agor/core/db';
 import { BadRequest, NotAuthenticated, NotFound } from '@agor/core/feathers';
 import type {
   AgenticToolsUpdate,
@@ -14,6 +20,7 @@ import type {
   OpenCodeOAuthAttempt,
   OpenCodeOAuthAttemptPatch,
   OpenCodeOAuthConnectRequest,
+  OpenCodeProviderCatalogArtifact,
   OpenCodeProviderDiscovery,
   OpenCodeProviderSettings,
 } from '@agor/core/types';
@@ -31,6 +38,10 @@ import {
   type OpenCodeNativeStateMutationFence,
 } from './native-state-coordinator.js';
 import { type OpenCodeOAuthExecutorHandle, startOpenCodeOAuthExecutor } from './oauth-executor.js';
+import {
+  OPEN_CODE_CATALOG_UNAVAILABLE,
+  readManagedOpenCodeProviderCatalog,
+} from './provider-catalog.js';
 
 function assertOptionalStringRecord(
   value: unknown
@@ -123,7 +134,11 @@ export class OpenCodeAuthService {
   constructor(
     private readonly db: TenantScopeAwareDatabase,
     private readonly config: DeepReadonly<AgorConfig>,
-    private readonly host?: UsersPatchHost
+    private readonly host?: UsersPatchHost,
+    private readonly agorVersion?: string,
+    private readonly readProviderCatalog: (
+      version?: string
+    ) => Promise<OpenCodeProviderCatalogArtifact> = readManagedOpenCodeProviderCatalog
   ) {}
 
   private credentialContext(
@@ -132,10 +147,16 @@ export class OpenCodeAuthService {
     return resolveAuthenticatedOpenCodeSubjectContext(this.db, this.config, params);
   }
 
-  /** Managed-projection settings: saved-key presence projected onto the reviewed provider list. */
-  private managedSettings(subject: ManagedOpenCodeSubject): OpenCodeProviderSettings {
+  /** Hosted settings are projected from the package's pinned OpenCode artifact. */
+  private managedSettings(
+    subject: ManagedOpenCodeSubject,
+    artifact: OpenCodeProviderCatalogArtifact,
+    savedEndpoints: ReadonlyMap<string, string>
+  ): OpenCodeProviderSettings {
     return {
-      ...createOpenCodeHostedProviderDiscovery(subject.savedProviderIds),
+      runtime: 'available',
+      runtimeVersion: OPENCODE_VERSION,
+      ...createOpenCodeHostedProviderDiscovery(artifact, subject.savedProviderIds, savedEndpoints),
       isolation: { mode: 'managed-projection', boundary: 'executor-run' },
     };
   }
@@ -144,16 +165,24 @@ export class OpenCodeAuthService {
    * Save or clear one reviewed provider key through the users service, which
    * owns encryption-at-rest and self-only authority for the credential bucket.
    */
-  private async patchManagedKey(
+  private async patchManagedEntry(
     subject: ManagedOpenCodeSubject,
     providerId: string,
-    value: string | null,
+    entry: OpenCodeApiEntry | null,
+    artifact: OpenCodeProviderCatalogArtifact | undefined,
     params?: AuthenticatedParams
-  ): Promise<OpenCodeProviderSettings> {
-    const field = hostedCredentialFieldForProvider(providerId);
-    if (!field) throw new BadRequest('That provider is not available for hosted OpenCode.');
+  ): Promise<void> {
     if (!this.host) throw new BadRequest('OpenCode credential storage is not available.');
-    if (value === null && !subject.savedProviderIds.has(providerId)) {
+    if (
+      entry &&
+      (!artifact ||
+        !createOpenCodeModelCatalog(artifact, new Set([providerId])).providers.some(
+          (provider) => provider.id === providerId && provider.apiAuthAvailable
+        ))
+    ) {
+      throw new BadRequest('That provider is not available for hosted API-key authentication.');
+    }
+    if (entry === null && !subject.savedProviderIds.has(providerId)) {
       throw new BadRequest('No saved OpenCode credential exists for that provider.');
     }
     // Self-patch under the caller's own authority; the users service rejects
@@ -161,17 +190,44 @@ export class OpenCodeAuthService {
     const { query: _query, ...callerParams } = (params ?? {}) as AuthenticatedParams & {
       query?: unknown;
     };
-    await this.host
-      .service('users')
-      .patch(
-        subject.subjectUserId,
-        { agentic_tools: { opencode: { [field]: value } } },
-        callerParams as AuthenticatedParams
-      );
-    const saved = new Set(subject.savedProviderIds);
-    if (value === null) saved.delete(providerId);
-    else saved.add(providerId);
-    return this.managedSettings({ ...subject, savedProviderIds: saved });
+    const field = openCodeProviderEntryField(providerId);
+    const legacyField =
+      LEGACY_OPENCODE_PROVIDER_FIELDS[providerId as keyof typeof LEGACY_OPENCODE_PROVIDER_FIELDS];
+    await this.host.service('users').patch(
+      subject.subjectUserId,
+      {
+        agentic_tools: {
+          opencode: {
+            [field]: entry === null ? null : JSON.stringify(entry),
+            ...(legacyField ? { [legacyField]: null } : {}),
+          },
+        },
+      },
+      callerParams as AuthenticatedParams
+    );
+  }
+
+  private async managedEndpoints(subject: ManagedOpenCodeSubject): Promise<Map<string, string>> {
+    return runWithTenantDatabaseScope(this.db, subject.tenantId, async (tenantDb) => {
+      const repo = new UsersRepository(tenantDb);
+      const endpoints = new Map<string, string>();
+      for (const providerId of subject.savedProviderIds) {
+        const field = openCodeProviderEntryField(providerId);
+        const result = await repo.getToolConfigFieldResult(
+          subject.subjectUserId,
+          'opencode',
+          field
+        );
+        if (!result.value || result.decryptionFailed) continue;
+        try {
+          const entry = parseOpenCodeApiEntry(result.value);
+          if (entry.endpoint) endpoints.set(providerId, entry.endpoint);
+        } catch {
+          // Presence remains observable even when a value needs re-entry.
+        }
+      }
+      return endpoints;
+    });
   }
 
   private async execute(
@@ -234,7 +290,18 @@ export class OpenCodeAuthService {
       if (params?.query && Object.keys(params.query).length > 0) {
         throw new BadRequest('Hosted OpenCode settings do not accept branch discovery.');
       }
-      return this.managedSettings(await resolveManagedOpenCodeSubject(this.db, params));
+      const subject = await resolveManagedOpenCodeSubject(this.db, params);
+      try {
+        const artifact = await this.readProviderCatalog(this.agorVersion);
+        return this.managedSettings(subject, artifact, await this.managedEndpoints(subject));
+      } catch {
+        return {
+          runtime: 'unsupported',
+          runtimeVersion: OPENCODE_VERSION,
+          unsupported: OPEN_CODE_CATALOG_UNAVAILABLE,
+          providers: [],
+        };
+      }
     }
     const context = await resolveAuthenticatedOpenCodeSubjectContext(this.db, this.config, params);
     const directory = await resolveOpenCodeConfigurationDirectory({
@@ -252,7 +319,13 @@ export class OpenCodeAuthService {
 
   async create(
     data:
-      | { providerId?: string; apiKey?: string; metadata?: Record<string, string> }
+      | {
+          providerId?: string;
+          apiKey?: string;
+          metadata?: Record<string, string>;
+          baseURL?: string;
+          type?: string;
+        }
       | OpenCodeOAuthConnectRequest,
     params?: AuthenticatedParams
   ): Promise<OpenCodeProviderSettings | OpenCodeOAuthAttempt> {
@@ -260,9 +333,12 @@ export class OpenCodeAuthService {
       return this.startOAuth(data, params);
     }
     const unsupported = Object.keys(data ?? {}).find(
-      (field) => field !== 'providerId' && field !== 'apiKey' && field !== 'metadata'
+      (field) => !['providerId', 'apiKey', 'metadata', 'baseURL', 'type'].includes(field)
     );
     if (unsupported) throw new BadRequest(`Unsupported field: ${unsupported}`);
+    if (data.type !== undefined && data.type !== 'api') {
+      throw new BadRequest('Only API provider entries are supported.');
+    }
     const providerId = data?.providerId?.trim();
     const apiKey = data?.apiKey?.trim();
     if (!providerId || !apiKey) throw new BadRequest('Provider and API key are required.');
@@ -270,11 +346,33 @@ export class OpenCodeAuthService {
     assertOptionalStringRecord(metadata);
 
     if (resolveOpenCodeCapabilities(this.config).mode === 'managed-projection') {
-      if (metadata && Object.keys(metadata).length > 0) {
-        throw new BadRequest('Hosted OpenCode providers accept an API key only.');
+      let entry: OpenCodeApiEntry;
+      try {
+        entry = validateOpenCodeApiEntry({
+          type: data.type ?? 'api',
+          key: apiKey,
+          ...(metadata ? { metadata } : {}),
+          ...(data.baseURL ? { endpoint: data.baseURL } : {}),
+        });
+      } catch (error) {
+        throw new BadRequest(error instanceof Error ? error.message : 'Provider entry is invalid.');
       }
       const subject = await resolveManagedOpenCodeSubject(this.db, params);
-      return this.patchManagedKey(subject, providerId, apiKey, params);
+      let artifact: OpenCodeProviderCatalogArtifact;
+      try {
+        artifact = await this.readProviderCatalog(this.agorVersion);
+      } catch {
+        throw new BadRequest(OPEN_CODE_CATALOG_UNAVAILABLE.message);
+      }
+      await this.patchManagedEntry(subject, providerId, entry, artifact, params);
+      const updated = {
+        ...subject,
+        savedProviderIds: new Set([...subject.savedProviderIds, providerId]),
+      };
+      return this.managedSettings(updated, artifact, await this.managedEndpoints(updated));
+    }
+    if (data.baseURL !== undefined) {
+      throw new BadRequest('Provider endpoints are only supported for hosted OpenCode.');
     }
 
     const context = await this.credentialContext(params);
@@ -397,6 +495,9 @@ export class OpenCodeAuthService {
     data: OpenCodeOAuthConnectRequest,
     params?: AuthenticatedParams
   ): Promise<OpenCodeOAuthAttempt> {
+    if (resolveOpenCodeCapabilities(this.config).mode === 'managed-projection') {
+      throw new BadRequest('Hosted OpenCode does not support OAuth sign-in.');
+    }
     const request = validateOAuthRequest(data);
     const context = await this.credentialContext(params);
     const attempt = createOAuthAttempt(request.providerId, context.namespaceKey);
@@ -484,7 +585,26 @@ export class OpenCodeAuthService {
     if (!providerId) throw new BadRequest('Provider is required.');
     if (resolveOpenCodeCapabilities(this.config).mode === 'managed-projection') {
       const subject = await resolveManagedOpenCodeSubject(this.db, params);
-      return this.patchManagedKey(subject, providerId, null, params);
+      let artifact: OpenCodeProviderCatalogArtifact | undefined;
+      try {
+        artifact = await this.readProviderCatalog(this.agorVersion);
+      } catch {
+        artifact = undefined;
+      }
+      await this.patchManagedEntry(subject, providerId, null, artifact, params);
+      const updated = {
+        ...subject,
+        savedProviderIds: new Set([...subject.savedProviderIds].filter((id) => id !== providerId)),
+      };
+      if (!artifact) {
+        return {
+          runtime: 'unsupported',
+          runtimeVersion: OPENCODE_VERSION,
+          unsupported: OPEN_CODE_CATALOG_UNAVAILABLE,
+          providers: [],
+        };
+      }
+      return this.managedSettings(updated, artifact, await this.managedEndpoints(updated));
     }
     const context = await this.credentialContext(params);
     const result = await inOpenCodeNativeStateMutationSlot(context.namespaceKey, (fence) =>
@@ -497,7 +617,9 @@ export class OpenCodeAuthService {
 export function createOpenCodeAuthService(
   db: TenantScopeAwareDatabase,
   config: DeepReadonly<AgorConfig>,
-  host?: UsersPatchHost
+  host?: UsersPatchHost,
+  agorVersion?: string,
+  readProviderCatalog?: (version?: string) => Promise<OpenCodeProviderCatalogArtifact>
 ) {
-  return new OpenCodeAuthService(db, config, host);
+  return new OpenCodeAuthService(db, config, host, agorVersion, readProviderCatalog);
 }

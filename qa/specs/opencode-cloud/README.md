@@ -2,8 +2,9 @@
 
 Canonical design: [`context/explorations/opencode-cloud.md`](../../../context/explorations/opencode-cloud.md).
 
-This directory holds the executable acceptance scenarios for the hosted OpenCode
-first release, the retained local proof scripts, and the proof log. Scenario
+This directory holds the executable acceptance scenarios for hosted OpenCode
+shared-session support and the revision-7 Runtime catalog/credential contract,
+the retained local proof scripts, and the proof log. Scenario
 files use stable IDs (`OC-xx`) so implementation slices, review findings, and
 QA evidence can reference them. Evidence from a QA run belongs in the task or
 pull request, not in this directory.

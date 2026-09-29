@@ -34,8 +34,12 @@ filesystem. This document specifies the smallest safe first release instead.
   execute through the delegated ephemeral executor Job. Branch-scoped Sessions
   may be shared only through the tenant and Branch prompt-sharing gates;
   execution-home Sessions remain owner-bound.
-- API-key providers only, from a reviewed static provider/model list
-  (`packages/agentic-tool-opencode/src/shared/known-models.ts`).
+- OpenCode's own pinned `provider.list()` / `provider.auth()` catalog and
+  generic API-key credentials. The managed package captures a versioned,
+  credential-free catalog artifact at build time; hosted settings read that
+  artifact without starting OpenCode or maintaining an Agor provider/model
+  list. Alpha and deprecated models, OAuth methods, and credential-free paths
+  are not offered.
 - Truthful unsupported/saved/connected/failed states in settings, readiness,
   session creation, and prompting.
 - Durable native conversation state across executor Jobs, with an explicit
@@ -58,8 +62,11 @@ filesystem. This document specifies the smallest safe first release instead.
 - A Branch SDK-home mount for OpenCode. New managed Sessions, including
   scheduled occurrences, follow sticky Branch intent and the existing
   `inherit`/`per_branch` setting; execution-home Sessions remain owner-bound.
-- Arbitrary plugins, local MCP `command` servers, custom provider endpoints,
-  and remote auxiliary executor operations (discovery/verification Jobs).
+- Configured/repository plugins, local MCP `command` servers, provider options
+  other than a validated per-user endpoint, and remote auxiliary executor
+  operations (discovery/verification Jobs). OpenCode's compiled-in plugins
+  remain on; `OPENCODE_PURE=true` keeps user/repository/npm plugin discovery
+  sealed.
 - Any change to other agents' branch-home policy, Cloud's delegated execution
   mode, or the executor Job's network posture.
 
@@ -103,35 +110,38 @@ Identity rules:
 Exactly one authority applies per deployment, selected by the capability
 resolver (section 8), never both:
 
-| Authority            | Deployment                                                                                                    | Mechanism                                                                                                                                                                                                    | Status    |
-| -------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- |
-| `native-file`        | Local `simple`/`sandbox` without executor command template                                                    | Existing: `auth.json` in the daemon-owned namespace, mutated by contained local executor operations, OAuth supported                                                                                         | Unchanged |
-| `managed-projection` | Hosted + delegated + templated executor + `executor_storage.user_home: persistent-per-user` + operator opt-in | Keys stored encrypted in `users.data.agentic_tools.opencode`; the executor pulls them through `config/resolve-api-key` and projects `OPENCODE_AUTH_CONTENT`; no `auth.json`, no daemon-side OpenCode process | New       |
+| Authority            | Deployment                                                                                                    | Mechanism                                                                                                                                                                                                                                            | Status    |
+| -------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `native-file`        | Local `simple`/`sandbox` without executor command template                                                    | Existing: `auth.json` in the daemon-owned namespace, mutated by contained local executor operations, OAuth supported                                                                                                                                 | Unchanged |
+| `managed-projection` | Hosted + delegated + templated executor + `executor_storage.user_home: persistent-per-user` + operator opt-in | Per-provider entries encrypted in `users.data.agentic_tools.opencode`; the executor resolves only the Task actor's selected entry and writes it to private scratch `auth.json`; endpoint is separate scratch config; no daemon-side OpenCode process | New       |
 
-`managed-projection` facts established from the pinned OpenCode 1.14.33 source and
-re-verified by spike replay against the 1.18.31 executable now pinned by main:
-`Auth.all()` returns the parsed `OPENCODE_AUTH_CONTENT` map when set, so
-readiness and `provider.list().connected` see the key; API keys never refresh,
-so the "stale snapshot after refresh" hazard applies only to OAuth, which is
-excluded. A malformed value falls through to the (absent) file, which reads as
-"no credential" and fails the first prompt with the truthful provider error.
+The managed server consumes its internal `OPENCODE_AUTH_CONTENT` control value
+before spawning OpenCode, writes the selected entry to mode-0600
+`$XDG_DATA_HOME/opencode/auth.json`, then removes the value from the child
+environment. OpenCode sees its native auth-file shape; the endpoint never
+enters that file. OAuth refresh is excluded.
 
-Storage shape: OpenCode becomes an ordinary provider-connection tool with one
-static, env-safe field per reviewed key-bearing provider
-(`OPENCODE_API_KEY_ANTHROPIC`, `OPENCODE_API_KEY_OPENAI`,
-`OPENCODE_API_KEY_KIMI_FOR_CODING`), declared in
-`PROVIDER_CONNECTION_FIELDS`. This reuses the existing tenant resolution
-policy, the presence DTO (`AgenticToolsStatus`), per-field delete, and the
-missing-credential classification without any read-modify-write of a JSON
-blob. Workspace-level (tenant) OpenCode connections are not offered in the
-first release (`TENANT_PROVIDER_CONNECTION_FIELDS.opencode` is empty). The
-generic user env loop never sees these fields because prompt launch does not
-pass a tool to it; the OpenCode executor handler alone converts the pulled
-connection into the `OPENCODE_AUTH_CONTENT` map, restricted to the reviewed
-list, keeps it out of `process.env` and `AGOR_USER_ENV_KEYS`, and registers
-each key value and the serialized auth content explicitly with the managed-server
-sanitizer. The env-name pattern does not cover `OPENCODE_AUTH_CONTENT`; explicit
-secret registration is required.
+Storage shape: the existing per-user OpenCode bucket stores opaque encrypted
+entries keyed by provider ID. Each entry has OpenCode's `{type:"api", key,
+metadata?}` shape and an optional validated endpoint; Agor does not maintain
+per-provider fields or interpret metadata. The three legacy fields
+`OPENCODE_API_KEY_ANTHROPIC`, `OPENCODE_API_KEY_OPENAI`, and
+`OPENCODE_API_KEY_KIMI_FOR_CODING` remain read-compatible; saving or removing a
+matching provider also removes its legacy value. Presence is read without
+decrypting. Saved IDs absent from the current catalog remain visible,
+unavailable, and removable. Workspace-level (tenant) OpenCode connections are
+not offered. Writes preserve the users service's last-writer-wins behavior.
+
+The executor-scoped resolver returns only the Task actor's revalidated entry
+for the Session's selected provider. The executor writes only `{type, key,
+metadata?}` to scratch `auth.json`; a validated endpoint is written only to
+scratch `provider.<id>.options.baseURL`. Neither value enters a task DTO. The
+resolver never falls back to the Session creator. When there is no saved entry,
+the actor's own Agor environment or credentials in their own persistent home
+may satisfy OpenCode's connected-provider check; OpenCode home auth/config and
+all inherited `OPENCODE_*` selectors stay excluded. The generic user-env path
+does not carry saved provider entries. The selected key and serialized auth
+content are explicitly registered with the managed-server sanitizer.
 
 Saved keys are **saved, unverified**. Verification happens on the first
 prompt: `assertExplicitModelAvailable` (existing) checks the provider is
@@ -158,11 +168,13 @@ executor payload:
 ```
 
 The payload carries no credential. After claiming a task, the executor resolves
-the prompting actor's connection and requires the selected session provider's
-saved key, then projects only that key into `OPENCODE_AUTH_CONTENT` on the
-managed server's environment; the
-existing `OPENCODE_CONFIG_CONTENT` / `OPENCODE_PERMISSION` interception values
-are set by the executor as today. V3 payload carries no accepted pointer or
+only the prompting Task actor's selected provider entry, revalidates its generic
+rules, and passes the selected auth object through the managed-server control
+interface. The managed server writes only `{type, key, metadata?}` to mode-0600
+scratch `auth.json`; the endpoint goes only to generated provider config. The
+control value is removed before the child starts. The existing
+`OPENCODE_CONFIG_CONTENT` / `OPENCODE_PERMISSION` interception values are set
+by the executor as today. V3 payload carries no accepted pointer or
 filesystem authority. The outer executor generates a per-invocation holder ID,
 captures its immutable launch locator before payload environment application,
 and obtains the input pin, store, exact holder binding, and current phases from
@@ -205,10 +217,10 @@ Executor turn (managed-projection mode), across the executor adapter and
    Hosted configuration discovery is sealed before startup: project OpenCode
    config/component discovery is disabled, all inherited `OPENCODE_*` selectors
    are removed, and home/system configuration discovery uses empty scratch roots.
-   The real execution `HOME` remains unchanged for tools. The pinned binary's
-   `OPENCODE_PURE` and default-plugin controls prevent plugin loading; the
-   invocation validator refuses plugins, provider configuration overrides, and
-   attached local MCP commands. Remote MCP entries still come from the authorized
+   The real execution `HOME` remains unchanged for tools. Built-in plugins stay
+   enabled with `OPENCODE_PURE=true`; configured and repository plugins remain
+   refused. The invocation validator refuses provider configuration overrides
+   and attached local MCP commands. Remote MCP entries still come from the authorized
    Agor resolver. Repository OpenCode configuration is ignored, not merged.
    This is a configuration boundary, not a sandbox protecting a user's key from
    code the user explicitly runs in their own Job.
@@ -394,17 +406,22 @@ Consumers (all read the same resolver): `opencode-auth` find/create/remove,
 (`scheduler.ts`, sharing the interactive deployment gate), task
 admission (`admitExecutor`), executor launch (`getExecutorLaunch`), the task
 completion publication gate (`tasks.ts`), the executor credential resolver
-(`config/resolve-api-key`, which serves a tool only its own reviewed
-provider-connection fields), and the settings/readiness UI. The tenant policy
+(`config/resolve-api-key`, which serves OpenCode only the Task actor's selected,
+revalidated provider entry), and the settings/readiness UI. The tenant policy
 for OpenCode accepts only `user_required` or `user_preferred`; tenant-shared
 provider keys are refused because the tool has no tenant-level fields. `opencode-auth.find` returns a 200 response with
 `runtime: 'unsupported'` and the structured reason instead of throwing; the UI
 renders a permanent capability notice without Retry, readiness shows
 "Not available in this workspace", and New Session rejects OpenCode with the
-same reason. In `managed-projection` the settings list shows only reviewed
-providers with API-key connect/disconnect, presence "Saved (verified on first
-prompt)", and the isolation notice reads "Keys are stored encrypted for your
-account and delivered only to your own executor runs".
+same reason. In `managed-projection` the settings list shows the pinned
+OpenCode catalog's API-auth providers with save/remove controls, presence
+"Saved (verified on first prompt)", an optional endpoint field, and the
+isolation notice that credentials are encrypted for the account and delivered
+only to the Task actor's executor run. OAuth-only providers and providers
+captured as credential-free are unavailable; the latter require a saved entry
+even if OpenCode reports a connected path in the user's Job. The hosted catalog
+is derived from the installed artifact, with alpha/deprecated models removed and
+defaults recomputed using OpenCode's model order.
 
 ## 9. Invariants
 
@@ -443,10 +460,10 @@ account and delivered only to your own executor runs".
    unsupported reason through `opencode-auth`/`opencode-models`, session
    creation/tool-switch refusal, UI notice/readiness without Retry. Ships
    independently.
-2. **Credential store and projection** (runtime): static per-provider fields in
-   the encrypted per-tool store, OpenCode as a provider-connection tool,
-   settings connect/disconnect in managed mode, executor pull and projection
-   to `OPENCODE_AUTH_CONTENT`, redaction coverage, mode-conditional HA gate.
+2. **Credential store and projection** (runtime): generic encrypted per-provider
+   entries with legacy reads, settings connect/disconnect in managed mode,
+   executor-scoped selected-entry pull and scratch `auth.json` projection,
+   endpoint-only scratch config, redaction coverage, mode-conditional HA gate.
 3. **DB coordination** (runtime): v3 attempt ledger, immutable store and
    holder grants, input pins, sealing/publication, irreversible retirement,
    first-use/legacy gates, deletion and portability barriers.
@@ -481,8 +498,10 @@ revision attestation.
 
 ## 12. Resolved decisions and assumptions
 
-- API-key-first, reviewed static model list; no auxiliary
-  discovery Jobs (approved plan and reconciliation).
+- Hosted catalog comes from the version-matched managed OpenCode package
+  artifact; no Agor-maintained provider/model/field list and no auxiliary
+  discovery Jobs. The build fails if captured data contains a provider key.
+  The daemon does not start OpenCode to serve hosted settings.
 - Credential authority in hosted mode is the existing encrypted per-tool user
   store, not `auth.json`: the hosted daemon has no filesystem path to a user's
   executor home (it resolves only a delegated home key), and Cloud's per-user
@@ -513,16 +532,44 @@ revision attestation.
    authorized whole-home fencing and transfer support.
 5. **No scope drift**: retain the Cloud chart's existing default, do not add a
    per-Cell toggle, leave generic runtime defaults and other agents unchanged.
-6. **Reviewed provider set for the beta** — `anthropic` and
-   `openai` (API key) from the pinned list, plus `kimi-for-coding`. The
-   credential-less `opencode` (Zen) provider is not offered in managed
-   projection: every hosted turn requires a saved reviewed key, so hosted
-   discovery reports it unavailable and never suggests it. There is no per-Cell
-   provider allowlist in this release.
+6. **Hosted providers (revision 7)** — use the pinned OpenCode artifact and
+   generic `api` entry shape; do not curate a provider allowlist. OAuth methods
+   and all-OAuth providers are unavailable. Providers captured as connected
+   without a credential require a caller-owned saved entry; keyless Zen/Go
+   paths are not admitted. Providers that disappear from a later pinned catalog
+   remain saved and removable. The pin bump is the catalog update boundary.
 7. **Saved-unverified credential state** — accepted; verify on
    first prompt.
 8. **Egress disclosure** — note the inherited agent-pod egress
    risk in the beta terms rather than blocking on the FQDN allowlist work.
+
+### 13.6 Hosted provider boundary (revision 7)
+
+The executor revalidates generic entry rules at delivery: `type: "api"`, a
+non-empty key up to 64 KiB, at most 32 metadata values of at most 1 KiB each,
+and no control characters. Metadata values containing `://` must be absolute
+HTTPS URLs without userinfo; other metadata values must match
+`^[A-Za-z0-9][A-Za-z0-9._-]*$`. An optional endpoint follows the same HTTPS/no-
+userinfo rule at save and before launch and is scoped to the entry owner. The
+daemon/settings/control plane never contacts it; the executor sets only
+`provider.<id>.options.baseURL`. No address-range filter is claimed. DNS
+rebinding is a documented residual limit until agent egress is separately
+sealed.
+
+Built-in plugins remain enabled and `OPENCODE_PURE=true` remains set. Configured
+and repository plugins remain refused. Turn-time installation of an unbundled
+provider SDK follows OpenCode's local behavior and is allowed; the package is
+unpinned third-party code running in the actor's own Job alongside that actor's
+credentials and executor token, so the user guide discloses the exposure.
+
+Proof boundary: mock captures can verify transport and caller-key delivery,
+not account-specific continuation. The OpenAI Responses API may return
+`invalid_encrypted_content` when a later actor's OpenAI key belongs to a
+different organization from the earlier turn; Azure OpenAI resource changes
+are expected to have the same limitation. Agor does not edit history or fall
+back to another user's credential. The accepted activation proof is the
+separately authorized P11 provider exercise; all other providers and credential
+paths remain mock-verified and unproven for cross-user continuation.
 
 ## 14. Open technical unknowns (do not change accepted behavior)
 

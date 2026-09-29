@@ -367,28 +367,26 @@ describe('classifyMissingCredentialFailure', () => {
     expect(taskRepository.findById).not.toHaveBeenCalled();
   });
 
-  it('classifies a hosted OpenCode provider failure through its reviewed connection fields', async () => {
+  it('classifies typed hosted OpenCode admission failures without a static provider field', async () => {
     sessionsRepository.findById = vi
       .fn()
-      .mockResolvedValue(makeSession({ agentic_tool: 'opencode' }));
-    vi.mocked(resolveApiKey).mockResolvedValue({
-      apiKey: null,
-      connection: {},
-      source: 'none',
-      useNativeAuth: false,
-    } as never);
-    let ctx = await runHook()(makeContext({ ...zeroTurnResult }));
-    expect((ctx.data as Message).metadata?.error_kind).toBe('missing_credential');
-    expect(vi.mocked(resolveApiKey).mock.calls[0]?.[0]).toBe('OPENCODE_API_KEY_ANTHROPIC');
-
-    vi.mocked(resolveApiKey).mockResolvedValue({
-      apiKey: null,
-      connection: { OPENCODE_API_KEY_OPENAI: 'sk-openai' },
-      source: 'user',
-      useNativeAuth: false,
-    } as never);
-    ctx = await runHook()(makeContext({ ...zeroTurnResult }));
-    expect((ctx.data as Message).metadata?.error_kind).toBeUndefined();
+      .mockResolvedValue(
+        makeSession({ agentic_tool: 'opencode', model_config: { provider: 'openai' } })
+      );
+    const ctx = await runHook()(
+      makeContext({
+        ...explicitCredentialFailure,
+        content: 'Hosted OpenCode provider is unavailable.',
+      })
+    );
+    expect((ctx.data as Message).metadata).toMatchObject({
+      error_kind: 'missing_credential',
+      tool: 'opencode',
+    });
+    expect((ctx.data as Message).content).toBe(
+      'This session needs to be connected to OpenCode before it can run.'
+    );
+    expect(resolveApiKey).not.toHaveBeenCalled();
   });
 
   it('falls through for missing records', async () => {

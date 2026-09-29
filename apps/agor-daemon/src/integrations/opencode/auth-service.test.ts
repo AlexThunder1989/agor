@@ -954,6 +954,21 @@ describe('OpenCode provider auth service', () => {
 });
 
 describe('OpenCode provider auth service (hosted managed projection)', () => {
+  const providerCatalog = {
+    schemaVersion: 1 as const,
+    runtimeVersion: OPENCODE_VERSION,
+    connected: ['opencode'],
+    providers: ['openai', 'anthropic', 'kimi-for-coding', 'zhipuai-coding-plan', 'opencode'].map(
+      (id) => ({
+        id,
+        name: id,
+        env: [],
+        models: [{ id: `${id}-model`, name: `${id} model`, status: 'active' as const }],
+        defaultModel: `${id}-model`,
+        authMethods: [{ index: 0, type: 'api' as const, label: 'API key' }],
+      })
+    ),
+  };
   const hostedConfig = {
     multi_tenancy: { mode: 'required_from_auth', auth_claim: 'tenant_id' },
     execution: {
@@ -971,15 +986,29 @@ describe('OpenCode provider auth service (hosted managed projection)', () => {
       return {
         findById: vi.fn(async () => ({
           user_id: 'same-user',
-          agentic_tools: { opencode: { OPENCODE_API_KEY_OPENAI: true } },
+          agentic_tools: { opencode: { 'provider:openai': true } },
+        })),
+        getToolConfigFieldResult: vi.fn(async () => ({
+          value: null,
+          stored: false,
+          decryptionFailed: false,
         })),
       };
     } as never);
     const host = { service: vi.fn(() => ({ patch })) };
-    return { service: createOpenCodeAuthService(db, loadConfigSync(), host as never), patch };
+    return {
+      service: createOpenCodeAuthService(
+        db,
+        loadConfigSync(),
+        host as never,
+        undefined,
+        async () => providerCatalog
+      ),
+      patch,
+    };
   }
 
-  it('reports saved-key presence on the reviewed provider list without an executor', async () => {
+  it('reports saved entry presence from OpenCode catalog data without an executor', async () => {
     const { service } = hostedService();
     const settings = await runWithTenantContext('tenant-a', () => service.find(params));
     expect(settings.runtime).toBe('available');
@@ -995,7 +1024,7 @@ describe('OpenCode provider auth service (hosted managed projection)', () => {
     expect(runCommand).not.toHaveBeenCalled();
   });
 
-  it('saves and clears a reviewed provider key through the users service as the caller', async () => {
+  it('saves and clears dynamic provider entries through the users service as the caller', async () => {
     const { service, patch } = hostedService();
     await runWithTenantContext('tenant-a', async () => {
       const saved = await service.create({ providerId: 'anthropic', apiKey: ' sk-ant-test ' }, {
@@ -1011,30 +1040,47 @@ describe('OpenCode provider auth service (hosted managed projection)', () => {
     expect(patch).toHaveBeenNthCalledWith(
       1,
       'same-user',
-      { agentic_tools: { opencode: { OPENCODE_API_KEY_ANTHROPIC: 'sk-ant-test' } } },
+      {
+        agentic_tools: {
+          opencode: {
+            'provider:anthropic': JSON.stringify({ type: 'api', key: 'sk-ant-test' }),
+            OPENCODE_API_KEY_ANTHROPIC: null,
+          },
+        },
+      },
       expect.not.objectContaining({ query: expect.anything() })
     );
     expect(patch).toHaveBeenNthCalledWith(
       2,
       'same-user',
-      { agentic_tools: { opencode: { OPENCODE_API_KEY_OPENAI: null } } },
+      {
+        agentic_tools: {
+          opencode: {
+            'provider:openai': null,
+            OPENCODE_API_KEY_OPENAI: null,
+          },
+        },
+      },
       expect.anything()
     );
     expect(runCommand).not.toHaveBeenCalled();
   });
 
-  it('refuses unreviewed providers, metadata, OAuth, and removal of an absent key', async () => {
+  it('refuses providers outside the artifact, invalid metadata, OAuth, and absent removal', async () => {
     const { service, patch } = hostedService();
     await runWithTenantContext('tenant-a', async () => {
-      await expect(service.create({ providerId: 'zhipuai', apiKey: 'k' }, params)).rejects.toThrow(
-        /not available for hosted OpenCode/
-      );
       await expect(
-        service.create({ providerId: 'openai', apiKey: 'k', metadata: { region: 'us' } }, params)
-      ).rejects.toThrow(/API key only/);
+        service.create({ providerId: 'not-in-catalog', apiKey: 'k' }, params)
+      ).rejects.toThrow(/not available for hosted API-key authentication/);
+      await expect(
+        service.create(
+          { providerId: 'openai', apiKey: 'k', metadata: { region: 'us west' } },
+          params
+        )
+      ).rejects.toThrow(/safe tokens/);
       await expect(
         service.create({ operation: 'connect-oauth', providerId: 'openai', method: 0 }, params)
-      ).rejects.toMatchObject({ data: { code: 'mode_not_admitted', mode: 'managed-projection' } });
+      ).rejects.toThrow(/does not support OAuth/);
       await expect(service.remove('anthropic', params)).rejects.toThrow(
         /No saved OpenCode credential/
       );

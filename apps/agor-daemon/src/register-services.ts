@@ -426,6 +426,8 @@ export interface RegisterServicesContext {
   config: AgorConfig;
   jwtSecret: string;
   daemonUrl: string;
+  /** Build identity used to resolve the version-aligned packaged provider catalog. */
+  agorVersion?: string;
   /** True when the daemon is serving the bundled UI itself at /ui (installed agor-live). */
   bundledUiAvailable: boolean;
   DAEMON_PORT: number;
@@ -998,7 +1000,8 @@ export async function registerServices(ctx: RegisterServicesContext): Promise<Re
     db,
     config,
     claudeRuntimeCredentials,
-    claudeBackendOAuth
+    claudeBackendOAuth,
+    ctx.agorVersion
   );
   configService.app = app;
   app.use(

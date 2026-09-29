@@ -17,8 +17,8 @@
  */
 
 import {
-  hostedCredentialFieldForProvider,
-  hostedProviderIdsFromConnection,
+  createOpenCodeModelCatalog,
+  openCodeArtifactUnavailableReason,
 } from '@agor/agentic-tool-opencode';
 import { resolveOpenCodeCapabilities } from '@agor/agentic-tool-opencode/daemon';
 import { getAgenticToolIntegration, TOOL_API_KEY_NAMES } from '@agor/agentic-tools';
@@ -36,10 +36,13 @@ import type {
   AuthCheckStatus,
   AuthenticatedParams,
   DeepReadonly,
+  OpenCodeProviderCatalogArtifact,
   UserID,
 } from '@agor/core/types';
 import { isAgenticToolName } from '@agor/core/types';
 import type * as ClaudeSdk from '@anthropic-ai/claude-agent-sdk';
+import { resolveManagedOpenCodeSubject } from '../integrations/opencode/credential-namespace.js';
+import { readManagedOpenCodeProviderCatalog } from '../integrations/opencode/provider-catalog.js';
 import { inspectClaudeAuthViaExecutor } from '../utils/executor-claude-auth.js';
 import { inspectCodexAuthViaExecutor } from '../utils/executor-codex-auth.js';
 import { isRealAuthSource } from './check-auth-helpers.js';
@@ -415,21 +418,26 @@ export function createCheckAuthService(
         }
         if (capabilities.mode === 'native-file') return authed('native');
         if (!userId) return unauthenticated('none', 'Sign in to save an OpenCode provider key.');
+        const subject = await resolveManagedOpenCodeSubject(db, params);
         const provider = data.provider?.trim();
-        const field = provider ? hostedCredentialFieldForProvider(provider) : undefined;
-        if (provider && !field)
-          return unauthenticated('none', 'This OpenCode provider is not supported in hosted mode.');
-        const resolution = await withTenantDatabase((tenantDb) =>
-          resolveApiKey(field ?? 'OPENCODE_API_KEY_ANTHROPIC', {
-            userId,
-            db: tenantDb,
-            tool: 'opencode',
-          })
-        );
-        if (resolution.decryptionFailed) {
-          return unknown('A saved OpenCode key could not be decrypted — re-enter it in Settings.');
+        const saved = subject.savedProviderIds;
+        if (provider) {
+          let artifact: OpenCodeProviderCatalogArtifact;
+          try {
+            artifact = await readManagedOpenCodeProviderCatalog();
+          } catch {
+            return unknown(openCodeArtifactUnavailableReason().message);
+          }
+          const selected = createOpenCodeModelCatalog(artifact, saved).providers.find(
+            (candidate) => candidate.id === provider
+          );
+          if (!selected?.availableForSelection) {
+            return unauthenticated(
+              'none',
+              'This OpenCode provider is unavailable for hosted execution or needs a saved entry.'
+            );
+          }
         }
-        const saved = hostedProviderIdsFromConnection(resolution.connection ?? {});
         return (provider ? saved.has(provider) : saved.size > 0)
           ? authed('api-key', 'Saved provider key; verified by the first prompt.')
           : unauthenticated(

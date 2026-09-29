@@ -30,6 +30,21 @@ export interface OpenCodeProviderAuthMethod {
   prompts?: OpenCodeProviderAuthPrompt[];
 }
 
+/** Public, build-time snapshot of OpenCode's own provider surface. */
+export interface OpenCodeProviderCatalogArtifact {
+  schemaVersion: 1;
+  runtimeVersion: string;
+  providers: Array<{
+    id: string;
+    name: string;
+    env: string[];
+    models: OpenCodeCatalogModel[];
+    defaultModel?: string;
+    authMethods: OpenCodeProviderAuthMethod[];
+  }>;
+  connected: string[];
+}
+
 export type OpenCodeOAuthAuthorization = {
   url: string;
   method: 'auto' | 'code';
@@ -69,9 +84,15 @@ export interface OpenCodeProviderConnection {
   id: string;
   name: string;
   runtimeAvailable: boolean;
+  /** Whether hosted OpenCode can use an API entry for this provider. */
+  apiAuthAvailable?: boolean;
   credentialPresence: OpenCodeCredentialPresence;
   authMethods: OpenCodeProviderAuthMethod[];
   suggestedModel?: string;
+  /** Owner-visible endpoint override. Never returned for another user. */
+  endpoint?: string;
+  /** Stable explanation when the provider cannot be used by hosted OpenCode. */
+  unavailableReason?: string;
   models: OpenCodeCatalogModel[];
 }
 
@@ -108,7 +129,8 @@ export type OpenCodeUnsupportedCode =
   | 'native_state_observer_required'
   | 'templated_transport'
   | 'delegated_execution'
-  | 'hosted_tenancy';
+  | 'hosted_tenancy'
+  | 'provider_catalog_unavailable';
 
 export interface OpenCodeUnsupportedReason {
   code: OpenCodeUnsupportedCode;

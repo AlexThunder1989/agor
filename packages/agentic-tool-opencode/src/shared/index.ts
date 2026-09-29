@@ -10,15 +10,18 @@ export {
 export {
   buildOpenCodeAuthContent,
   createOpenCodeHostedProviderDiscovery,
-  createOpenCodeKnownModelCatalog,
-  hostedCredentialFieldForProvider,
+  createOpenCodeModelCatalog,
+  createOpenCodeRuntimeModelCatalog,
   hostedProviderIdsFromConnection,
-  OPENCODE_HOSTED_PROVIDER_FIELDS,
-  OPENCODE_VERSION,
-  type OpenCodeHostedCredentialField,
-  type OpenCodeHostedProviderId,
+  LEGACY_OPENCODE_PROVIDER_FIELDS,
+  type OpenCodeApiEntry,
+  openCodeArtifactUnavailableReason,
+  openCodeProviderEntryField,
+  openCodeProviderIdFromEntryField,
+  parseOpenCodeApiEntry,
+  validateOpenCodeApiEntry,
+  validateOpenCodeEndpoint,
 } from './known-models.js';
-
 export {
   hasCompleteOpenCodeModelConfig,
   OPENCODE_MODEL_CONFIG_PAIR_ERROR,
@@ -26,6 +29,7 @@ export {
   resolveOpenCodeCatalogFallback,
   resolveOpenCodeModelConfig,
 } from './model-configuration.js';
+export { OPENCODE_VERSION } from './version.js';
 
 import { OPENCODE_MODEL_CONFIGURATION } from './model-configuration.js';
 

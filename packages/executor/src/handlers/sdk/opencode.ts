@@ -8,7 +8,6 @@
 import { performance } from 'node:perf_hooks';
 import {
   buildOpenCodeAuthContent,
-  hostedCredentialFieldForProvider,
   isOpenCodeManagedExecutorContext,
   OPENCODE_MODEL_CONFIG_PAIR_ERROR,
   parseOpenCodeExecutorContext,
@@ -263,24 +262,21 @@ export async function executeOpenCodeTask(params: {
       });
       managedLayoutForErrors = nativeState;
       const provider = session.model_config.provider.trim();
-      const credentialField = hostedCredentialFieldForProvider(provider);
-      if (!credentialField) {
-        throw new MissingCredentialError(
-          'This OpenCode provider is not supported in hosted mode. Choose a supported provider in Settings > OpenCode.'
-        );
+      const resolution = await resolveApiKeyForTask(
+        { providerId: provider },
+        client,
+        taskId,
+        'opencode'
+      );
+      if (resolution.providerUnavailable) {
+        throw new MissingCredentialError(resolution.providerUnavailable);
       }
-      const resolution = await resolveApiKeyForTask(credentialField, client, taskId, 'opencode');
       if (resolution.decryptionFailed) {
         throw new Error(
           'A saved OpenCode provider key could not be decrypted. Re-enter it in Settings > OpenCode.'
         );
       }
       const projected = buildOpenCodeAuthContent(resolution.connection ?? {}, provider);
-      if (!projected.content) {
-        throw new MissingCredentialError(
-          'The OpenCode provider selected for this session has no saved key. Save its key in Settings > OpenCode.'
-        );
-      }
       await (
         prepareOpenCodeScratch as unknown as (
           layout: ManagedOpenCodeNativeStateLayout
@@ -328,6 +324,7 @@ export async function executeOpenCodeTask(params: {
       managed = {
         authContent: projected.content,
         authSecrets: projected.secrets,
+        endpoint: projected.endpoint,
         nativeState,
         input: committedGrant.input,
       } as unknown as NonNullable<Parameters<OpenCodeTool['runTurn']>[0]['managed']>;

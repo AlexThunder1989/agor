@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -313,7 +313,8 @@ vi.mock('./native-state.js', () => ({
 
 async function managedTurn(
   behavior: 'prompt-fails' | 'completes',
-  config: OpenCodeInvocationConfig = { mcp: {} }
+  config: OpenCodeInvocationConfig = { mcp: {} },
+  options: { endpoint?: string; connected?: boolean } = {}
 ) {
   const scratchRoot = await realpath(await mkdtemp(join(tmpdir(), 'opencode-managed-turn-')));
   managedScratchRoots.push(scratchRoot);
@@ -387,7 +388,10 @@ async function managedTurn(
       })),
     },
     provider: {
-      list: vi.fn(async () => ({ data: { connected: ['anthropic'] }, error: undefined })),
+      list: vi.fn(async () => ({
+        data: { connected: options.connected === false ? [] : ['anthropic'] },
+        error: undefined,
+      })),
     },
     event: { subscribe: vi.fn(async () => ({ stream })) },
     session: {
@@ -444,7 +448,13 @@ async function managedTurn(
     provider: 'anthropic',
     model: 'claude-test',
     signal: new AbortController().signal,
-    managed: { authContent, authSecrets: [key, authContent], nativeState, accepted: null },
+    managed: {
+      authContent,
+      authSecrets: [key, authContent],
+      nativeState,
+      accepted: null,
+      ...(options.endpoint ? { endpoint: options.endpoint } : {}),
+    },
     persistOpenCodeSessionId,
   });
   return {
@@ -453,6 +463,7 @@ async function managedTurn(
     key,
     authContent,
     nativeState,
+    client,
     persistOpenCodeSessionId,
     publishOpenCodeCheckpoint,
   };
@@ -497,6 +508,31 @@ describe('OpenCodeTool managed projection', () => {
       openCodeSessionId: 'opencode-session-1',
     });
     expect(result.nativeStateAttempt?.openCodeSessionId).toBe('opencode-session-1');
+  });
+
+  it('keeps a saved endpoint in scratch provider config and revalidates before startup', async () => {
+    const endpoint = 'https://gateway.example.test/v1';
+    const { run, spawn, authContent } = await managedTurn('completes', { mcp: {} }, { endpoint });
+    await run;
+    const env = (
+      spawn.mock.calls[0] as unknown as [string, string[], { env: Record<string, string> }]
+    )[2].env;
+    const config = JSON.parse(await readFile(env.OPENCODE_CONFIG!, 'utf8')) as {
+      provider?: { anthropic?: { options?: { baseURL?: string } } };
+    };
+    expect(config.provider?.anthropic?.options?.baseURL).toBe(endpoint);
+    expect(authContent).not.toContain(endpoint);
+
+    const invalid = await managedTurn('completes', { mcp: {} }, { endpoint: 'http://127.0.0.1' });
+    await expect(invalid.run).rejects.toThrow(/HTTPS/);
+    expect(invalid.spawn).not.toHaveBeenCalled();
+  });
+
+  it('refuses a provider OpenCode reports disconnected before session or provider turn', async () => {
+    const { run, client } = await managedTurn('completes', { mcp: {} }, { connected: false });
+    await expect(run).rejects.toThrow(/has no credential/);
+    expect(client.session.create).not.toHaveBeenCalled();
+    expect(client.session.prompt).not.toHaveBeenCalled();
   });
 
   it('redacts projected keys from a failed turn and publishes nothing', async () => {

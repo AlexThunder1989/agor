@@ -231,11 +231,11 @@ export const OpenCodeModelSelector: React.FC<OpenCodeModelSelectorProps> = ({
 
   const storedCatalogState = useMemo<StoredCatalogState>(() => {
     if (!value || !catalog) return 'unknown';
+    if (!availabilityResolved) return 'unknown';
     const storedProvider = catalog.providers.find((entry) => entry.id === value.provider);
     if (!storedProvider?.models.some((candidate) => candidate.id === value.model)) {
       return 'unlisted';
     }
-    if (!availabilityResolved) return 'unknown';
     return storedProvider.availableForSelection ? 'available' : 'unavailable';
   }, [availabilityResolved, catalog, value]);
 

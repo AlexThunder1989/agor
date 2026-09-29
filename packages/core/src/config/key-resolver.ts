@@ -19,6 +19,8 @@ export interface KeyResolutionResult {
   decryptionFailed?: boolean;
   managedOAuth?: import('../types').ManagedOAuthSelector;
   credentialExpiresAt?: string;
+  /** Hosted OpenCode admission refusal derived from the versioned provider catalog. */
+  providerUnavailable?: string;
 }
 
 /** Resolve a key through the atomic user → ambient tenant connection policy. */

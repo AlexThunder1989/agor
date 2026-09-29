@@ -8,6 +8,13 @@
  * operator-owned and immutable at runtime.
  */
 
+import {
+  createOpenCodeModelCatalog,
+  LEGACY_OPENCODE_PROVIDER_FIELDS,
+  openCodeProviderEntryField,
+  parseOpenCodeApiEntry,
+  validateOpenCodeApiEntry,
+} from '@agor/agentic-tool-opencode';
 import { TOOL_API_KEY_NAMES } from '@agor/agentic-tools';
 import {
   type AgorConfig,
@@ -19,12 +26,14 @@ import {
   runWithTenantDatabaseScope,
   TaskRepository,
   type TenantScopeAwareDatabase,
+  UsersRepository,
 } from '@agor/core/db';
 import { type Application, BadRequest, Forbidden, NotAuthenticated } from '@agor/core/feathers';
 import {
   type AgenticToolName,
   type AuthenticatedParams,
   type DeepReadonly,
+  type OpenCodeProviderCatalogArtifact,
   type Params,
   PROVIDER_CONNECTION_FIELDS,
   type TaskID,
@@ -35,6 +44,10 @@ import {
   authenticatedTaskExecutorRuntimeScope,
   matchesTaskExecutorRuntimeScope,
 } from '../auth/executor-runtime-scope.js';
+import {
+  OPEN_CODE_CATALOG_UNAVAILABLE,
+  readManagedOpenCodeProviderCatalog,
+} from '../integrations/opencode/provider-catalog.js';
 import type { ClaudeBackendOAuth } from './claude-backend-oauth.js';
 import {
   resolveExecutionCredentialHome,
@@ -56,9 +69,6 @@ const RESOLVABLE_API_KEY_NAMES: Record<ApiKeyName, true> = {
   GEMINI_API_KEY: true,
   COPILOT_GITHUB_TOKEN: true,
   CURSOR_API_KEY: true,
-  OPENCODE_API_KEY_ANTHROPIC: true,
-  OPENCODE_API_KEY_OPENAI: true,
-  OPENCODE_API_KEY_KIMI_FOR_CODING: true,
 };
 
 function isResolvableApiKeyName(value: string): value is ApiKeyName {
@@ -77,7 +87,11 @@ export class ConfigService {
     db: TenantScopeAwareDatabase,
     private readonly config: DeepReadonly<AgorConfig> = {},
     private readonly claudeRuntimeCredentials?: ClaudeRuntimeCredentialResolverLike,
-    private readonly claudeBackendOAuth?: ClaudeBackendOAuth
+    private readonly claudeBackendOAuth?: ClaudeBackendOAuth,
+    private readonly agorVersion?: string,
+    private readonly readProviderCatalog: (
+      version?: string
+    ) => Promise<OpenCodeProviderCatalogArtifact> = readManagedOpenCodeProviderCatalog
   ) {
     this.db = db;
   }
@@ -93,7 +107,8 @@ export class ConfigService {
   async resolveApiKey(
     data: {
       taskId: TaskID;
-      keyName: string;
+      keyName?: string;
+      providerId?: string;
       /**
        * Restrict the per-user lookup to this tool's credential bucket. Executors
        * always pass this; absent it, the resolver falls back to a cross-tool
@@ -108,10 +123,18 @@ export class ConfigService {
     source: 'user' | 'tenant' | 'none';
     useNativeAuth: boolean;
     decryptionFailed?: boolean;
+    providerUnavailable?: string;
     credentialExpiresAt?: string;
   }> {
-    const { taskId, keyName, tool } = data;
-    if (!isResolvableApiKeyName(keyName)) {
+    const { taskId, keyName, providerId, tool } = data;
+    const selectedProviderId = providerId?.trim();
+    if (providerId !== undefined && (!selectedProviderId || tool !== 'opencode')) {
+      throw new BadRequest('OpenCode provider scope is invalid.');
+    }
+    if (selectedProviderId && keyName !== undefined) {
+      throw new BadRequest('Resolve an OpenCode provider entry without an API key name.');
+    }
+    if (!selectedProviderId && (!keyName || !isResolvableApiKeyName(keyName))) {
       throw new BadRequest('Unsupported API key name');
     }
 
@@ -135,6 +158,9 @@ export class ConfigService {
         throw new Forbidden('Executor token task scope does not match this request');
       }
     }
+    if (selectedProviderId && !executorScope) {
+      throw new Forbidden('OpenCode provider credentials require task-scoped executor authority');
+    }
 
     // Fetch task to get creator user ID and session. This is required for
     // executor-token calls and best-effort for internal/service-account calls.
@@ -144,6 +170,7 @@ export class ConfigService {
     };
     let userId: UserID | undefined;
     let sessionId: string | undefined;
+    let verifiedSession: Record<string, unknown> | undefined;
     try {
       const tasksService = this.app?.service('tasks');
       if (tasksService) {
@@ -182,31 +209,49 @@ export class ConfigService {
       if (!tool) {
         throw new BadRequest('Tool is required for executor API key resolution');
       }
-      // A tool may resolve its canonical API key name or any field of its own
-      // provider connection (OpenCode has no single canonical key; its hosted
-      // per-provider fields are the connection). Never another tool's bucket.
-      const expectedKeyName = TOOL_API_KEY_NAMES[tool];
-      const connectionFields: readonly string[] = PROVIDER_CONNECTION_FIELDS[tool];
-      if (expectedKeyName !== keyName && !connectionFields.includes(keyName)) {
-        throw new Forbidden('Executor token is not valid for this API key');
-      }
+      // Other SDKs resolve their canonical env fields. OpenCode resolves the
+      // exact provider selected by this Session and never sweeps its bucket.
       const sessionsService = this.app?.service('sessions');
       if (!sessionsService) {
         throw new Forbidden('Executor token tool scope could not be verified');
       }
-      const session = await sessionsService.get(verifiedSessionId, internalParams);
+      const session = (await sessionsService.get(verifiedSessionId, internalParams)) as
+        | Record<string, unknown>
+        | undefined;
+      verifiedSession = session;
       if (
         session?.agentic_tool !== tool ||
         (executorScope.branchId && executorScope.branchId !== session.branch_id)
       ) {
         throw new Forbidden('Executor token tool scope does not match this session');
       }
+      if (selectedProviderId) {
+        const modelConfig = session.model_config as { provider?: unknown } | undefined;
+        if (modelConfig?.provider !== selectedProviderId) {
+          throw new Forbidden('Executor token provider scope does not match this session.');
+        }
+      } else {
+        const expectedKeyName = TOOL_API_KEY_NAMES[tool];
+        const connectionFields: readonly string[] = PROVIDER_CONNECTION_FIELDS[tool];
+        if (expectedKeyName !== keyName && !connectionFields.includes(keyName!)) {
+          throw new Forbidden('Executor token is not valid for this API key');
+        }
+      }
+    }
+
+    if (selectedProviderId) {
+      return this.resolveOpenCodeProviderCredential({
+        providerId: selectedProviderId,
+        userId,
+        session: verifiedSession,
+        params: internalParams,
+      });
     }
 
     let result = await runWithTenantDatabaseScope(
       this.db,
       internalParams.tenant?.tenant_id,
-      (tenantDb) => resolveApiKey(keyName, { userId, db: tenantDb, tool })
+      (tenantDb) => resolveApiKey(keyName! as ApiKeyName, { userId, db: tenantDb, tool })
     );
     if (result.managedOAuth) {
       const authority = authenticatedTaskExecutorRuntimeAuthority(params);
@@ -281,8 +326,126 @@ export class ConfigService {
       connection: result.connection as Record<string, string> | undefined,
       source: result.source,
       useNativeAuth: result.useNativeAuth,
+      ...(result.providerUnavailable ? { providerUnavailable: result.providerUnavailable } : {}),
       ...(result.credentialExpiresAt ? { credentialExpiresAt: result.credentialExpiresAt } : {}),
       ...(result.decryptionFailed && { decryptionFailed: true }),
+    };
+  }
+
+  private async resolveOpenCodeProviderCredential(input: {
+    providerId: string;
+    userId?: UserID;
+    session?: Record<string, unknown>;
+    params: AuthenticatedParams;
+  }): Promise<{
+    apiKey: null;
+    connection?: Record<string, string>;
+    source: 'user' | 'none';
+    useNativeAuth: false;
+    decryptionFailed?: boolean;
+    providerUnavailable?: string;
+  }> {
+    if (!input.userId) throw new Forbidden('Task actor could not be verified.');
+    const modelConfig = input.session?.model_config as { provider?: unknown } | undefined;
+    if (modelConfig?.provider !== input.providerId) {
+      throw new Forbidden('Task actor provider does not match the selected session model.');
+    }
+
+    const entryField = openCodeProviderEntryField(input.providerId);
+    const legacyField =
+      LEGACY_OPENCODE_PROVIDER_FIELDS[
+        input.providerId as keyof typeof LEGACY_OPENCODE_PROVIDER_FIELDS
+      ];
+    const entry = await runWithTenantDatabaseScope(
+      this.db,
+      input.params.tenant?.tenant_id,
+      async (tenantDb) => {
+        const repo = new UsersRepository(tenantDb);
+        const current = await repo.getToolConfigFieldResult(input.userId!, 'opencode', entryField);
+        if (current.stored) return { ...current, field: entryField };
+        if (legacyField) {
+          const legacy = await repo.getToolConfigFieldResult(
+            input.userId!,
+            'opencode',
+            legacyField
+          );
+          if (legacy.stored) return { ...legacy, field: legacyField, legacy: true };
+        }
+        return { value: null, stored: false, decryptionFailed: false, field: entryField };
+      }
+    );
+    const savedProviderIds = entry.stored ? new Set([input.providerId]) : new Set<string>();
+
+    let artifact: OpenCodeProviderCatalogArtifact;
+    try {
+      artifact = await this.readProviderCatalog(this.agorVersion);
+    } catch {
+      return {
+        apiKey: null,
+        source: 'none',
+        useNativeAuth: false,
+        providerUnavailable: OPEN_CODE_CATALOG_UNAVAILABLE.message,
+      };
+    }
+    let selected: ReturnType<typeof createOpenCodeModelCatalog>['providers'][number] | undefined;
+    try {
+      selected = createOpenCodeModelCatalog(artifact, savedProviderIds).providers.find(
+        (provider) => provider.id === input.providerId
+      );
+    } catch {
+      selected = undefined;
+    }
+    if (!selected?.availableForSelection) {
+      const provider = artifact.providers.find(({ id }) => id === input.providerId);
+      const allOAuth = Boolean(
+        provider &&
+          provider.authMethods.length > 0 &&
+          provider.authMethods.every((method) => method.type === 'oauth')
+      );
+      return {
+        apiKey: null,
+        source: 'none',
+        useNativeAuth: false,
+        providerUnavailable: allOAuth
+          ? 'OpenCode OAuth sign-in is not available in hosted OpenCode.'
+          : artifact.connected.includes(input.providerId) && !entry.stored
+            ? 'Credential-free providers require a saved API entry in hosted OpenCode.'
+            : 'The selected provider is unavailable in the hosted OpenCode catalog.',
+      };
+    }
+    if (!entry.stored) {
+      await this.assertNativeAuthHomeMatchesSession(
+        'opencode',
+        input.userId,
+        input.session?.session_id as string | undefined,
+        input.params
+      );
+      return { apiKey: null, source: 'none', useNativeAuth: false };
+    }
+    if (entry.decryptionFailed || entry.value === null) {
+      return {
+        apiKey: null,
+        source: 'user',
+        useNativeAuth: false,
+        decryptionFailed: true,
+      };
+    }
+    try {
+      if (entry.field === entryField) parseOpenCodeApiEntry(entry.value);
+      else validateOpenCodeApiEntry({ type: 'api', key: entry.value });
+    } catch {
+      return {
+        apiKey: null,
+        source: 'user',
+        useNativeAuth: false,
+        decryptionFailed: true,
+      };
+    }
+    return {
+      apiKey: null,
+      source: 'user',
+      useNativeAuth: false,
+      connection: { [entry.field]: entry.value },
     };
   }
 
@@ -333,7 +496,7 @@ export class ConfigService {
     // comparing it with the Session owner would reject the intended
     // collaborator path. Execution-home Sessions retain the historical owner
     // home and therefore still require the comparison below.
-    if (tool === 'codex' && session?.sdk_home_scope === 'branch') return;
+    if ((tool === 'codex' || tool === 'opencode') && session?.sdk_home_scope === 'branch') return;
     const ownerUserId = session?.created_by;
     if (!ownerUserId) return;
 
@@ -372,7 +535,8 @@ export function createConfigService(
   db: TenantScopeAwareDatabase,
   config: DeepReadonly<AgorConfig>,
   claudeRuntimeCredentials?: ClaudeRuntimeCredentialResolverLike,
-  claudeBackendOAuth?: ClaudeBackendOAuth
+  claudeBackendOAuth?: ClaudeBackendOAuth,
+  agorVersion?: string
 ): ConfigService {
-  return new ConfigService(db, config, claudeRuntimeCredentials, claudeBackendOAuth);
+  return new ConfigService(db, config, claudeRuntimeCredentials, claudeBackendOAuth, agorVersion);
 }

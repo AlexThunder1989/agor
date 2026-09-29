@@ -84,8 +84,11 @@ export function OpenCodeProviderSettings({
     loadFailed,
     retry,
   } = useOpenCodeConfiguration({ client, enabled: true });
+  const managedHosted =
+    settings?.runtime === 'available' && settings.isolation.mode === 'managed-projection';
   const [selectedProviderId, setSelectedProviderId] = useState<string>();
   const [apiKey, setApiKey] = useState('');
+  const [hostedEndpoint, setHostedEndpoint] = useState('');
   const [selectedMethodIndex, setSelectedMethodIndex] = useState<number>();
   const [promptValues, setPromptValues] = useState<Record<string, string>>({});
   const [oauthAttempts, setOAuthAttempts] = useState<Record<string, OpenCodeOAuthAttempt>>({});
@@ -154,6 +157,7 @@ export function OpenCodeProviderSettings({
 
   const clearFormState = useCallback(() => {
     setApiKey('');
+    setHostedEndpoint('');
     setSelectedMethodIndex(undefined);
     setPromptValues({});
     setOAuthCode('');
@@ -293,10 +297,12 @@ export function OpenCodeProviderSettings({
           providerId,
           apiKey: trimmedApiKey,
           ...(Object.keys(metadata).length ? { metadata } : {}),
+          ...(managedHosted && hostedEndpoint.trim() ? { baseURL: hostedEndpoint.trim() } : {}),
         }) as Promise<Settings>,
       (next) => {
         publishSettings(next);
         setApiKey('');
+        setHostedEndpoint('');
         setPromptValues({});
       }
     );
@@ -400,10 +406,16 @@ export function OpenCodeProviderSettings({
   return (
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-        {settings?.isolation.mode === 'managed-projection'
-          ? 'Save an API key for a reviewed provider. Keys are stored encrypted for your account and delivered only to your own executor runs; they are verified by your first prompt.'
+        {managedHosted
+          ? 'Save an API entry from OpenCode’s catalog. Entries are stored encrypted for your account and delivered only to your own executor runs. Your own environment and provider SDK credentials may also be used; provider access is verified by your first prompt.'
           : 'Connect providers through native API-key or subscription authorization in the managed OpenCode runtime.'}
       </Typography.Paragraph>
+      {managedHosted && (
+        <Typography.Text type="secondary">
+          Optional endpoints must use HTTPS. OpenCode provider SDK packages may be installed at turn
+          time and run inside your job with your credentials.
+        </Typography.Text>
+      )}
       {settings && settings.isolation.mode !== 'managed-projection' && (
         <Alert
           type="warning"
@@ -475,6 +487,9 @@ export function OpenCodeProviderSettings({
               setPromptValues((current) => ({ ...current, [key]: value }))
             }
             onApiKeyChange={setApiKey}
+            hostedEndpoint={hostedEndpoint}
+            onHostedEndpointChange={setHostedEndpoint}
+            managedHosted={managedHosted}
             onOAuthCodeChange={setOAuthCode}
           />
         )}

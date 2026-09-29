@@ -1,9 +1,18 @@
-import { createOpenCodeKnownModelCatalog, OPENCODE_VERSION } from '@agor/agentic-tool-opencode';
+import {
+  createOpenCodeModelCatalog,
+  OPENCODE_VERSION,
+  openCodeArtifactUnavailableReason,
+} from '@agor/agentic-tool-opencode';
 import { resolveOpenCodeCapabilities } from '@agor/agentic-tool-opencode/daemon';
 import type { AgorConfig } from '@agor/core/config';
 import type { TenantScopeAwareDatabase } from '@agor/core/db';
 import { BadRequest, NotAuthenticated } from '@agor/core/feathers';
-import type { AuthenticatedParams, DeepReadonly, OpenCodeModelCatalog } from '@agor/core/types';
+import type {
+  AuthenticatedParams,
+  DeepReadonly,
+  OpenCodeModelCatalog,
+  OpenCodeProviderCatalogArtifact,
+} from '@agor/core/types';
 import type { ExecutorCommandResult } from '../../utils/spawn-executor.js';
 import {
   resolveAuthenticatedOpenCodeSubjectContext,
@@ -11,6 +20,7 @@ import {
 } from './credential-namespace.js';
 import { startOpenCodeExecutorInvocation } from './executor-command.js';
 import { blockOpenCodeNativeStateNamespace } from './native-state-coordinator.js';
+import { readManagedOpenCodeProviderCatalog } from './provider-catalog.js';
 
 const MODEL_CATALOG_FAILURE = 'OpenCode model catalog could not be loaded. Try again.';
 const OPEN_CODE_MODEL_STATUSES = new Set(['active', 'alpha', 'beta', 'deprecated']);
@@ -83,7 +93,11 @@ async function readModelCatalog(
 export class OpenCodeModelsService {
   constructor(
     private readonly db: TenantScopeAwareDatabase,
-    private readonly config: DeepReadonly<AgorConfig>
+    private readonly config: DeepReadonly<AgorConfig>,
+    private readonly agorVersion?: string,
+    private readonly readProviderCatalog: (
+      version?: string
+    ) => Promise<OpenCodeProviderCatalogArtifact> = readManagedOpenCodeProviderCatalog
   ) {}
 
   async find(params?: AuthenticatedParams): Promise<OpenCodeModelCatalog> {
@@ -96,25 +110,44 @@ export class OpenCodeModelsService {
     // instead of retrying an operation that can never succeed here.
     const capabilities = resolveOpenCodeCapabilities(this.config);
     if (capabilities.mode === 'unsupported') {
-      const known = createOpenCodeKnownModelCatalog(null);
       return {
         runtimeVersion: OPENCODE_VERSION,
-        providers: known.providers.map((provider) => ({
-          ...provider,
-          availableForSelection: false,
-        })),
+        providers: [],
         unsupported: capabilities.reason,
       };
     }
     if (capabilities.mode === 'managed-projection') {
-      // Saved-key presence is the only availability evidence in hosted mode;
-      // no executor or OpenCode server is started to read a catalog.
+      // The installed build artifact is the catalog authority; no OpenCode
+      // process or provider request is started for hosted settings.
       const subject = await resolveManagedOpenCodeSubject(this.db, params);
+      let artifact: OpenCodeProviderCatalogArtifact;
+      let catalog: ReturnType<typeof createOpenCodeModelCatalog>;
+      try {
+        artifact = await this.readProviderCatalog(this.agorVersion);
+        catalog = createOpenCodeModelCatalog(artifact, subject.savedProviderIds);
+      } catch {
+        return {
+          runtimeVersion: OPENCODE_VERSION,
+          providers: [],
+          unsupported: openCodeArtifactUnavailableReason(),
+        };
+      }
+      const providers = [...catalog.providers];
+      const known = new Set(providers.map(({ id }) => id));
+      for (const id of subject.savedProviderIds) {
+        if (!known.has(id)) {
+          providers.push({
+            id,
+            name: id,
+            availableForSelection: false,
+            models: [],
+          });
+        }
+      }
       return {
         runtimeVersion: OPENCODE_VERSION,
-        ...createOpenCodeKnownModelCatalog(subject.savedProviderIds, {
-          allowCredentialless: false,
-        }),
+        ...catalog,
+        providers,
       };
     }
     return readModelCatalog(this.db, this.config, params);
@@ -123,7 +156,9 @@ export class OpenCodeModelsService {
 
 export function createOpenCodeModelsService(
   db: TenantScopeAwareDatabase,
-  config: DeepReadonly<AgorConfig>
+  config: DeepReadonly<AgorConfig>,
+  agorVersion?: string,
+  readProviderCatalog?: (version?: string) => Promise<OpenCodeProviderCatalogArtifact>
 ) {
-  return new OpenCodeModelsService(db, config);
+  return new OpenCodeModelsService(db, config, agorVersion, readProviderCatalog);
 }

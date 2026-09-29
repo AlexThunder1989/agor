@@ -32,6 +32,7 @@ import {
 } from '@agor/core/types';
 import type { createOpencodeClient } from '@opencode-ai/sdk';
 import { OPENCODE_MODEL_CONFIG_PAIR_ERROR } from '../shared/index.js';
+import { validateOpenCodeEndpoint } from '../shared/known-models.js';
 import type { OpenCodeCommand } from './binary.js';
 import {
   createOpenCodeEventTranslator,
@@ -108,6 +109,7 @@ export type RunOpenCodeTurnInput = {
   managed?: {
     authContent?: string;
     authSecrets: readonly string[];
+    endpoint?: string;
     nativeState: OpenCodeNativeStateLayout;
     /** Input is returned only by the committed DB holder grant. */
     input: OpenCodeNativeStateAttempt | null;
@@ -707,7 +709,16 @@ export class OpenCodeTool {
     // Local mode still merges repository configuration; hosted mode seals
     // discovery at server startup. Force interceptable permissions in both.
     if (input.managed) assertHostedOpenCodeInvocationConfig(resolvedInvocationConfig);
-    const invocationConfig = this.protectedInvocationConfig(resolvedInvocationConfig);
+    let invocationConfig = this.protectedInvocationConfig(resolvedInvocationConfig);
+    if (input.managed?.endpoint) {
+      const providerId = input.provider?.trim();
+      if (!providerId) throw new Error('A saved OpenCode endpoint requires a selected provider.');
+      const endpoint = validateOpenCodeEndpoint(input.managed.endpoint);
+      invocationConfig = {
+        ...invocationConfig,
+        provider: { [providerId]: { options: { baseURL: endpoint } } },
+      };
+    }
     const configContent = JSON.stringify(invocationConfig);
     let managedServer: ManagedOpenCodeServer;
     try {
@@ -935,6 +946,7 @@ export class OpenCodeTool {
   ): Promise<void> {
     let modelAvailable = false;
     let effortAvailable = !effort;
+    let providerConnected = false;
     try {
       const query = { directory };
       const [catalogResponse, runtimeResponse] = await Promise.all([
@@ -947,10 +959,12 @@ export class OpenCodeTool {
             ([candidateId, model]) => candidateId === modelId || model.id === modelId
           )?.[1]
         : undefined;
+      providerConnected =
+        !runtimeResponse.error && Boolean(runtimeResponse.data?.connected.includes(providerId));
       modelAvailable =
         !catalogResponse.error &&
         !runtimeResponse.error &&
-        Boolean(runtimeResponse.data?.connected.includes(providerId)) &&
+        providerConnected &&
         Boolean(selectedModel);
       if (modelAvailable && effort) {
         // OpenCode returns native variants here; the generated SDK model type currently omits them.
@@ -959,6 +973,11 @@ export class OpenCodeTool {
       }
     } catch {
       // Public failure stays independent of raw provider objects and SDK details.
+    }
+    if (!providerConnected) {
+      throw new Error(
+        'The selected OpenCode provider has no credential for this Task actor. Save an entry in Settings > OpenCode or provide the actor’s own provider environment/home credential.'
+      );
     }
     if (!modelAvailable) {
       throw new Error(

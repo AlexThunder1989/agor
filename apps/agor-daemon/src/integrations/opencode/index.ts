@@ -4,13 +4,16 @@ import { createOpenCodeModelsService } from './models-service.js';
 
 /** Thin host composition for package-owned OpenCode auth and catalog operations. */
 export function registerOpenCodeServices(
-  ctx: Pick<RegisterServicesContext, 'app' | 'db' | 'config' | 'requireAuth'>
+  ctx: Pick<RegisterServicesContext, 'app' | 'db' | 'config' | 'requireAuth' | 'agorVersion'>
 ): void {
-  ctx.app.use('/opencode-auth', createOpenCodeAuthService(ctx.db, ctx.config, ctx.app));
+  ctx.app.use(
+    '/opencode-auth',
+    createOpenCodeAuthService(ctx.db, ctx.config, ctx.app, ctx.agorVersion)
+  );
   ctx.app.service('/opencode-auth').hooks({ before: { all: [ctx.requireAuth] } });
   ctx.app.service('/opencode-auth').publish(() => []);
 
-  ctx.app.use('/opencode-models', createOpenCodeModelsService(ctx.db, ctx.config));
+  ctx.app.use('/opencode-models', createOpenCodeModelsService(ctx.db, ctx.config, ctx.agorVersion));
   ctx.app.service('/opencode-models').hooks({ before: { all: [ctx.requireAuth] } });
   ctx.app.service('/opencode-models').publish(() => []);
 }

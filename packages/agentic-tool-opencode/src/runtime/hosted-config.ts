@@ -26,8 +26,21 @@ export function hostedOpenCodeEnvironment(
   layout: OpenCodeNativeStateLayout,
   inherited: NodeJS.ProcessEnv
 ): NodeJS.ProcessEnv {
+  const callerOwnedEnvironment = new Set(
+    (inherited.AGOR_USER_ENV_KEYS ?? '')
+      .split(',')
+      .map((name) => name.trim())
+      .filter(Boolean)
+  );
+  const platformCredential = (key: string) =>
+    (key.startsWith('AWS_CONTAINER_CREDENTIALS_') ||
+      key === 'AWS_WEB_IDENTITY_TOKEN_FILE' ||
+      key === 'AWS_ROLE_ARN') &&
+    !callerOwnedEnvironment.has(key);
   const environment = Object.fromEntries(
-    Object.entries(inherited).filter(([key]) => !key.startsWith('OPENCODE_'))
+    Object.entries(inherited).filter(
+      ([key]) => !key.startsWith('OPENCODE_') && !platformCredential(key)
+    )
   );
   return {
     ...environment,
@@ -38,10 +51,11 @@ export function hostedOpenCodeEnvironment(
     OPENCODE_DB: layout.liveDbPath,
     OPENCODE_DISABLE_PROJECT_CONFIG: 'true',
     OPENCODE_PURE: 'true',
-    OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true',
     OPENCODE_DISABLE_AUTOUPDATE: 'true',
     OPENCODE_DISABLE_MODELS_FETCH: 'true',
     OPENCODE_TEST_HOME: layout.scratchRoot,
     OPENCODE_TEST_MANAGED_CONFIG_DIR: join(layout.xdg.config, 'managed'),
+    AWS_EC2_METADATA_DISABLED: 'true',
+    METADATA_SERVER_DETECTION: 'none',
   };
 }

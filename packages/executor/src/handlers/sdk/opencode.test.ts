@@ -144,12 +144,23 @@ function client(sessionOverrides: Record<string, unknown> = {}) {
       patch: vi.fn(async () => ({})),
     },
     'config/resolve-api-key': {
-      create: vi.fn(async () => ({
-        apiKey: null,
-        connection: { OPENCODE_API_KEY_ANTHROPIC: 'sk-ant-test' } as Record<string, string>,
-        source: 'user',
-        useNativeAuth: false,
-      })),
+      create: vi.fn(async (request: { providerId?: string }) =>
+        request.providerId === 'anthropic'
+          ? {
+              apiKey: null,
+              connection: {
+                'provider:anthropic': JSON.stringify({
+                  type: 'api',
+                  key: 'sk-ant-test',
+                  metadata: { resourceName: 'workspace-1' },
+                  endpoint: 'https://gateway.example.test/v1',
+                }),
+              } as Record<string, string>,
+              source: 'user',
+              useNativeAuth: false,
+            }
+          : { apiKey: null, connection: {}, source: 'none', useNativeAuth: false }
+      ),
     },
     'opencode-native-state': {
       closeRead: vi.fn(async () => undefined),
@@ -466,7 +477,7 @@ describe('OpenCode executor adapter (hosted managed projection)', () => {
     expect(mocks.runTurn).not.toHaveBeenCalled();
   });
 
-  it('pulls reviewed keys through the task-scoped read, restores the accepted checkpoint, and publishes with completion', async () => {
+  it('pulls only the selected provider entry, separates its endpoint, and publishes with completion', async () => {
     const state = client({
       sdk_session_id: 'oc-stale-unpublished',
       model_config: { mode: 'exact', provider: 'anthropic', model: 'claude-test' },
@@ -487,7 +498,7 @@ describe('OpenCode executor adapter (hosted managed projection)', () => {
 
     expect(state.services['config/resolve-api-key'].create).toHaveBeenCalledWith({
       taskId,
-      keyName: 'OPENCODE_API_KEY_ANTHROPIC',
+      providerId: 'anthropic',
       tool: 'opencode',
     });
     expect(nativeState.prepare).toHaveBeenCalledOnce();
@@ -495,13 +506,18 @@ describe('OpenCode executor adapter (hosted managed projection)', () => {
     const turn = mocks.runTurn.mock.calls[0][0] as {
       existingOpenCodeSessionId?: string;
       dataHome?: string;
-      managed?: { authContent?: string; authSecrets: string[]; input: unknown };
+      managed?: { authContent?: string; authSecrets: string[]; input: unknown; endpoint?: string };
     };
     expect(turn.existingOpenCodeSessionId).toBe('oc-accepted');
     expect(turn.dataHome).toBeUndefined();
     expect(JSON.parse(turn.managed?.authContent ?? '{}')).toEqual({
-      anthropic: { type: 'api', key: 'sk-ant-test' },
+      anthropic: {
+        type: 'api',
+        key: 'sk-ant-test',
+        metadata: { resourceName: 'workspace-1' },
+      },
     });
+    expect(turn.managed?.endpoint).toBe('https://gateway.example.test/v1');
     expect(turn.managed?.authSecrets).toContain('sk-ant-test');
     expect(process.env.OPENCODE_API_KEY_ANTHROPIC).toBeUndefined();
     expect(process.env.OPENCODE_AUTH_CONTENT).toBeUndefined();
@@ -906,18 +922,21 @@ describe('OpenCode executor adapter (hosted managed projection)', () => {
     expect(mocks.runTurn).not.toHaveBeenCalled();
   });
 
-  it('fails the turn as a missing credential when no reviewed key is saved', async () => {
+  it('refuses a provider marked unavailable by the hosted catalog before runtime I/O', async () => {
     const state = client({ model_config: { mode: 'exact', provider: 'anthropic', model: 'm' } });
     state.services['config/resolve-api-key'].create.mockResolvedValueOnce({
       apiKey: null,
       connection: {},
       source: 'none',
       useNativeAuth: false,
+      providerUnavailable:
+        'Credential-free providers require a saved API entry in hosted OpenCode.',
     });
 
     await expect(
       execute(state.value, new AbortController(), managedContext, managedAdmission)
-    ).rejects.toThrow(/selected for this session has no saved key/);
+    ).rejects.toThrow(/Credential-free providers require a saved API entry/);
+    expect(nativeState.prepare).not.toHaveBeenCalled();
     expect(mocks.runTurn).not.toHaveBeenCalled();
     expect(state.services.tasks.patch).toHaveBeenCalledWith(
       taskId,
@@ -925,19 +944,21 @@ describe('OpenCode executor adapter (hosted managed projection)', () => {
     );
   });
 
-  it('rejects a different saved provider before scratch restore or a provider turn', async () => {
+  it('requests only the Session-selected provider entry', async () => {
     const state = client(); // openai session, only anthropic saved
-    await expect(
-      execute(state.value, new AbortController(), managedContext, managedAdmission)
-    ).rejects.toThrow(/selected for this session has no saved key/);
+    mocks.runTurn.mockResolvedValueOnce({
+      nativeStateAttempt: { ...acceptedAttempt, attemptTaskId: taskId },
+      finalMessage: { content: 'done', contentBlocks: [], toolUses: [], metadata: {} },
+    });
+    await execute(state.value, new AbortController(), managedContext, managedAdmission);
     expect(state.services['config/resolve-api-key'].create).toHaveBeenCalledWith({
       taskId,
-      keyName: 'OPENCODE_API_KEY_OPENAI',
+      providerId: 'openai',
       tool: 'opencode',
     });
-    expect(nativeState.prepare).not.toHaveBeenCalled();
-    expect(nativeState.restore).not.toHaveBeenCalled();
-    expect(mocks.runTurn).not.toHaveBeenCalled();
+    expect(nativeState.prepare).toHaveBeenCalledOnce();
+    const turn = mocks.runTurn.mock.calls[0]?.[0] as { managed?: { authContent?: string } };
+    expect(turn.managed?.authContent).toBeUndefined();
   });
 
   it('refuses a managed context that names another task and a turn without a checkpoint', async () => {

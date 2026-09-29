@@ -183,6 +183,36 @@ agentic_tools:
 Local `simple`/`sandbox` deployments ignore this key and keep OpenCode's native
 credential file authority.
 
+Hosted provider settings mirror the pinned OpenCode catalog rather than a
+provider list maintained by Agor. Alpha/deprecated models and OAuth-only
+providers are unavailable. API credentials are stored as encrypted per-user,
+per-provider OpenCode entries; saved entries are verified on the first prompt.
+The prompt uses only the Task actor's selected provider entry, never the Session
+creator's or another user's. The actor's own environment and provider SDK
+credentials in their own persistent home may also be used; platform-injected
+cloud credentials are not used by OpenCode provider loaders. Keyless
+credential-free providers still require a saved entry. Saved providers that
+later leave the pinned catalog remain visible as unavailable and can be
+removed.
+
+An optional provider endpoint must be HTTPS and contain no user information.
+It is private to the user's entry and is applied only by that user's executor;
+the daemon does not contact it. Metadata and endpoint values are revalidated
+before use. DNS rebinding is not filtered by address range, so this is not a
+network-egress boundary. OpenCode may install an unbundled provider SDK at turn
+time, as it does locally; that unpinned package runs in the user's executor job
+alongside their credentials and executor token. Only compiled-in built-in
+plugins are loaded; user/repository plugins remain refused.
+
+Provider continuation is not guaranteed across provider accounts. In
+particular, if a shared Session's earlier OpenAI Responses turn used a key from
+one organization and the next actor uses a key from another, OpenAI may return
+`invalid_encrypted_content`; Azure OpenAI resource changes are expected to have
+the same limitation. Agor does not alter conversation history or substitute
+another user's credential. P11's authorized real-provider test remains a
+separate activation gate; other providers and credential paths are
+mock-verified only and are not proven for cross-user continuation.
+
 After editing this list, run `agor install --sync`. It installs the exact matching package version, removes
 unconfigured tools and packages from older Agor versions, and leaves `config.yaml` untouched. The
 packaged daemon fails before listening if any configured integration is missing or misaligned.

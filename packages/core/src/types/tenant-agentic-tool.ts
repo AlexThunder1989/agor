@@ -43,11 +43,7 @@ export const PROVIDER_CONNECTION_FIELDS = {
   gemini: ['GEMINI_API_KEY'],
   copilot: ['COPILOT_GITHUB_TOKEN'],
   cursor: ['CURSOR_API_KEY'],
-  opencode: [
-    'OPENCODE_API_KEY_ANTHROPIC',
-    'OPENCODE_API_KEY_OPENAI',
-    'OPENCODE_API_KEY_KIMI_FOR_CODING',
-  ],
+  opencode: [],
 } as const satisfies Record<ProviderConnectionTool, readonly AgenticToolConfigField[]>;
 
 /** Credential-bearing subset of each atomic provider connection (excludes endpoints). */
@@ -57,11 +53,7 @@ export const PROVIDER_CREDENTIAL_FIELDS = {
   gemini: ['GEMINI_API_KEY'],
   copilot: ['COPILOT_GITHUB_TOKEN'],
   cursor: ['CURSOR_API_KEY'],
-  opencode: [
-    'OPENCODE_API_KEY_ANTHROPIC',
-    'OPENCODE_API_KEY_OPENAI',
-    'OPENCODE_API_KEY_KIMI_FOR_CODING',
-  ],
+  opencode: [],
 } as const satisfies Record<ProviderConnectionTool, readonly AgenticToolConfigField[]>;
 
 export const TENANT_PROVIDER_CONNECTION_FIELDS = {

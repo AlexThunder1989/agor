@@ -14,7 +14,7 @@ import { link, lstat, mkdir, open, readdir, rm, rmdir, unlink } from 'node:fs/pr
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import type { OpenCodeNativeStateAttempt } from '@agor/core/types';
-import { OPENCODE_VERSION } from '../shared/known-models.js';
+import { OPENCODE_VERSION } from '../shared/version.js';
 
 /**
  * Job-local scratch root. The Cloud executor pod sets `AGOR_OPENCODE_SCRATCH_ROOT`

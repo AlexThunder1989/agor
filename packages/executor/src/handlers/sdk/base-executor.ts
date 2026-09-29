@@ -416,7 +416,7 @@ export async function stampGitStateAtTaskStart(
  * Returns resolution result with key, source, and useNativeAuth flag
  */
 export async function resolveApiKeyForTask(
-  keyName: ApiKeyName,
+  keyName: ApiKeyName | { providerId: string },
   client: AgorClient,
   taskId: TaskID,
   tool: AgenticToolName
@@ -427,10 +427,12 @@ export async function resolveApiKeyForTask(
   // never resolves a key stored under `agentic_tools['claude-code']`, and vice versa.
   const result = (await client.service('config/resolve-api-key').create({
     taskId,
-    keyName,
+    ...(typeof keyName === 'string' ? { keyName } : { providerId: keyName.providerId }),
     tool,
   })) as import('@agor/core/config').KeyResolutionResult;
-  sdkDebug(`[API Key Resolution] Resolved ${keyName} via daemon (source: ${result.source})`);
+  sdkDebug(
+    `[API Key Resolution] Resolved ${typeof keyName === 'string' ? keyName : `OpenCode provider ${keyName.providerId}`} via daemon (source: ${result.source})`
+  );
   return result;
 }
 

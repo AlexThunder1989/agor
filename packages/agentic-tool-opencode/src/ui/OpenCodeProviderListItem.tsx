@@ -94,6 +94,9 @@ export function OpenCodeProviderListItem({
   onMethodChange,
   onPromptChange,
   onApiKeyChange,
+  hostedEndpoint,
+  onHostedEndpointChange,
+  managedHosted,
   onOAuthCodeChange,
 }: {
   provider: Provider;
@@ -113,6 +116,9 @@ export function OpenCodeProviderListItem({
   onMethodChange: (index: number) => void;
   onPromptChange: (key: string, value: string) => void;
   onApiKeyChange: (value: string) => void;
+  hostedEndpoint: string;
+  onHostedEndpointChange: (value: string) => void;
+  managedHosted: boolean;
   onOAuthCodeChange: (value: string) => void;
 }) {
   const [copiedAuthorizationCode, setCopiedAuthorizationCode] = useState<string>();
@@ -121,7 +127,9 @@ export function OpenCodeProviderListItem({
       ? selectedMethodIndex
       : preferredOAuthMethodIndex(provider.authMethods);
   const method = provider.authMethods[methodIndex];
-  const apiKeyAvailable = method?.type === 'api' || !method;
+  const apiKeyAvailable = managedHosted
+    ? provider.apiAuthAvailable !== false
+    : method?.type === 'api' || !method;
   const values = selected ? promptValues : {};
   const prompts = visibleAuthPrompts(method?.prompts, values);
   const promptsComplete = prompts.every((prompt) => values[prompt.key]?.trim());
@@ -177,7 +185,11 @@ export function OpenCodeProviderListItem({
         title={
           <Space>
             <Typography.Text strong>{provider.name}</Typography.Text>
-            {provider.runtimeAvailable && <Tag color="blue">Available in runtime</Tag>}
+            {provider.runtimeAvailable && (
+              <Tag color="blue">
+                {managedHosted ? 'Hosted API provider' : 'Available in runtime'}
+              </Tag>
+            )}
             {provider.credentialPresence === 'present' && <Tag color="green">Saved credential</Tag>}
             {provider.credentialPresence === 'unknown' && (
               <Tag color="gold">Credential state unknown</Tag>
@@ -186,9 +198,14 @@ export function OpenCodeProviderListItem({
         }
         description={
           provider.credentialPresence === 'present' ? (
-            <Typography.Text type="secondary">
-              A saved credential exists; provider access is not verified here.
-            </Typography.Text>
+            <Space orientation="vertical">
+              <Typography.Text type="secondary">
+                A saved credential exists; provider access is not verified here.
+              </Typography.Text>
+              {provider.endpoint && (
+                <Typography.Text type="secondary">Endpoint: {provider.endpoint}</Typography.Text>
+              )}
+            </Space>
           ) : (
             <Space orientation="vertical" style={{ width: '100%' }}>
               {provider.credentialPresence === 'unknown' ? (
@@ -312,6 +329,15 @@ export function OpenCodeProviderListItem({
                   value={apiKey}
                   onChange={(event) => onApiKeyChange(event.target.value)}
                   onPressEnter={onConnect}
+                />
+              )}
+              {selected && managedHosted && apiKeyAvailable && !oauthActive && (
+                <Input
+                  aria-label={`${provider.name} endpoint`}
+                  autoComplete="url"
+                  placeholder="Optional HTTPS endpoint"
+                  value={hostedEndpoint}
+                  onChange={(event) => onHostedEndpointChange(event.target.value)}
                 />
               )}
             </Space>

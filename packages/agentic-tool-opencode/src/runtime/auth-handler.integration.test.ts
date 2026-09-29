@@ -57,7 +57,17 @@ const providerList = (connected: string[]) => ({
       { id: 'zhipuai-coding-plan', name: 'GLM Coding Plan' },
       { id: 'opencode', name: 'OpenCode Zen' },
       { id: 'openai', name: 'OpenAI' },
-    ],
+    ].map((provider) => ({
+      ...provider,
+      env: [],
+      models: {
+        [`${provider.id}-default`]: {
+          id: `${provider.id}-default`,
+          name: `${provider.name} default`,
+          status: 'active',
+        },
+      },
+    })),
     connected,
     default: {},
   },
@@ -131,10 +141,11 @@ afterEach(() => {
 });
 
 describe('opencode.auth executor command', () => {
-  it('returns configured known choices without starting an OpenCode server', async () => {
+  it('discovers local model choices from the running OpenCode provider catalog', async () => {
     runtime.readAuthFile.mockResolvedValue(
       JSON.stringify({ openai: { type: 'api', key: 'must-not-cross' } })
     );
+    runtime.clients.push(client(['openai']));
 
     const result = await executeCommand({
       command: 'opencode.auth',
@@ -149,18 +160,14 @@ describe('opencode.auth executor command', () => {
       '/home/alice/.local/share/agor/opencode/opaque',
       { allowMissing: true }
     );
-    expect(runtime.start).not.toHaveBeenCalled();
+    expect(runtime.start).toHaveBeenCalledTimes(1);
     expect(result).toEqual({
       success: true,
       data: expect.objectContaining({
         runtimeVersion: expect.any(String),
-        suggestedSelection: {
-          providerId: 'openai',
-          modelId: 'gpt-5.6-terra-pro',
-        },
+        suggestedSelection: { providerId: 'openai', modelId: 'openai-default' },
         providers: expect.arrayContaining([
           expect.objectContaining({ id: 'openai', availableForSelection: true }),
-          expect.objectContaining({ id: 'opencode', availableForSelection: true }),
         ]),
       }),
     });

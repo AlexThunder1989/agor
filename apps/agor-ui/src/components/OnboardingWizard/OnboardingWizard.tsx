@@ -710,8 +710,8 @@ export function OnboardingWizard({
       }
       if (agent === 'gemini') return !!(gemini?.GEMINI_API_KEY || user.env_vars?.GEMINI_API_KEY);
       if (agent === 'opencode') {
-        // Hosted OpenCode stores one encrypted key per reviewed provider; any
-        // saved key counts as connected (verified by the first prompt). Local
+        // Hosted OpenCode stores one encrypted entry per provider; any saved
+        // entry counts as connected (verified by the first prompt). Local
         // native-file deployments keep credentials in OpenCode's own store and
         // report readiness through the OpenCode settings surface instead.
         return Object.values(user.agentic_tools?.opencode ?? {}).some(Boolean);

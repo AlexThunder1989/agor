@@ -3,7 +3,7 @@ import { constants as fsConstants } from 'node:fs';
 import { access } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
 import { resolveManagedAgenticToolPackageDirectory } from '@agor/core/agentic-integrations';
-import { OPENCODE_VERSION } from '../shared/known-models.js';
+import { OPENCODE_VERSION } from '../shared/version.js';
 
 async function isExecutable(path: string): Promise<boolean> {
   try {

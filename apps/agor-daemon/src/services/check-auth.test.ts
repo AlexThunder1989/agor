@@ -7,6 +7,8 @@ import { createCheckAuthService } from './check-auth';
 import { resolveCodexCredentialRoute } from './codex-auth-shared.js';
 
 const claudeQueryMock = vi.hoisted(() => vi.fn());
+const hostedCatalogMock = vi.hoisted(() => vi.fn());
+const usersRepositoryMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@agor/core/config', async () => {
   const actual = await vi.importActual<typeof import('@agor/core/config')>('@agor/core/config');
@@ -15,6 +17,18 @@ vi.mock('@agor/core/config', async () => {
     resolveApiKey: vi.fn(),
     isTenantAgenticToolEnabled: vi.fn(),
   };
+});
+
+vi.mock('@agor/core/db', async () => {
+  const actual = await vi.importActual<typeof import('@agor/core/db')>('@agor/core/db');
+  return { ...actual, UsersRepository: usersRepositoryMock };
+});
+
+vi.mock('../integrations/opencode/provider-catalog.js', async () => {
+  const actual = await vi.importActual<
+    typeof import('../integrations/opencode/provider-catalog.js')
+  >('../integrations/opencode/provider-catalog.js');
+  return { ...actual, readManagedOpenCodeProviderCatalog: hostedCatalogMock };
 });
 
 vi.mock('@agor/core/agentic-integrations', async () => {
@@ -80,6 +94,26 @@ beforeEach(() => {
   delete process.env.ANTHROPIC_AUTH_TOKEN;
   isTenantAgenticToolEnabledMock.mockResolvedValue(true);
   resolveApiKeyMock.mockResolvedValue({ apiKey: undefined, source: 'none', useNativeAuth: false });
+  usersRepositoryMock.mockImplementation(function repository() {
+    return {
+      findById: vi.fn(async () => ({
+        user_id: 'owner',
+        agentic_tools: { opencode: { 'provider:openai': true } },
+      })),
+    };
+  });
+  hostedCatalogMock.mockResolvedValue({
+    schemaVersion: 1,
+    runtimeVersion: '1.18.31',
+    connected: [],
+    providers: ['openai', 'anthropic', 'oauth-only'].map((id) => ({
+      id,
+      name: id,
+      env: [],
+      models: [{ id: `${id}-model`, name: `${id} model`, status: 'active' }],
+      authMethods: [{ index: 0, type: id === 'oauth-only' ? 'oauth' : 'api', label: 'method' }],
+    })),
+  });
 });
 
 // #1867 — Claude subscription-token handling (kept verbatim; `authenticated`
@@ -461,7 +495,7 @@ describe('check-auth codex auth.json probe', () => {
 });
 
 describe('hosted OpenCode provider-specific checks', () => {
-  it('does not call a different saved key authenticated for the selected provider', async () => {
+  it('checks dynamic saved entries for the selected hosted provider', async () => {
     const delegate = createCheckAuthService(TEST_DB, {
       multi_tenancy: { mode: 'required_from_auth' },
       execution: {
@@ -472,12 +506,6 @@ describe('hosted OpenCode provider-specific checks', () => {
       },
       agentic_tools: { opencode_hosted_native_state: 'checkpointed' },
     } as never);
-    resolveApiKeyMock.mockResolvedValue({
-      source: 'user',
-      useNativeAuth: false,
-      apiKey: undefined,
-      connection: { OPENCODE_API_KEY_OPENAI: 'synthetic' },
-    });
     const check = (provider?: string) =>
       runWithTenantContext('tenant-test', () =>
         delegate.create({ tool: 'opencode', provider }, { user: { user_id: 'owner' } } as never)

@@ -3,7 +3,7 @@ import { randomBytes as nodeRandomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import { chmod, lstat, mkdir, open } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { OPENCODE_VERSION } from '../shared/known-models.js';
+import { OPENCODE_VERSION } from '../shared/version.js';
 import { type OpenCodeCommand, resolvePackagedOpenCodeBinary } from './binary.js';
 import { hostedOpenCodeEnvironment } from './hosted-config.js';
 import type { OpenCodeNativeStateLayout } from './native-state.js';

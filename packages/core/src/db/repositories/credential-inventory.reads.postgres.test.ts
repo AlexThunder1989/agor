@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { resolveUserEnvironment } from '../../config/env-resolver';
 import { resolveProviderConnection } from '../../config/tenant-agentic-tool-resolver';
@@ -7,6 +7,7 @@ import type { GatewayChannel, UserID } from '../../types';
 import { createDatabase, type Database } from '../client';
 import { select } from '../database-wrapper';
 import { initializeDatabase } from '../migrate';
+import { users } from '../schema';
 import { runWithTenantDatabaseScope } from '../tenant-scope';
 import { AppVariableRepository } from './app-variables';
 import { BranchRepository } from './branches';
@@ -74,6 +75,25 @@ describe.skipIf(!url || process.env.AGOR_DB_DIALECT !== 'postgresql')(
             'OPENAI_API_KEY',
             `user-key-${tenant}`
           );
+          const users = new UsersRepository(scoped);
+          await users.setToolConfigField(
+            user.user_id,
+            'opencode',
+            'provider:openai',
+            JSON.stringify({ type: 'api', key: `openai-${tenant}` })
+          );
+          await users.setToolConfigField(
+            user.user_id,
+            'opencode',
+            'provider:anthropic',
+            JSON.stringify({ type: 'api', key: `anthropic-${tenant}` })
+          );
+          await users.setToolConfigField(
+            user.user_id,
+            'opencode',
+            'OPENCODE_API_KEY_OPENAI',
+            `legacy-openai-${tenant}`
+          );
           await new TenantAgenticToolSettingsRepository(scoped).patch('codex', {
             connection: { OPENAI_API_KEY: `key-${tenant}` },
           });
@@ -111,16 +131,51 @@ describe.skipIf(!url || process.env.AGOR_DB_DIALECT !== 'postgresql')(
               source: 'user',
               connection: { OPENAI_API_KEY: `user-key-${tenant}` },
             });
-            const users = new UsersRepository(scoped);
-            expect(await users.getToolConfigField(own.user, 'codex', 'OPENAI_API_KEY')).toBe(
+            const userRepo = new UsersRepository(scoped);
+            expect(await userRepo.getToolConfigField(own.user, 'codex', 'OPENAI_API_KEY')).toBe(
               `user-key-${tenant}`
             );
-            expect(await users.getToolConfig(own.user, 'codex')).toMatchObject({
+            const ownOpenCode = await userRepo.getToolConfig(own.user, 'opencode');
+            expect(ownOpenCode).toMatchObject({
+              'provider:openai': JSON.stringify({ type: 'api', key: `openai-${tenant}` }),
+              'provider:anthropic': JSON.stringify({ type: 'api', key: `anthropic-${tenant}` }),
+              OPENCODE_API_KEY_OPENAI: `legacy-openai-${tenant}`,
+            });
+            await expect(
+              userRepo.getToolConfigField(own.user, 'opencode', 'provider:openai')
+            ).resolves.toBe(JSON.stringify({ type: 'api', key: `openai-${tenant}` }));
+            await expect(
+              userRepo.getToolConfigField(foreign.user, 'opencode', 'provider:openai')
+            ).resolves.toBeNull();
+            await userRepo.setToolConfigField(
+              own.user,
+              'opencode',
+              'provider:openai',
+              JSON.stringify({ type: 'api', key: `rotated-openai-${tenant}` })
+            );
+            await userRepo.deleteToolConfigField(own.user, 'opencode', 'provider:anthropic');
+            await expect(
+              userRepo.getToolConfigField(own.user, 'opencode', 'provider:openai')
+            ).resolves.toBe(JSON.stringify({ type: 'api', key: `rotated-openai-${tenant}` }));
+            await expect(
+              userRepo.getToolConfigField(own.user, 'opencode', 'provider:anthropic')
+            ).resolves.toBeNull();
+            const publicUser = await userRepo.findById(own.user);
+            expect(publicUser?.agentic_tools?.opencode).toEqual({
+              'provider:openai': true,
+              OPENCODE_API_KEY_OPENAI: true,
+            });
+            const rawUser = await select(scoped)
+              .from(users)
+              .where(eq(users.user_id, own.user))
+              .one();
+            expect(JSON.stringify(rawUser?.data)).not.toContain(`rotated-openai-${tenant}`);
+            expect(await userRepo.getToolConfig(own.user, 'codex')).toMatchObject({
               OPENAI_API_KEY: `user-key-${tenant}`,
             });
-            await expect(users.getToolConfig(foreign.user, 'codex')).resolves.toBeNull();
+            await expect(userRepo.getToolConfig(foreign.user, 'codex')).resolves.toBeNull();
             await expect(
-              users.getToolConfigField(foreign.user, 'codex', 'OPENAI_API_KEY')
+              userRepo.getToolConfigField(foreign.user, 'codex', 'OPENAI_API_KEY')
             ).resolves.toBeNull();
             expect(await resolveUserEnvironment(own.user, scoped, { tool: 'codex' })).toMatchObject(
               { OPENAI_API_KEY: `user-key-${tenant}` }
