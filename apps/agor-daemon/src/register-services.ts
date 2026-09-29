@@ -1025,7 +1025,7 @@ export async function registerServices(ctx: RegisterServicesContext): Promise<Re
     },
   });
 
-  app.use('/check-auth', createCheckAuthService(db, config, claudeBackendOAuth));
+  app.use('/check-auth', createCheckAuthService(db, config, claudeBackendOAuth, ctx.agorVersion));
   app.service('/check-auth').hooks({ before: { create: [ctx.requireAuth] } });
 
   registerOpenCodeServices(ctx);

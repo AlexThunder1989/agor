@@ -1024,6 +1024,31 @@ describe('OpenCode provider auth service (hosted managed projection)', () => {
     expect(runCommand).not.toHaveBeenCalled();
   });
 
+  it('finds, saves and removes a saved endpoint without contacting it', async () => {
+    const network = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('saved endpoint must not be contacted'));
+    try {
+      const { service } = hostedService();
+      await runWithTenantContext('tenant-a', async () => {
+        await service.find(params);
+        await service.create(
+          {
+            providerId: 'openai',
+            apiKey: 'synthetic-key',
+            baseURL: 'https://saved.example.invalid/v1',
+          },
+          params
+        );
+        await service.remove('openai', params);
+      });
+      expect(network).not.toHaveBeenCalled();
+      expect(runCommand).not.toHaveBeenCalled();
+    } finally {
+      network.mockRestore();
+    }
+  });
+
   it('saves and clears dynamic provider entries through the users service as the caller', async () => {
     const { service, patch } = hostedService();
     await runWithTenantContext('tenant-a', async () => {

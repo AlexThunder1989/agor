@@ -1,4 +1,7 @@
-import * as NativeOpenCodeRuntime from '@agor/agentic-tool-opencode/runtime';
+import {
+  deleteRetiredOpenCodeAttemptInWorker,
+  type OpenCodeNativeStateLayout,
+} from '@agor/agentic-tool-opencode/runtime';
 import type { TaskID } from '@agor/core/types';
 import type { AgorClient } from '../../services/feathers-client.js';
 
@@ -6,18 +9,6 @@ type CleanupWork =
   | { kind: 'delete'; object: { storeId: string; taskId: string } }
   | { kind: 'observe'; attemptId: string }
   | { kind: 'none' };
-
-interface ManagedOpenCodeNativeStateLayout {
-  homeDir: string;
-  namespaceKey: string;
-  agorSessionId: string;
-  storeId: string;
-  attemptsDir: string;
-  attemptTaskId: string;
-  scratchRoot: string;
-  liveDbPath: string;
-  xdg: { data: string; config: string; cache: string; state: string };
-}
 
 interface OpenCodeNativeStateService {
   prepareCleanup(input: { task_id: string; holder_instance_id: string }): Promise<CleanupWork>;
@@ -48,7 +39,7 @@ export class OpenCodeCleanupOperation {
     private readonly client: AgorClient,
     private readonly taskId: TaskID,
     private readonly holderId: string,
-    private readonly layout: ManagedOpenCodeNativeStateLayout
+    private readonly layout: OpenCodeNativeStateLayout
   ) {}
 
   start(): void {
@@ -121,15 +112,7 @@ export class OpenCodeCleanupOperation {
         console.error('[opencode.cleanup] event=delete_skipped reason=store_mismatch');
         return;
       }
-      const deleteWorker = (
-        NativeOpenCodeRuntime as unknown as {
-          deleteRetiredOpenCodeAttemptInWorker(
-            layout: ManagedOpenCodeNativeStateLayout,
-            object: { storeId: string; taskId: string }
-          ): Promise<{ outcome: 'deleted' } | { outcome: 'failed'; errorCode: string }>;
-        }
-      ).deleteRetiredOpenCodeAttemptInWorker;
-      const result = await deleteWorker(this.layout, work.object);
+      const result = await deleteRetiredOpenCodeAttemptInWorker(this.layout, work.object);
       await service.acknowledgeDelete({
         task_id: this.taskId,
         holder_instance_id: this.holderId,

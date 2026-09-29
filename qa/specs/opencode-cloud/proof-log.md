@@ -92,3 +92,71 @@ copy (`integrity_check` ok) that a third server resumes; two writers on one
 config root. A separate loopback probe with `OPENCODE_AUTH_CONTENT` set and no
 `auth.json` confirmed that the projected provider is reported as connected and
 no credential file is written.
+
+## Completion of reduced P17–P21 (2026-09-29)
+
+The following observations supersede the partial local rows above. The executable
+was the pinned 1.18.31 Darwin binary. Credentials, OAuth tokens, SDK package and
+provider responses were synthetic; an HTTPS CONNECT mock intercepted outbound
+traffic and never forwarded it. Provider definitions and model metadata came
+from the binary, without SDK or model overrides. A saved endpoint was set only
+on the compatible-provider entry. TLS verification was disabled only in these
+throwaway mock children, not in product configuration.
+
+- **P17:** Alice and Bob used one native Session per provider across fresh hosted
+  scratch layouts: `llmgateway-providers` (`@ai-sdk/openai-compatible`),
+  `openrouter`, `kimi-for-coding`, `zai`, `azure` with `resourceName`, and
+  `amazon-bedrock` bearer credentials. Each capture contained the current actor's
+  synthetic key, correct provider/model route, and only the selected entry in
+  mode-0600 `auth.json`. The compatible-provider request reached its saved HTTPS
+  endpoint; Azure reached the resource hostname derived from the actor's own
+  metadata. OpenAI `/v1/responses` and Anthropic `/v1/messages` were captured
+  separately with both actors, using their production definitions. Mock 401s
+  prove delivery, not successful account continuation. Other catalog providers
+  are covered through their credential shape; their SDK request format is
+  unverified.
+- **P18:** `config.opencode-provider-entry.postgres.test.ts` passes through the
+  actual users service and Config resolver on SQLite and restricted-role
+  PostgreSQL/RLS. Non-API, malformed JSON and oversized entries yield re-entry
+  status without a connection or provider I/O. Alice's endpoint resolves only
+  for her Task; Bob's Task receives no Alice entry. Keyless Zen and an all-OAuth
+  provider are unavailable. Existing credential inventory/storage suites retain
+  sequential saves, narrow removal, legacy and tenant-boundary coverage.
+- **P19:** A network spy covers hosted `find`, `create` with a saved endpoint,
+  and `remove`: no fetch or executor command occurs. The resolver shared-Session
+  negative prevents Bob from receiving Alice's saved endpoint. Generic endpoint
+  and metadata validation remains covered by the provider-catalog suite.
+- **P20:** Alice's Vertex project/location environment and a synthetic
+  service-account file under her own home produced an OAuth token request and
+  a Vertex request carrying the mock access token. Bob resumed the same native
+  Session with his own home and no Alice environment/file: no token or provider
+  request occurred. No saved auth file existed in either scratch layout.
+- **P21:** A loopback registry served a synthetic `@qvac/ai-sdk-provider` package
+  to the pinned native installer. The package installed and executed under
+  scratch. After native shutdown, the production checkpoint publisher sealed
+  only `opencode.db` and `manifest.json` (258,048-byte DB), excluding SDK/cache,
+  config and credentials. A fresh Bob layout with registry 404 returned
+  `Failed to initialize provider: qvac`, without silently using Alice's package.
+  The configured/repository plugin exclusion test also passed against the real
+  binary with the exact hosted discovery environment.
+
+Validation after merging main `504c7ec7`: `pnpm check` passed; tool-focused tests
+48 passed/1 opt-in skipped, executor tests 31 passed, credential service tests
+27 passed/1 PostgreSQL-gated skipped, Session header tests 28 passed. The real
+binary hosted configuration test passed all 3 cases. Restricted-role PostgreSQL
+reported 500 passed/2 failed/1 skipped across 97 files; the new provider-entry
+case passed. The failures were the unchanged macOS branch-deletion recovery
+case and a main timestamp assertion 3 ms outside its client-clock bound. The
+latter passed all 4 cases in an isolated restricted-role replay; the original
+aggregate failure is retained as a limit. These are local developer checks,
+not Cloud/EFS or real-provider acceptance. The subsequent latest-main update
+is validated separately before publication.
+
+### Final review corrections
+
+- Hosted defaults use the pinned runtime's ordering after filtering alpha/deprecated models; the regression reverses object order and the selected default.
+- The local curated picker and its no-server regression remain unchanged from main. Hosted projection is separate.
+- Hosted provider settings render unavailability reasons and disable OAuth-only entry creation while retaining saved-entry removal.
+- Native layout and v3 manifest reuse canonical types; obsolete static credential-field resolution is removed and hosted admission/check-auth reuse the same availability projection.
+- The existing Node.js 22.13 floor is retained and disclosed in the changelog.
+- Focused executor suites: 42 passed. Focused daemon credential/check-auth/classification suites: 89 passed, 1 PostgreSQL-only skip. Full source checks pass after remediation. Independent focused review and hosted acceptance remain pending.

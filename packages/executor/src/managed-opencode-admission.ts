@@ -1,5 +1,5 @@
 /** Wire shape returned only after the daemon commits the managed Task holder. */
-import { OPENCODE_OBSERVER_BUSY_REASON } from '@agor/core/types';
+import { OPENCODE_OBSERVER_BUSY_REASON, type OpenCodeNativeStateAttempt } from '@agor/core/types';
 
 const OBSERVER_BUSY_DELAYS_MS = [150, 300, 600, 1_200, 2_400] as const;
 const TRANSPORT_DELAYS_MS = [200, 500, 1_000, 1_500, 2_000] as const;
@@ -77,16 +77,10 @@ export async function beginManagedOpenCodeWithBusyRetry<T>(
   }
 }
 
-export interface ManagedOpenCodeNativeStateManifest {
-  version: 3;
-  attemptTaskId: string;
-  storeId: string;
-  digest: string;
-  bytes: number;
-  openCodeSessionId: string;
-  openCodeVersion: string;
-  publishedAt: string;
-}
+export type ManagedOpenCodeNativeStateManifest = Extract<
+  OpenCodeNativeStateAttempt,
+  { version: 3 }
+>;
 
 export interface ManagedOpenCodeAttemptGrant {
   task_id: string;

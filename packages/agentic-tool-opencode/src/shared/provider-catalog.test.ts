@@ -8,7 +8,7 @@ import {
   openCodeProviderEntryField,
   parseOpenCodeApiEntry,
   validateOpenCodeApiEntry,
-} from './known-models.js';
+} from './provider-catalog.js';
 import { OPENCODE_VERSION } from './version.js';
 
 function providerCatalog(): OpenCodeProviderCatalogArtifact {
@@ -73,6 +73,19 @@ describe('OpenCode provider catalog projection', () => {
     expect(catalog.suggestedSelection).toEqual({ providerId: 'openai', modelId: 'latest' });
   });
 
+  it('uses pinned OpenCode ordering when the captured default is filtered out', () => {
+    const artifact = providerCatalog();
+    artifact.providers[0].models = [
+      { id: 'gpt-5-nano', name: 'Nano', status: 'active' },
+      { id: 'alpha-model', name: 'Alpha', status: 'alpha' },
+      { id: 'gpt-5.3-chat-latest', name: 'Latest', status: 'active' },
+      { id: 'gpt-5.9', name: 'Higher ID without latest', status: 'active' },
+    ];
+    expect(createOpenCodeModelCatalog(artifact, new Set()).providers[0].suggestedModel).toBe(
+      'gpt-5.3-chat-latest'
+    );
+  });
+
   it('offers a credential-free provider only with a caller saved entry and keeps saved noncatalog ids removable', () => {
     const saved = new Set(['opencode', 'retired-provider']);
     const hosted = createOpenCodeHostedProviderDiscovery(providerCatalog(), saved);
@@ -124,6 +137,39 @@ describe('OpenCode provider catalog projection', () => {
     expect(projected.content).not.toContain('gateway.example');
     expect(projected.secrets).toEqual(['alice-secret', projected.content]);
   });
+
+  it.each([
+    ['llmgateway-providers', { type: 'api', key: 'compatible-key' }],
+    ['openrouter', { type: 'api', key: 'openrouter-key' }],
+    ['kimi-for-coding', { type: 'api', key: 'kimi-key' }],
+    ['zai', { type: 'api', key: 'zai-key' }],
+    ['azure', { type: 'api', key: 'azure-key', metadata: { resourceName: 'mock-resource' } }],
+    ['amazon-bedrock', { type: 'api', key: 'bedrock-bearer-token' }],
+  ])(
+    'projects the %s credential shape without sibling entries or endpoints',
+    (providerId, entry) => {
+      const projected = buildOpenCodeAuthContent(
+        {
+          [openCodeProviderEntryField(providerId)]: JSON.stringify({
+            ...entry,
+            endpoint: 'https://mock-provider.example/v1',
+          }),
+          [openCodeProviderEntryField('openai')]: JSON.stringify({
+            type: 'api',
+            key: 'sibling-key',
+          }),
+        },
+        providerId
+      );
+
+      expect(JSON.parse(projected.content ?? '')).toEqual({
+        [providerId]: entry,
+      });
+      expect(projected.endpoint).toBe('https://mock-provider.example/v1');
+      expect(projected.content).not.toContain('mock-provider.example');
+      expect(projected.content).not.toContain('sibling-key');
+    }
+  );
 
   it('reads legacy aliases without returning unrelated entries', () => {
     const projected = buildOpenCodeAuthContent(

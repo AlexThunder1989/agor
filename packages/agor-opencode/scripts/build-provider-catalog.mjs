@@ -215,10 +215,10 @@ try {
       connected: list.data.connected,
     };
     const outputDirectory = join(root, '.catalog');
-    await mkdir(outputDirectory, { recursive: true, mode: 0o700 });
+    await mkdir(outputDirectory, { recursive: true, mode: 0o755 });
     const target = join(outputDirectory, 'provider-catalog.json');
-    await writeFile(target, `${JSON.stringify(artifact)}\n`, { mode: 0o600 });
-    await chmod(target, 0o600);
+    await writeFile(target, `${JSON.stringify(artifact)}\n`, { mode: 0o644 });
+    await chmod(target, 0o644);
   } finally {
     child.kill('SIGTERM');
     await new Promise((resolvePromise) => {

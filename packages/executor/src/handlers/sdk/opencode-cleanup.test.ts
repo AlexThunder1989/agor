@@ -9,6 +9,7 @@ import { OpenCodeCleanupOperation } from './opencode-cleanup.js';
 
 const layout = {
   homeDir: '/tmp/home',
+  sessionRoot: '/tmp/home/opencode-sessions/session',
   namespaceKey: 'a'.repeat(64),
   agorSessionId: '00000000-0000-4000-8000-000000000001',
   storeId: '00000000-0000-4000-8000-000000000002',

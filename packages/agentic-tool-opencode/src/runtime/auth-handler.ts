@@ -5,12 +5,11 @@ import type {
   OpenCodeModelPair,
   OpenCodeOAuthAuthorization,
   OpenCodeProviderAuthMethod,
-  OpenCodeProviderCatalogArtifact,
   OpenCodeProviderConnection,
   OpenCodeProviderDiscovery,
 } from '@agor/core/types';
 import type { createOpencodeClient } from '@opencode-ai/sdk/v2';
-import { createOpenCodeRuntimeModelCatalog } from '../shared/known-models.js';
+import { createOpenCodeKnownModelCatalog } from '../shared/known-models.js';
 import type { OpenCodeAuthPayload } from './auth-payload.js';
 import {
   ensureOpenCodeDataHome as defaultEnsureOpenCodeDataHome,
@@ -159,46 +158,10 @@ async function discoverModels(
 ): Promise<OpenCodeModelCatalog> {
   await runtime.ensureOpenCodeDataHome(dataHome);
   await runtime.verifyOpenCodeAuthFileBoundary(dataHome, { allowMissing: true });
-  return withFreshClient(
-    dataHome,
-    [],
-    async (client) => {
-      const [providers, auth] = await Promise.all([
-        client.provider.list({ directory: dataHome }),
-        client.provider.auth({ directory: dataHome }),
-      ]);
-      if (providers.error || !providers.data || auth.error) {
-        throw new Error('OpenCode provider catalog discovery failed');
-      }
-      const artifact: OpenCodeProviderCatalogArtifact = {
-        schemaVersion: 1,
-        runtimeVersion: OPENCODE_VERSION,
-        connected: providers.data.connected,
-        providers: providers.data.all.map((provider) => ({
-          id: provider.id,
-          name: provider.name,
-          env: provider.env,
-          defaultModel: providers.data.default[provider.id],
-          models: Object.values(provider.models).map((model) => ({
-            id: model.id,
-            name: model.name,
-            status: model.status,
-            limit: model.limit,
-            capabilities: model.capabilities,
-          })),
-          authMethods: safeMethods(auth.data, provider.id),
-        })),
-      };
-      return createOpenCodeRuntimeModelCatalog({
-        providers: artifact.providers,
-        defaults: providers.data.default,
-        connected: providers.data.connected,
-        savedProviderIds: await savedCredentialProviderIds(dataHome),
-      });
-    },
-    dataHome,
-    runtime
-  );
+  return {
+    runtimeVersion: OPENCODE_VERSION,
+    ...createOpenCodeKnownModelCatalog(await savedCredentialProviderIds(dataHome)),
+  };
 }
 
 function configuredPair(model: string | undefined): OpenCodeModelPair | undefined {

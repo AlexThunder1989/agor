@@ -17,7 +17,7 @@
  */
 
 import {
-  createOpenCodeModelCatalog,
+  createOpenCodeHostedProviderDiscovery,
   openCodeArtifactUnavailableReason,
 } from '@agor/agentic-tool-opencode';
 import { resolveOpenCodeCapabilities } from '@agor/agentic-tool-opencode/daemon';
@@ -389,7 +389,8 @@ async function probeClaudeAuthFile(
 export function createCheckAuthService(
   db: TenantScopeAwareDatabase,
   config: DeepReadonly<AgorConfig>,
-  backend?: ClaudeBackendOAuth
+  backend?: ClaudeBackendOAuth,
+  agorVersion?: string
 ) {
   return {
     async create(
@@ -424,17 +425,18 @@ export function createCheckAuthService(
         if (provider) {
           let artifact: OpenCodeProviderCatalogArtifact;
           try {
-            artifact = await readManagedOpenCodeProviderCatalog();
+            artifact = await readManagedOpenCodeProviderCatalog(agorVersion);
           } catch {
             return unknown(openCodeArtifactUnavailableReason().message);
           }
-          const selected = createOpenCodeModelCatalog(artifact, saved).providers.find(
+          const selected = createOpenCodeHostedProviderDiscovery(artifact, saved).providers.find(
             (candidate) => candidate.id === provider
           );
-          if (!selected?.availableForSelection) {
+          if (!selected?.runtimeAvailable) {
             return unauthenticated(
               'none',
-              'This OpenCode provider is unavailable for hosted execution or needs a saved entry.'
+              selected?.unavailableReason ??
+                'This OpenCode provider is unavailable for hosted execution.'
             );
           }
         }

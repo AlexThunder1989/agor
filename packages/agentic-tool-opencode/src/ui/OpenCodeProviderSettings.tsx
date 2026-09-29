@@ -449,7 +449,11 @@ export function OpenCodeProviderSettings({
         optionFilterProp="searchText"
         options={connectableProviders.map((provider) => ({
           value: provider.id,
-          label: provider.name,
+          label:
+            managedHosted && provider.unavailableReason
+              ? `${provider.name} — ${provider.unavailableReason}`
+              : provider.name,
+          disabled: managedHosted && provider.apiAuthAvailable === false,
           searchText: `${provider.name} ${provider.id}`,
         }))}
         onChange={selectProvider}

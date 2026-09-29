@@ -9,7 +9,7 @@
  */
 
 import {
-  createOpenCodeModelCatalog,
+  createOpenCodeHostedProviderDiscovery,
   LEGACY_OPENCODE_PROVIDER_FIELDS,
   openCodeProviderEntryField,
   parseOpenCodeApiEntry,
@@ -29,15 +29,14 @@ import {
   UsersRepository,
 } from '@agor/core/db';
 import { type Application, BadRequest, Forbidden, NotAuthenticated } from '@agor/core/feathers';
-import {
-  type AgenticToolName,
-  type AuthenticatedParams,
-  type DeepReadonly,
-  type OpenCodeProviderCatalogArtifact,
-  type Params,
-  PROVIDER_CONNECTION_FIELDS,
-  type TaskID,
-  type UserID,
+import type {
+  AgenticToolName,
+  AuthenticatedParams,
+  DeepReadonly,
+  OpenCodeProviderCatalogArtifact,
+  Params,
+  TaskID,
+  UserID,
 } from '@agor/core/types';
 import {
   authenticatedTaskExecutorRuntimeAuthority,
@@ -232,8 +231,7 @@ export class ConfigService {
         }
       } else {
         const expectedKeyName = TOOL_API_KEY_NAMES[tool];
-        const connectionFields: readonly string[] = PROVIDER_CONNECTION_FIELDS[tool];
-        if (expectedKeyName !== keyName && !connectionFields.includes(keyName!)) {
+        if (expectedKeyName !== keyName) {
           throw new Forbidden('Executor token is not valid for this API key');
         }
       }
@@ -387,30 +385,24 @@ export class ConfigService {
         providerUnavailable: OPEN_CODE_CATALOG_UNAVAILABLE.message,
       };
     }
-    let selected: ReturnType<typeof createOpenCodeModelCatalog>['providers'][number] | undefined;
+    let selected:
+      | ReturnType<typeof createOpenCodeHostedProviderDiscovery>['providers'][number]
+      | undefined;
     try {
-      selected = createOpenCodeModelCatalog(artifact, savedProviderIds).providers.find(
+      selected = createOpenCodeHostedProviderDiscovery(artifact, savedProviderIds).providers.find(
         (provider) => provider.id === input.providerId
       );
     } catch {
       selected = undefined;
     }
-    if (!selected?.availableForSelection) {
-      const provider = artifact.providers.find(({ id }) => id === input.providerId);
-      const allOAuth = Boolean(
-        provider &&
-          provider.authMethods.length > 0 &&
-          provider.authMethods.every((method) => method.type === 'oauth')
-      );
+    if (!selected?.runtimeAvailable) {
       return {
         apiKey: null,
         source: 'none',
         useNativeAuth: false,
-        providerUnavailable: allOAuth
-          ? 'OpenCode OAuth sign-in is not available in hosted OpenCode.'
-          : artifact.connected.includes(input.providerId) && !entry.stored
-            ? 'Credential-free providers require a saved API entry in hosted OpenCode.'
-            : 'The selected provider is unavailable in the hosted OpenCode catalog.',
+        providerUnavailable:
+          selected?.unavailableReason ??
+          'The selected provider is unavailable in the hosted OpenCode catalog.',
       };
     }
     if (!entry.stored) {

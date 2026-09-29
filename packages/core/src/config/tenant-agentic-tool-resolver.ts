@@ -54,8 +54,8 @@ const PROVIDER_AMBIENT_ENV: Record<
     prefixes: [],
   },
   cursor: { keys: [], prefixes: [] },
-  // OpenCode reads no ambient provider env: the executor projects the resolved
-  // keys through OPENCODE_AUTH_CONTENT on the managed server only.
+  // Hosted OpenCode resolves a selected per-user provider entry separately.
+  // Actor-owned environment credentials are admitted by its managed runtime.
   opencode: { keys: [], prefixes: [] },
 };
 

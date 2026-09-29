@@ -16,6 +16,7 @@ import {
   assertOpenCodeCheckpointRuntime,
   discardOpenCodeScratch,
   isOpenCodeCleanupUnverifiedError,
+  type OpenCodeNativeStateLayout,
   OpenCodeTool,
   prepareOpenCodeScratch,
   resolveOpenCodeNativeStateLayout,
@@ -73,18 +74,6 @@ interface ManagedOpenCodeStateService {
     manifest: import('../../managed-opencode-admission.js').ManagedOpenCodeNativeStateManifest;
   }): Promise<void>;
   abandon(input: { task_id: string; holder_instance_id: string }): Promise<void>;
-}
-
-interface ManagedOpenCodeNativeStateLayout {
-  homeDir: string;
-  namespaceKey: string;
-  agorSessionId: string;
-  storeId: string;
-  attemptsDir: string;
-  attemptTaskId: string;
-  scratchRoot: string;
-  liveDbPath: string;
-  xdg: { data: string; config: string; cache: string; state: string };
 }
 
 type ManagedNativeManifest = ManagedOpenCodeNativeStateManifest;
@@ -156,8 +145,8 @@ export async function executeOpenCodeTask(params: {
     client.service('sessions').emit(event, data);
   }, params.resolvedConfig?.execution?.permission_timeout_ms ?? 600_000);
   globalPermissionManager.register(sessionId, permissionService);
-  let managedScratch: ManagedOpenCodeNativeStateLayout | undefined;
-  let managedLayoutForErrors: ManagedOpenCodeNativeStateLayout | undefined;
+  let managedScratch: OpenCodeNativeStateLayout | undefined;
+  let managedLayoutForErrors: OpenCodeNativeStateLayout | undefined;
   const committedGrant = params.managedOpenCodeAdmission;
   const managedPayloadCandidate =
     !!params.agenticToolContext &&
@@ -247,14 +236,7 @@ export async function executeOpenCodeTask(params: {
       // Resolve the layout (which requires the pinned scratch root) before the
       // owner's keys enter executor memory, so an unpinned image fails before
       // any credential read.
-      const nativeState = (
-        resolveOpenCodeNativeStateLayout as unknown as (input: {
-          namespaceKey: string;
-          agorSessionId: string;
-          taskId: string;
-          storeId: string;
-        }) => ManagedOpenCodeNativeStateLayout
-      )({
+      const nativeState = resolveOpenCodeNativeStateLayout({
         namespaceKey: managedContext.namespaceKey,
         agorSessionId: managedContext.agorSessionId,
         taskId,
@@ -277,23 +259,14 @@ export async function executeOpenCodeTask(params: {
         );
       }
       const projected = buildOpenCodeAuthContent(resolution.connection ?? {}, provider);
-      await (
-        prepareOpenCodeScratch as unknown as (
-          layout: ManagedOpenCodeNativeStateLayout
-        ) => Promise<void>
-      )(nativeState);
+      await prepareOpenCodeScratch(nativeState);
       managedScratch = nativeState;
       if (committedGrant.input) {
         if (committedGrant.input.storeId !== nativeState.storeId) {
           throw new Error('OpenCode DB input pin does not match the immutable store');
         }
         try {
-          await (
-            restoreOpenCodeAcceptedState as unknown as (
-              layout: ManagedOpenCodeNativeStateLayout,
-              accepted: ManagedOpenCodeNativeStateManifest
-            ) => Promise<void>
-          )(nativeState, committedGrant.input);
+          await restoreOpenCodeAcceptedState(nativeState, committedGrant.input);
         } finally {
           // restore settles only after every source descriptor has closed, on
           // both successful verification and copy failure.
@@ -327,7 +300,7 @@ export async function executeOpenCodeTask(params: {
         endpoint: projected.endpoint,
         nativeState,
         input: committedGrant.input,
-      } as unknown as NonNullable<Parameters<OpenCodeTool['runTurn']>[0]['managed']>;
+      };
     } else if (committedGrant) {
       throw new Error('OpenCode holder grant has no matching managed execution context');
     }
@@ -444,9 +417,10 @@ export async function executeOpenCodeTask(params: {
       await cleanupOperation?.stopAndDrain();
       return;
     }
-    const publishedManifest = result.nativeStateAttempt as unknown as
-      | ManagedNativeManifest
-      | undefined;
+    const publishedManifest = result.nativeStateAttempt;
+    if (publishedManifest && publishedManifest.version !== 3) {
+      throw new Error('OpenCode managed turn returned an unsupported checkpoint version');
+    }
     if (managed && !publishedManifest) {
       throw new Error('OpenCode managed turn completed without a published checkpoint');
     }
@@ -663,11 +637,7 @@ export async function executeOpenCodeTask(params: {
     await cleanupOperation?.stopAndDrain();
     globalPermissionManager.unregister(sessionId);
     if (managedScratch) {
-      await (
-        discardOpenCodeScratch as unknown as (
-          layout: ManagedOpenCodeNativeStateLayout
-        ) => Promise<void>
-      )(managedScratch);
+      await discardOpenCodeScratch(managedScratch);
     }
   }
 }

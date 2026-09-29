@@ -141,11 +141,10 @@ afterEach(() => {
 });
 
 describe('opencode.auth executor command', () => {
-  it('discovers local model choices from the running OpenCode provider catalog', async () => {
+  it('returns configured known choices without starting an OpenCode server', async () => {
     runtime.readAuthFile.mockResolvedValue(
       JSON.stringify({ openai: { type: 'api', key: 'must-not-cross' } })
     );
-    runtime.clients.push(client(['openai']));
 
     const result = await executeCommand({
       command: 'opencode.auth',
@@ -160,14 +159,18 @@ describe('opencode.auth executor command', () => {
       '/home/alice/.local/share/agor/opencode/opaque',
       { allowMissing: true }
     );
-    expect(runtime.start).toHaveBeenCalledTimes(1);
+    expect(runtime.start).not.toHaveBeenCalled();
     expect(result).toEqual({
       success: true,
       data: expect.objectContaining({
         runtimeVersion: expect.any(String),
-        suggestedSelection: { providerId: 'openai', modelId: 'openai-default' },
+        suggestedSelection: {
+          providerId: 'openai',
+          modelId: 'gpt-5.6-terra-pro',
+        },
         providers: expect.arrayContaining([
           expect.objectContaining({ id: 'openai', availableForSelection: true }),
+          expect.objectContaining({ id: 'opencode', availableForSelection: true }),
         ]),
       }),
     });

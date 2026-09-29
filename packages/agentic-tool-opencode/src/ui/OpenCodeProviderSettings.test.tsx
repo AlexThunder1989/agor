@@ -126,6 +126,58 @@ function deviceCodeAttempt(attemptId: string) {
 }
 
 describe('OpenCodeProviderSettings', () => {
+  it('shows why a saved hosted provider is unavailable while keeping removal available', async () => {
+    const reason = 'This saved provider is no longer in the hosted catalog.';
+    const settings: Settings = {
+      ...initial,
+      isolation: { mode: 'managed-projection', boundary: 'executor-run' },
+      providers: [
+        {
+          id: 'retired-provider',
+          name: 'Retired provider',
+          runtimeAvailable: false,
+          credentialPresence: 'present',
+          apiAuthAvailable: false,
+          unavailableReason: reason,
+          models: [],
+          authMethods: [],
+        },
+      ],
+    };
+    const service = createAuthService({ find: vi.fn().mockResolvedValue(settings) });
+    renderSettings(service);
+    expect(await screen.findByText(reason)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeEnabled();
+  });
+
+  it('explains and disables hosted OAuth-only choices', async () => {
+    const reason = 'OpenCode OAuth sign-in is not available in hosted OpenCode.';
+    const settings: Settings = {
+      ...initial,
+      isolation: { mode: 'managed-projection', boundary: 'executor-run' },
+      providers: [
+        {
+          id: 'oauth-only',
+          name: 'OAuth only',
+          runtimeAvailable: false,
+          credentialPresence: 'absent',
+          apiAuthAvailable: false,
+          unavailableReason: reason,
+          models: [],
+          authMethods: [],
+        },
+      ],
+    };
+    const service = createAuthService({ find: vi.fn().mockResolvedValue(settings) });
+    renderSettings(service);
+    expect(await screen.findByText(reason)).toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByLabelText('Provider to connect'));
+    const labels = await screen.findAllByText(`OAuth only — ${reason}`);
+    expect(labels.some((label) => label.closest('.ant-select-item-option-disabled'))).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument();
+    expect(service.create).not.toHaveBeenCalled();
+  });
+
   it('renders a permanent capability notice without Retry when the deployment cannot run OpenCode', async () => {
     const service = createAuthService({
       find: vi.fn().mockResolvedValue({

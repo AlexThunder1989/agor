@@ -32,7 +32,7 @@ import {
 } from '@agor/core/types';
 import type { createOpencodeClient } from '@opencode-ai/sdk';
 import { OPENCODE_MODEL_CONFIG_PAIR_ERROR } from '../shared/index.js';
-import { validateOpenCodeEndpoint } from '../shared/known-models.js';
+import { validateOpenCodeEndpoint } from '../shared/provider-catalog.js';
 import type { OpenCodeCommand } from './binary.js';
 import {
   createOpenCodeEventTranslator,
@@ -976,7 +976,7 @@ export class OpenCodeTool {
     }
     if (!providerConnected) {
       throw new Error(
-        'The selected OpenCode provider has no credential for this Task actor. Save an entry in Settings > OpenCode or provide the actor’s own provider environment/home credential.'
+        'The selected OpenCode provider is not connected for the current user. Connect it in Settings > OpenCode or configure your own provider environment/home credential.'
       );
     }
     if (!modelAvailable) {

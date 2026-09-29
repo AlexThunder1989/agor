@@ -8,10 +8,16 @@ export {
   parseOpenCodeExecutorContext,
 } from './executor-context.js';
 export {
+  hasCompleteOpenCodeModelConfig,
+  OPENCODE_MODEL_CONFIG_PAIR_ERROR,
+  OPENCODE_MODEL_CONFIGURATION,
+  resolveOpenCodeCatalogFallback,
+  resolveOpenCodeModelConfig,
+} from './model-configuration.js';
+export {
   buildOpenCodeAuthContent,
   createOpenCodeHostedProviderDiscovery,
   createOpenCodeModelCatalog,
-  createOpenCodeRuntimeModelCatalog,
   hostedProviderIdsFromConnection,
   LEGACY_OPENCODE_PROVIDER_FIELDS,
   type OpenCodeApiEntry,
@@ -21,14 +27,7 @@ export {
   parseOpenCodeApiEntry,
   validateOpenCodeApiEntry,
   validateOpenCodeEndpoint,
-} from './known-models.js';
-export {
-  hasCompleteOpenCodeModelConfig,
-  OPENCODE_MODEL_CONFIG_PAIR_ERROR,
-  OPENCODE_MODEL_CONFIGURATION,
-  resolveOpenCodeCatalogFallback,
-  resolveOpenCodeModelConfig,
-} from './model-configuration.js';
+} from './provider-catalog.js';
 export { OPENCODE_VERSION } from './version.js';
 
 import { OPENCODE_MODEL_CONFIGURATION } from './model-configuration.js';

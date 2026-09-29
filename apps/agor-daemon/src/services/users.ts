@@ -1535,11 +1535,7 @@ export class UsersService {
   ): Promise<User> {
     await lockTenantAuthorizationFence(this.db, params);
     const authority = await this.authorizeRemove(id, params);
-    await (
-      new UsersRepository(this.db) as UsersRepository & {
-        assertNativeStateHandoffClear(userId: string): Promise<void>;
-      }
-    ).assertNativeStateHandoffClear(id);
+    await new UsersRepository(this.db).assertNativeStateHandoffClear(id);
     await this.assertNotLastSuperadmin(authority.target, params);
     const requesterId = (params as AuthenticatedParams | undefined)?.user?.user_id as
       | UserID

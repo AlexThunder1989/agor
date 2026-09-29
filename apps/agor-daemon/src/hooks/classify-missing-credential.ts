@@ -12,7 +12,6 @@ import type { SessionRepository, TaskRepository, TenantScopeAwareDatabase } from
 import { Forbidden } from '@agor/core/feathers';
 import type {
   AgenticToolName,
-  ApiKeyName,
   HookContext,
   Message,
   MessageID,
@@ -117,15 +116,6 @@ function classifyProviderFailure(
   };
 }
 
-function firstProviderCredentialField(tool: AgenticToolName): ApiKeyName | undefined {
-  const canonicalTool = canonicalTenantAgenticTool(tool);
-  if (!(canonicalTool in PROVIDER_CREDENTIAL_FIELDS)) return undefined;
-  // Every reviewed provider-connection field is itself a resolvable key name.
-  return PROVIDER_CREDENTIAL_FIELDS[canonicalTool as keyof typeof PROVIDER_CREDENTIAL_FIELDS][0] as
-    | ApiKeyName
-    | undefined;
-}
-
 function hasResolvedCredential(
   tool: AgenticToolName,
   connection: Record<string, string | undefined> | undefined
@@ -187,7 +177,7 @@ export function classifyMissingCredentialFailure(
 
       const tool = session.agentic_tool;
       if (!isAgenticToolName(tool)) return context;
-      const keyName = TOOL_API_KEY_NAMES[tool] ?? firstProviderCredentialField(tool);
+      const keyName = TOOL_API_KEY_NAMES[tool];
       if (!keyName) {
         // Hosted OpenCode entries are dynamic provider IDs rather than
         // ApiKeyName fields. Its executor marks only typed, pre-I/O

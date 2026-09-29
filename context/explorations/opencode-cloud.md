@@ -568,8 +568,12 @@ not account-specific continuation. The OpenAI Responses API may return
 different organization from the earlier turn; Azure OpenAI resource changes
 are expected to have the same limitation. Agor does not edit history or fall
 back to another user's credential. The accepted activation proof is the
-separately authorized P11 provider exercise; all other providers and credential
-paths remain mock-verified and unproven for cross-user continuation.
+separately authorized P11 provider exercise. P11's mock providers, P17's
+credential shapes and saved endpoint, and P20's caller environment/home path
+have mock coverage for transport and credential delivery. Other catalog
+providers are covered through their credential shape; their SDK request format
+is unverified. Cross-user continuation remains unproven outside P11's real
+provider exercise.
 
 ## 14. Open technical unknowns (do not change accepted behavior)
 

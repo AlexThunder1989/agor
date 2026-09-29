@@ -199,6 +199,9 @@ export function OpenCodeProviderListItem({
         description={
           provider.credentialPresence === 'present' ? (
             <Space orientation="vertical">
+              {provider.unavailableReason && (
+                <Typography.Text type="secondary">{provider.unavailableReason}</Typography.Text>
+              )}
               <Typography.Text type="secondary">
                 A saved credential exists; provider access is not verified here.
               </Typography.Text>
@@ -208,6 +211,9 @@ export function OpenCodeProviderListItem({
             </Space>
           ) : (
             <Space orientation="vertical" style={{ width: '100%' }}>
+              {provider.unavailableReason && (
+                <Typography.Text type="secondary">{provider.unavailableReason}</Typography.Text>
+              )}
               {provider.credentialPresence === 'unknown' ? (
                 <Typography.Text type="secondary">
                   Saved credential presence could not be determined. Removal is unavailable until
