@@ -72,9 +72,10 @@ overrides:
 
 patchedDependencies:
   '@codesandbox/sandpack-client@2.19.8': 78d8d40b12d5da5ccb0c9329c8e6e19e84f2e712646cfc96af9973fcf69b11f3
+  '@codesandbox/sandpack-react@2.20.0': d131596b727ed39e5132be3ea36dc6cb6860b63f9aae7b77f3e15bf98ac3e78c
   '@rc-component/util@1.13.0': b9106e9587099133a5b54cf6e8075a8bab098413d2d1b986302739eb06106a27
   '@streamdown/code@1.1.1': 6c4a3e4bb1c8f4eb48df153df1da1f2f448f68f4c1508c0cfd1df001c15ca023
-  static-browser-server@1.0.3: 095c2f2a2e0faf754cae13d996df526563e5ee4161a9da49059085f729154959
+  static-browser-server@1.0.3: 3f53cc71d25338504288f143ab4b110ec3ce0fd34f33aacddc836fcdb428c3b7
   streamdown@2.5.0: 19300059403a0f3973e236d4d8049c92a6d5a3422d55cdf1653207fda4ddb8a4
 
 importers:
@@ -428,7 +429,7 @@ importers:
         version: 6.1.3
       '@codesandbox/sandpack-react':
         specifier: ^2.20.0
-        version: 2.20.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        version: 2.20.0(patch_hash=d131596b727ed39e5132be3ea36dc6cb6860b63f9aae7b77f3e15bf98ac3e78c)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@streamdown/cjk':
         specifier: ^1.0.3
         version: 1.0.3(@types/mdast@4.0.4)(micromark-util-types@2.0.2)(micromark@4.0.2(supports-color@8.1.1))(react@19.3.0)(supports-color@8.1.1)(unified@11.0.5)
@@ -11559,9 +11560,9 @@ snapshots:
       dequal: 2.0.3
       mime-db: 1.54.0
       outvariant: 1.4.0
-      static-browser-server: 1.0.3(patch_hash=095c2f2a2e0faf754cae13d996df526563e5ee4161a9da49059085f729154959)
+      static-browser-server: 1.0.3(patch_hash=3f53cc71d25338504288f143ab4b110ec3ce0fd34f33aacddc836fcdb428c3b7)
 
-  '@codesandbox/sandpack-react@2.20.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+  '@codesandbox/sandpack-react@2.20.0(patch_hash=d131596b727ed39e5132be3ea36dc6cb6860b63f9aae7b77f3e15bf98ac3e78c)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
       '@codemirror/autocomplete': 6.20.3
       '@codemirror/commands': 6.10.4
@@ -21352,7 +21353,7 @@ snapshots:
       '@stablelib/base64': 1.0.1
       fast-sha256: 1.3.0
 
-  static-browser-server@1.0.3(patch_hash=095c2f2a2e0faf754cae13d996df526563e5ee4161a9da49059085f729154959):
+  static-browser-server@1.0.3(patch_hash=3f53cc71d25338504288f143ab4b110ec3ce0fd34f33aacddc836fcdb428c3b7):
     dependencies:
       '@open-draft/deferred-promise': 2.2.0
       dotenv: 16.6.1
