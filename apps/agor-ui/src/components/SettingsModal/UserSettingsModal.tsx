@@ -1938,7 +1938,7 @@ const UserSettingsModalForIdentity: React.FC<UserSettingsModalProps> = ({
               style={{ maxWidth: 560, marginBottom: 0 }}
             >
               <Select
-                placeholder="Not set — Claude Code is used initially"
+                placeholder="Not set (Claude Code is used initially)"
                 loading={!tenantToolSettingsHydrated}
                 disabled={!tenantToolSettingsHydrated || saving}
                 options={AGENTIC_TOOL_TABS.map((tool) => ({
@@ -2191,7 +2191,7 @@ const UserSettingsModalForIdentity: React.FC<UserSettingsModalProps> = ({
       <Alert
         type="info"
         showIcon
-        title="Authentication is managed by this workspace — your personal configuration is never used while this policy is active."
+        title="Authentication is managed by this workspace; your personal configuration is never used while this policy is active."
         style={{ marginBottom: 16 }}
       />
     ) : effectiveSource === 'Unavailable' ? (

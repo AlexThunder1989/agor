@@ -116,6 +116,7 @@ import { AVAILABLE_AGENTS } from '../AgentSelectionGrid/availableAgents';
 import { JSONEditor, validateJSON } from '../JSONEditor';
 import { AdaptiveSettingsModal } from './AdaptiveSettingsModal';
 import { BranchSelect } from './BranchSelect';
+import { FIELD_WIDTHS } from './panelPrimitives';
 import { ResponsiveSettingsHeader } from './ResponsiveSettingsHeader';
 import { ResponsiveTable } from './ResponsiveTable';
 import { SettingsActionGroup } from './SettingsActionGroup';
@@ -702,7 +703,7 @@ const ConnectionTestResultView: React.FC<{ result: GatewayConnectionTestResult }
           expandable
           description={
             <>
-              A green result does not guarantee these — confirm them on the platform:
+              A green result does not guarantee these; confirm them on the platform:
               <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
                 {result.notVerifiable.map((n) => (
                   <li key={n}>{n}</li>
@@ -764,7 +765,7 @@ const SlackScopeChangeWarning: React.FC<{
     if (ok) {
       setCopied(true);
     } else {
-      showError('Copy failed — copy the manifest from the App Manifest section.');
+      showError('Copy failed. Copy the manifest from the App Manifest section.');
     }
   };
 
@@ -787,8 +788,8 @@ const SlackScopeChangeWarning: React.FC<{
       description={
         <>
           <div style={{ marginBottom: 6 }}>
-            Saving here does not change the Slack app — update its manifest and reinstall the app
-            for the new scope{addedScopes.length > 1 ? 's' : ''} to take effect.
+            Saving here does not change the Slack app; update its manifest and reinstall the app for
+            the new scope{addedScopes.length > 1 ? 's' : ''} to take effect.
           </div>
           <Space size="small" wrap>
             <SlackAppManifestLink appInfo={appInfo} />
@@ -839,7 +840,7 @@ const SlackManifestPanel: React.FC<{
     if (ok) {
       setCopied(true);
     } else {
-      showError('Copy failed — select the manifest text and copy it manually.');
+      showError('Copy failed. Select the manifest text and copy it manually.');
     }
   };
 
@@ -849,7 +850,7 @@ const SlackManifestPanel: React.FC<{
         type="secondary"
         style={{ fontSize: 12, display: 'block', marginBottom: 12 }}
       >
-        The recommended manifest for this channel&apos;s current options — the desired Slack app
+        The recommended manifest for this channel&apos;s current options; the desired Slack app
         configuration, not a readout of your app&apos;s live settings. Paste it into{' '}
         <strong>App Manifest</strong> in your Slack app to align its scopes and events.
       </Typography.Text>
@@ -1151,7 +1152,7 @@ const SlackSetupWizard: React.FC<{
     if (ok) {
       setCopied(true);
     } else {
-      showError('Copy failed — select the manifest text and copy it manually.');
+      showError('Copy failed. Select the manifest text and copy it manually.');
     }
   };
 
@@ -1357,7 +1358,7 @@ const SlackSetupWizard: React.FC<{
           {`Required Slack Scopes & Events (${scopes.length} scopes, ${events.length} events)`}
         </Typography.Text>
         <Typography.Paragraph type="secondary" style={{ fontSize: 12, margin: '4px 0 12px' }}>
-          Derived from the selected surfaces — channel-like surfaces trigger on{' '}
+          Derived from the selected surfaces; channel-like surfaces trigger on{' '}
           <code>app_mention</code>, not <code>message.*</code> channel events. You copy the full
           manifest on the next step.
         </Typography.Paragraph>
@@ -1368,7 +1369,7 @@ const SlackSetupWizard: React.FC<{
       <div style={{ display: step === 1 ? undefined : 'none' }}>
         <Typography.Paragraph type="secondary" style={{ fontSize: 13 }}>
           Create the Slack app from this manifest. Slack preconfigures every scope and event for you
-          — no manual scope entry needed.
+          with no manual scope entry needed.
         </Typography.Paragraph>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
@@ -1402,7 +1403,7 @@ const SlackSetupWizard: React.FC<{
           </li>
           <li>
             Go to <strong>Basic Information → App-Level Tokens</strong> and generate a token with
-            the <code>connections:write</code> scope — this is your <code>xapp-</code> token.
+            the <code>connections:write</code> scope; this is your <code>xapp-</code> token.
           </li>
         </ol>
       </div>
@@ -1455,7 +1456,7 @@ const SlackSetupWizard: React.FC<{
           <CompactAlert
             type="warning"
             heading="Testing is optional"
-            description="Slack can't be fully verified up front. Save now and confirm by messaging the bot — but an untested channel may not work."
+            description="Slack can't be fully verified up front. Save now and confirm by messaging the bot, but an untested channel may not work."
             style={{ marginBottom: 16 }}
           />
         )}
@@ -1794,7 +1795,7 @@ const DiscordSetupFields: React.FC<{
               <InputNumber
                 min={MIN_DISCORD_CATCH_UP.max_pages}
                 max={MAX_DISCORD_CATCH_UP.max_pages}
-                style={{ width: '100%' }}
+                style={{ width: '100%', ...FIELD_WIDTHS.tiny }}
               />
             </Form.Item>
             <Form.Item
@@ -1805,7 +1806,7 @@ const DiscordSetupFields: React.FC<{
               <InputNumber
                 min={MIN_DISCORD_CATCH_UP.max_messages}
                 max={MAX_DISCORD_CATCH_UP.max_messages}
-                style={{ width: '100%' }}
+                style={{ width: '100%', ...FIELD_WIDTHS.tiny }}
               />
             </Form.Item>
             <Form.Item
@@ -1816,7 +1817,7 @@ const DiscordSetupFields: React.FC<{
               <InputNumber
                 min={MIN_DISCORD_CATCH_UP.max_prompt_bytes}
                 max={MAX_DISCORD_CATCH_UP.max_prompt_bytes}
-                style={{ width: '100%' }}
+                style={{ width: '100%', ...FIELD_WIDTHS.tiny }}
               />
             </Form.Item>
             <Form.Item
@@ -1827,7 +1828,7 @@ const DiscordSetupFields: React.FC<{
               <InputNumber
                 min={MIN_DISCORD_CATCH_UP.request_timeout_ms}
                 max={MAX_DISCORD_CATCH_UP.request_timeout_ms}
-                style={{ width: '100%' }}
+                style={{ width: '100%', ...FIELD_WIDTHS.tiny }}
               />
             </Form.Item>
             <Form.Item
@@ -1838,7 +1839,7 @@ const DiscordSetupFields: React.FC<{
               <InputNumber
                 min={MIN_DISCORD_CATCH_UP.rate_limit_max_retries}
                 max={MAX_DISCORD_CATCH_UP.rate_limit_max_retries}
-                style={{ width: '100%' }}
+                style={{ width: '100%', ...FIELD_WIDTHS.tiny }}
               />
             </Form.Item>
             <Form.Item
@@ -1849,7 +1850,7 @@ const DiscordSetupFields: React.FC<{
               <InputNumber
                 min={MIN_DISCORD_CATCH_UP.rate_limit_max_total_delay_ms}
                 max={MAX_DISCORD_CATCH_UP.rate_limit_max_total_delay_ms}
-                style={{ width: '100%' }}
+                style={{ width: '100%', ...FIELD_WIDTHS.tiny }}
               />
             </Form.Item>
           </Space>
@@ -2351,12 +2352,12 @@ const ChannelFormFields: React.FC<{
               <div style={{ marginBottom: 16 }}>
                 <Typography.Paragraph type="secondary" style={{ fontSize: 13 }}>
                   Create a GitHub App to connect Agor to your repositories. This uses GitHub&apos;s
-                  URL-parameters registration flow — you&apos;ll be redirected to GitHub with the
+                  URL-parameters registration flow; you&apos;ll be redirected to GitHub with the
                   form pre-filled, then brought back here to complete setup.
                 </Typography.Paragraph>
 
                 <Form.Item label="App Name" name="github_app_name">
-                  <Input placeholder="Agor (optional — defaults to 'Agor')" />
+                  <Input placeholder="Agor (optional, defaults to 'Agor')" />
                 </Form.Item>
 
                 <Form.Item
@@ -2541,7 +2542,7 @@ const ChannelFormFields: React.FC<{
                                   placeholder={
                                     editingChannel?.config &&
                                     (editingChannel.config as Record<string, unknown>).private_key
-                                      ? '(private key is set — paste new key to replace)'
+                                      ? '(private key is set; paste new key to replace)'
                                       : '-----BEGIN RSA PRIVATE KEY-----\n...'
                                   }
                                   style={{ fontFamily: 'monospace', fontSize: 11 }}
@@ -2608,7 +2609,11 @@ const ChannelFormFields: React.FC<{
                           initialValue={30}
                           tooltip="How frequently to poll the GitHub API for new mentions"
                         >
-                          <InputNumber min={10} max={300} style={{ width: '100%' }} />
+                          <InputNumber
+                            min={10}
+                            max={300}
+                            style={{ width: '100%', ...FIELD_WIDTHS.tiny }}
+                          />
                         </Form.Item>
                       </>
                     ),
@@ -2845,7 +2850,11 @@ const ChannelFormFields: React.FC<{
                       initialValue={3978}
                       tooltip="Port for the Bot Framework HTTP endpoint"
                     >
-                      <InputNumber min={1024} max={65535} style={{ width: '100%' }} />
+                      <InputNumber
+                        min={1024}
+                        max={65535}
+                        style={{ width: '100%', ...FIELD_WIDTHS.tiny }}
+                      />
                     </Form.Item>
 
                     <Form.Item
@@ -2950,7 +2959,7 @@ const ChannelFormFields: React.FC<{
                     <Form.Item
                       label="Agent Member ID (optional)"
                       name="shortcut_agent_member_id"
-                      tooltip="Override the mention target. Leave blank to auto-resolve from the API token's own member — comments that @mention that member trigger the agent."
+                      tooltip="Override the mention target. Leave blank to auto-resolve from the API token's own member; comments that @mention that member trigger the agent."
                     >
                       <Input placeholder="(auto-resolved from token)" />
                     </Form.Item>
@@ -3054,7 +3063,11 @@ const ChannelFormFields: React.FC<{
                       initialValue={15}
                       tooltip="How frequently to poll the Shortcut API for new mentions"
                     >
-                      <InputNumber min={5} max={300} style={{ width: '100%' }} />
+                      <InputNumber
+                        min={5}
+                        max={300}
+                        style={{ width: '100%', ...FIELD_WIDTHS.tiny }}
+                      />
                     </Form.Item>
                   </>
                 ),
@@ -3431,7 +3444,7 @@ const ChannelFormFields: React.FC<{
                       description={
                         <div>
                           <Typography.Text type="secondary" style={{ fontSize: 'inherit' }}>
-                            Derived from the selected surfaces — channel-like surfaces trigger on{' '}
+                            Derived from the selected surfaces; channel-like surfaces trigger on{' '}
                             <code>app_mention</code>, not <code>message.*</code> channel events.
                             Copy the full manifest from the App Manifest section.
                           </Typography.Text>
