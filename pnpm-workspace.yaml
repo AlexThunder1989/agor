@@ -104,7 +104,14 @@ allowBuilds:
   # hot-shots uses this optional native addon only for Unix-domain sockets;
   # Agor's exporter deliberately uses UDP to the local Agent.
   'unix-dgram@2.0.7': false
+# Exact-version lifecycle patches are required, including after dependency changes.
+allowUnusedPatches: false
 patchedDependencies:
+  # Static previews own hidden relay frames and MessagePorts outside React.
+  # Remove together when upstream implements cancellation-safe owner disposal.
+  # Regression: apps/agor-ui/src/test/sandpackStaticLifecycle.test.ts.
+  '@codesandbox/sandpack-client@2.19.8': patches/@codesandbox__sandpack-client@2.19.8.patch
+  static-browser-server@1.0.3: patches/static-browser-server@1.0.3.patch
   # AntD Form's delayed-state hook must cancel timers/frames on unmount.
   # Remove once upstream useDelayState includes effect cleanup; regression:
   # apps/agor-ui/src/test/antdDelayState.test.tsx.

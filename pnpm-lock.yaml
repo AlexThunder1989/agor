@@ -71,8 +71,10 @@ overrides:
   zod: ^4.6.5
 
 patchedDependencies:
+  '@codesandbox/sandpack-client@2.19.8': 78d8d40b12d5da5ccb0c9329c8e6e19e84f2e712646cfc96af9973fcf69b11f3
   '@rc-component/util@1.13.0': b9106e9587099133a5b54cf6e8075a8bab098413d2d1b986302739eb06106a27
   '@streamdown/code@1.1.1': 6c4a3e4bb1c8f4eb48df153df1da1f2f448f68f4c1508c0cfd1df001c15ca023
+  static-browser-server@1.0.3: 095c2f2a2e0faf754cae13d996df526563e5ee4161a9da49059085f729154959
   streamdown@2.5.0: 19300059403a0f3973e236d4d8049c92a6d5a3422d55cdf1653207fda4ddb8a4
 
 importers:
@@ -11550,14 +11552,14 @@ snapshots:
       outvariant: 1.4.0
       strict-event-emitter: 0.4.6
 
-  '@codesandbox/sandpack-client@2.19.8':
+  '@codesandbox/sandpack-client@2.19.8(patch_hash=78d8d40b12d5da5ccb0c9329c8e6e19e84f2e712646cfc96af9973fcf69b11f3)':
     dependencies:
       '@codesandbox/nodebox': 0.1.8
       buffer: 6.0.3
       dequal: 2.0.3
       mime-db: 1.54.0
       outvariant: 1.4.0
-      static-browser-server: 1.0.3
+      static-browser-server: 1.0.3(patch_hash=095c2f2a2e0faf754cae13d996df526563e5ee4161a9da49059085f729154959)
 
   '@codesandbox/sandpack-react@2.20.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
@@ -11569,7 +11571,7 @@ snapshots:
       '@codemirror/language': 6.12.4
       '@codemirror/state': 6.7.0
       '@codemirror/view': 6.43.0
-      '@codesandbox/sandpack-client': 2.19.8
+      '@codesandbox/sandpack-client': 2.19.8(patch_hash=78d8d40b12d5da5ccb0c9329c8e6e19e84f2e712646cfc96af9973fcf69b11f3)
       '@lezer/highlight': 1.2.3
       '@react-hook/intersection-observer': 3.1.2(react@19.3.0)
       '@stitches/core': 1.2.8
@@ -21350,7 +21352,7 @@ snapshots:
       '@stablelib/base64': 1.0.1
       fast-sha256: 1.3.0
 
-  static-browser-server@1.0.3:
+  static-browser-server@1.0.3(patch_hash=095c2f2a2e0faf754cae13d996df526563e5ee4161a9da49059085f729154959):
     dependencies:
       '@open-draft/deferred-promise': 2.2.0
       dotenv: 16.6.1

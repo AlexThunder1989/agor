@@ -1,0 +1,273 @@
+--- a/out/lib/main.js
++++ b/out/lib/main.js
+@@ -8618,6 +8618,8 @@
+ }
+ var PreviewController = class {
+   constructor(options) {
++    this.destroyed = false;
++    this.disposePreview = null;
+     this.initPromise = null;
+     this.baseUrl = new URL(options.baseUrl);
+     this.getFileContent = options.getFileContent;
+@@ -8625,6 +8627,7 @@
+   }
+   async getIndexAtPath(filepath) {
+     for (const index of this.indexFiles) {
++      if (this.destroyed) throw new Error("Preview controller destroyed");
+       try {
+         const content = await this.getFileContent(
+           joinFilepath(filepath, index)
+@@ -8636,11 +8639,12 @@
+     throw new Error("No index file not found");
+   }
+   async handleWorkerRequest(request) {
+-    if (!this.initPromise) {
+-      throw new Error("Init promise is null");
+-    }
+-    const [previewRoot, port] = await this.initPromise;
++    if (this.destroyed || !this.initPromise) return;
++    let responsePort;
+     try {
++      const [previewRoot, port] = await this.initPromise;
++      responsePort = port;
++      if (this.destroyed) return;
+       const filepath = normalizeFilepath(
+         new URL(request.url, previewRoot).pathname
+       );
+@@ -8650,6 +8654,7 @@
+         body = await this.getFileContent(filepath);
+       } catch (err) {
+       }
++      if (this.destroyed) return;
+       if (body == null) {
+         body = await this.getIndexAtPath(filepath);
+         headers["Content-Type"] = "text/html; charset=utf-8";
+@@ -8672,8 +8677,9 @@
+         status: 200,
+         body
+       };
+-      port.postMessage(responseMessage);
++      if (!this.destroyed) port.postMessage(responseMessage);
+     } catch (err) {
++      if (this.destroyed || !responsePort) return;
+       const responseMessage = {
+         $channel: CHANNEL_NAME,
+         $type: "preview/response",
+@@ -8684,7 +8690,7 @@
+         status: 404,
+         body: "File not found"
+       };
+-      port.postMessage(responseMessage);
++      responsePort.postMessage(responseMessage);
+     }
+   }
+   getRelayUrl(previewUrl) {
+@@ -8701,15 +8707,28 @@
+     const iframe = document.createElement("iframe");
+     iframe.setAttribute("src", relayUrl.toString());
+     iframe.style.display = "none";
++    const channel = new MessageChannel();
+     document.body.appendChild(iframe);
+-    const channel = new MessageChannel();
+     const iframeContentWindow = iframe.contentWindow;
+     if (!iframeContentWindow) {
++      channel.port1.close();
++      channel.port2.close();
++      iframe.remove();
+       throw new Error("Could not get iframe contentWindow");
+     }
+-    return new Promise((resolve) => {
++    return new Promise((resolve, reject) => {
+       const port = channel.port1;
++      // Retain the exact resources immediately, not only after preview/ready.
++      this.disposePreview = () => {
++        iframe.onload = null;
++        port.onmessage = null;
++        port.close();
++        channel.port2.close();
++        iframe.remove();
++        reject(new Error("Preview controller destroyed"));
++      };
+       port.onmessage = (evt) => {
++        if (this.destroyed) return;
+         if (typeof evt.data === "object" && evt.data.$channel === CHANNEL_NAME) {
+           switch (evt.data.$type) {
+             case "preview/ready":
+@@ -8722,6 +8741,8 @@
+         }
+       };
+       iframe.onload = () => {
++        if (this.destroyed) return;
++        iframe.onload = null;
+         const initMsg = {
+           $channel: CHANNEL_NAME,
+           $type: "preview/init"
+@@ -8734,22 +8755,20 @@
+    * Initialize a preview and return the url at which the preview is being served
+    **/
+   initPreview() {
++    if (this.destroyed) return Promise.reject(new Error("Preview controller destroyed"));
+     if (!this.initPromise) {
+       this.initPromise = this._initPreview();
+     }
+     return this.initPromise.then((v) => v[0]);
+   }
+   destroy() {
+-    if (this.initPromise) {
+-      const p = this.initPromise;
+-      p.then((val) => {
+-        val[1].close();
+-        const url = this.getRelayUrl(val[0]);
+-        const foundElements = document.body.querySelectorAll(`src="${url}"`);
+-        foundElements.forEach((el) => el.remove());
+-      });
+-      this.initPromise = null;
+-    }
++    if (this.destroyed) return;
++    this.destroyed = true;
++    this.disposePreview?.();
++    this.disposePreview = null;
++    this.initPromise = null;
++    // Release the owning client's file callback, even if this controller is held.
++    this.getFileContent = () => { throw new Error("Preview controller destroyed"); };
+   }
+ };
+ /*! Bundled license information:
+--- a/src/lib/main.ts
++++ b/src/lib/main.ts
+@@ -40,6 +40,8 @@
+ }
+ 
+ export class PreviewController {
++  private destroyed = false;
++  private disposePreview: (() => void) | null = null;
+   private baseUrl: URL;
+   private indexFiles: string[];
+   private getFileContent: GetFileContentFn;
+@@ -55,6 +57,7 @@
+ 
+   private async getIndexAtPath(filepath: string): Promise<string | Uint8Array> {
+     for (const index of this.indexFiles) {
++      if (this.destroyed) throw new Error("Preview controller destroyed");
+       try {
+         const content = await this.getFileContent(
+           joinFilepath(filepath, index)
+@@ -70,12 +73,12 @@
+   private async handleWorkerRequest(
+     request: IPreviewRequestMessage
+   ): Promise<void> {
+-    if (!this.initPromise) {
+-      throw new Error("Init promise is null");
+-    }
+-
+-    const [previewRoot, port] = await this.initPromise;
++    if (this.destroyed || !this.initPromise) return;
++    let responsePort: MessagePort | undefined;
+     try {
++      const [previewRoot, port] = await this.initPromise;
++      responsePort = port;
++      if (this.destroyed) return;
+       const filepath = normalizeFilepath(
+         new URL(request.url, previewRoot).pathname
+       );
+@@ -86,6 +89,7 @@
+       } catch (err) {
+         // do nothing
+       }
++      if (this.destroyed) return;
+       if (body == null) {
+         body = await this.getIndexAtPath(filepath);
+         headers["Content-Type"] = "text/html; charset=utf-8";
+@@ -108,8 +112,9 @@
+         status: 200,
+         body,
+       };
+-      port.postMessage(responseMessage);
++      if (!this.destroyed) port.postMessage(responseMessage);
+     } catch (err) {
++      if (this.destroyed || !responsePort) return;
+       const responseMessage: IPreviewResponseMessage = {
+         $channel: CHANNEL_NAME,
+         $type: "preview/response",
+@@ -120,7 +125,7 @@
+         status: 404,
+         body: "File not found",
+       };
+-      port.postMessage(responseMessage);
++      responsePort.postMessage(responseMessage);
+     }
+   }
+ 
+@@ -141,15 +146,28 @@
+     const iframe = document.createElement("iframe");
+     iframe.setAttribute("src", relayUrl.toString());
+     iframe.style.display = "none";
++    const channel = new MessageChannel();
+     document.body.appendChild(iframe);
+-    const channel = new MessageChannel();
+     const iframeContentWindow = iframe.contentWindow;
+     if (!iframeContentWindow) {
++      channel.port1.close();
++      channel.port2.close();
++      iframe.remove();
+       throw new Error("Could not get iframe contentWindow");
+     }
+-    return new Promise((resolve) => {
++    return new Promise((resolve, reject) => {
+       const port = channel.port1;
++      // Retain the exact resources immediately, not only after preview/ready.
++      this.disposePreview = () => {
++        iframe.onload = null;
++        port.onmessage = null;
++        port.close();
++        channel.port2.close();
++        iframe.remove();
++        reject(new Error("Preview controller destroyed"));
++      };
+       port.onmessage = (evt: MessageEvent<MessageSentToMain>) => {
++        if (this.destroyed) return;
+         if (
+           typeof evt.data === "object" &&
+           evt.data.$channel === CHANNEL_NAME
+@@ -165,6 +183,8 @@
+         }
+       };
+       iframe.onload = () => {
++        if (this.destroyed) return;
++        iframe.onload = null;
+         const initMsg: IPreviewInitMessage = {
+           $channel: CHANNEL_NAME,
+           $type: "preview/init",
+@@ -178,6 +198,7 @@
+    * Initialize a preview and return the url at which the preview is being served
+    **/
+   public initPreview(): Promise<string> {
++    if (this.destroyed) return Promise.reject(new Error("Preview controller destroyed"));
+     if (!this.initPromise) {
+       this.initPromise = this._initPreview();
+     }
+@@ -185,15 +206,12 @@
+   }
+ 
+   public destroy(): void {
+-    if (this.initPromise) {
+-      const p = this.initPromise;
+-      p.then((val) => {
+-        val[1].close();
+-        const url = this.getRelayUrl(val[0]);
+-        const foundElements = document.body.querySelectorAll(`src="${url}"`);
+-        foundElements.forEach((el) => el.remove());
+-      });
+-      this.initPromise = null;
+-    }
+-  }
+-}
++    if (this.destroyed) return;
++    this.destroyed = true;
++    this.disposePreview?.();
++    this.disposePreview = null;
++    this.initPromise = null;
++    // Release the owning client's file callback, even if this controller is held.
++    this.getFileContent = () => { throw new Error("Preview controller destroyed"); };
++  }
++}
