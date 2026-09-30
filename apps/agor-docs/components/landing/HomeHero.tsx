@@ -1,6 +1,7 @@
 'use client';
 
 import { Check, Copy, Pause, Play } from 'lucide-react';
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { trackEvent } from '../../lib/analytics';
 import { GITHUB_REPO_URL } from '../../lib/links';
@@ -122,7 +123,19 @@ export function HomeHero() {
         </div>
         <div className={styles.homeInstallRow}>
           <InstallCommand />
-          <span>or</span>
+          <Link
+            href="/guide/getting-started"
+            className={styles.homeGithub}
+            onClick={() =>
+              trackEvent('nav_click', {
+                target: '/guide/getting-started',
+                placement: 'home-hero-install',
+              })
+            }
+          >
+            Run Agor locally <span aria-hidden="true">→</span>
+          </Link>
+          <span aria-hidden="true">·</span>
           <a
             href={GITHUB_REPO_URL}
             target="_blank"
