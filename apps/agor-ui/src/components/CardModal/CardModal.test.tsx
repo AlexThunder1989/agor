@@ -2,6 +2,7 @@ import type { AgorClient, Board, CardWithType } from '@agor-live/client';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App as AntApp } from 'antd';
 import { describe, expect, it, vi } from 'vitest';
+import { StandaloneSettingsDrillProvider } from '../SettingsModal/SettingsDrill';
 import CardModal from './CardModal';
 
 function renderWithApp(ui: React.ReactElement) {
@@ -80,5 +81,25 @@ describe('CardModal permission gating', () => {
         })
       )
     );
+  });
+
+  it('renders embedded in place (no stacked dialog) with its own Archive/Delete/Save footer', async () => {
+    const { client, effectiveAccessFind } = makeClient(['board.view', 'board.edit']);
+
+    render(
+      <AntApp>
+        <StandaloneSettingsDrillProvider>
+          <CardModal embedded open card={card} board={board} client={client} onClose={vi.fn()} />
+        </StandaloneSettingsDrillProvider>
+      </AntApp>
+    );
+    await waitFor(() => expect(effectiveAccessFind).toHaveBeenCalled());
+
+    // Drill-in: no stacked Modal dialog, but the card body + its own footer render.
+    // ("A card" appears twice: the drill breadcrumb crumb and the body title bar.)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getAllByText('A card').length).toBeGreaterThan(0);
+    expect(screen.getByText('Archive')).toBeInTheDocument();
+    expect(screen.getByText('Save')).toBeInTheDocument();
   });
 });

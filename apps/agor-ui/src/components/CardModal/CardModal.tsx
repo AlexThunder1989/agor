@@ -32,6 +32,7 @@ import { isSafeExternalUrl } from '../../utils/safeExternalUrl';
 import { ArchiveActionButton } from '../ArchiveButton';
 import { getBoardEmoji } from '../BoardTile';
 import { MarkdownRenderer } from '../MarkdownRenderer';
+import { DrillInFrame } from '../SettingsModal/SettingsDrill';
 
 const { TextArea } = Input;
 
@@ -46,6 +47,13 @@ interface CardModalProps {
   afterClose?: () => void;
   onCardUpdated?: (card: CardWithType) => void;
   onCardDeleted?: (cardId: string) => void;
+  /**
+   * Render the body as an in-place drill-in (no outer Modal) for the Workspace
+   * Settings Cards audit view. The card editor keeps its own Archive/Delete/Save
+   * footer (ownsFooter). Default false → the standalone Modal used on the canvas
+   * (SessionCanvas) is unchanged.
+   */
+  embedded?: boolean;
 }
 
 const CardModalComponent = ({
@@ -59,6 +67,7 @@ const CardModalComponent = ({
   afterClose,
   onCardUpdated,
   onCardDeleted,
+  embedded = false,
 }: CardModalProps) => {
   const { token } = theme.useToken();
   const { showSuccess, showError } = useThemedMessage();
@@ -194,52 +203,44 @@ const CardModalComponent = ({
   const emoji = card.effective_emoji;
   const borderColor = card.effective_color || token.colorBorder;
 
-  return (
-    <Modal
-      open={open}
-      onCancel={onClose}
-      afterClose={afterClose}
-      width={560}
-      footer={
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <Space>
-            <ArchiveActionButton
-              tooltip={editBlockedReason ?? ''}
-              size="middle"
-              disabled={!canEdit}
-              onClick={handleArchive}
-            >
-              Archive
-            </ArchiveActionButton>
-            {/* A disabled button can't host a tooltip of its own — hence the span. */}
-            <Tooltip title={editBlockedReason}>
-              <span>
-                <Button danger icon={<DeleteOutlined />} disabled={!canEdit} onClick={handleDelete}>
-                  Delete
-                </Button>
-              </span>
-            </Tooltip>
-          </Space>
-          <Tooltip title={editBlockedReason}>
-            <span>
-              <Button
-                type="primary"
-                icon={<SaveOutlined />}
-                onClick={handleSave}
-                disabled={!hasChanges || !canEdit}
-                loading={saving}
-              >
-                Save
-              </Button>
-            </span>
-          </Tooltip>
-        </div>
-      }
-      title={null}
-      styles={{
-        body: { padding: 0 },
-      }}
-    >
+  const cardFooter = (
+    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+      <Space>
+        <ArchiveActionButton
+          tooltip={editBlockedReason ?? ''}
+          size="middle"
+          disabled={!canEdit}
+          onClick={handleArchive}
+        >
+          Archive
+        </ArchiveActionButton>
+        {/* A disabled button can't host a tooltip of its own, hence the span. */}
+        <Tooltip title={editBlockedReason}>
+          <span>
+            <Button danger icon={<DeleteOutlined />} disabled={!canEdit} onClick={handleDelete}>
+              Delete
+            </Button>
+          </span>
+        </Tooltip>
+      </Space>
+      <Tooltip title={editBlockedReason}>
+        <span>
+          <Button
+            type="primary"
+            icon={<SaveOutlined />}
+            onClick={handleSave}
+            disabled={!hasChanges || !canEdit}
+            loading={saving}
+          >
+            Save
+          </Button>
+        </span>
+      </Tooltip>
+    </div>
+  );
+
+  const cardBody = (
+    <>
       {/* Title bar */}
       <div
         style={{
@@ -440,6 +441,34 @@ const CardModalComponent = ({
         {card.created_by && `Created by: ${card.created_by}`}
         {card.created_at && ` • ${new Date(card.created_at).toLocaleString()}`}
       </div>
+    </>
+  );
+
+  // Drill-in mode for the Workspace Settings Cards audit view: no stacked Modal.
+  // The editor owns its Archive/Delete/Save footer; the breadcrumb backs out.
+  if (embedded) {
+    if (!open) return null;
+    return (
+      <DrillInFrame title={card.title} dirty={hasChanges} ownsFooter onBack={onClose}>
+        {cardBody}
+        <div style={{ marginTop: token.marginMD }}>{cardFooter}</div>
+      </DrillInFrame>
+    );
+  }
+
+  return (
+    <Modal
+      open={open}
+      onCancel={onClose}
+      afterClose={afterClose}
+      width={560}
+      footer={cardFooter}
+      title={null}
+      styles={{
+        body: { padding: 0 },
+      }}
+    >
+      {cardBody}
     </Modal>
   );
 };

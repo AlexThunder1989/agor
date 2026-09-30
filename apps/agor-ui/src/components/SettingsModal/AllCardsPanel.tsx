@@ -7,7 +7,7 @@ import type {
 } from '@agor-live/client';
 import { ExportOutlined, PushpinFilled } from '@ant-design/icons';
 import { Button, Empty, Input, Space, Table, Tag, Tooltip, Typography } from 'antd';
-import { type Key, useCallback, useMemo, useState } from 'react';
+import { type Key, useCallback, useEffect, useMemo, useState } from 'react';
 import { useAppNavigation } from '@/hooks/useAppNavigation';
 import { useSettingsRoute } from '@/hooks/useSettingsRoute';
 import { useAgorStore } from '@/store/agorStore';
@@ -19,6 +19,7 @@ import CardModal from '../CardModal/CardModal';
 import { HighlightMatch } from '../HighlightMatch';
 import { ListPanelHeader } from './panelPrimitives';
 import { SettingsActionGroup } from './SettingsActionGroup';
+import { useSettingsDrill } from './SettingsDrill';
 
 interface AllCardsPanelProps {
   client: AgorClient | null;
@@ -50,6 +51,17 @@ export const AllCardsPanel: React.FC<AllCardsPanelProps> = ({
   const [typeFilter, setTypeFilter] = useState<string[]>(itemId ? [itemId] : []);
   const [cardModalCard, setCardModalCard] = useState<CardWithType | null>(null);
   const [cardModalOpen, setCardModalOpen] = useState(false);
+  // Card detail opens as a drill-in (no modal stacked on the Settings modal).
+  // The local open state stays the source of truth; mirror it into the shell
+  // drill state so the breadcrumb renders and the list is hidden while open.
+  const { openDrill, closeDrill } = useSettingsDrill();
+  useEffect(() => {
+    if (cardModalOpen && cardModalCard) {
+      openDrill({ kind: 'cards', mode: 'view', recordId: cardModalCard.card_id });
+    } else {
+      closeDrill();
+    }
+  }, [cardModalOpen, cardModalCard, openDrill, closeDrill]);
 
   // card_id → zone info (name + color) from board objects.
   const cardZoneInfo = useMemo(() => {
@@ -285,6 +297,25 @@ export const AllCardsPanel: React.FC<AllCardsPanelProps> = ({
 
   const cardModalBoard = cardModalCard ? (boardById.get(cardModalCard.board_id) ?? null) : null;
 
+  // Card detail drills in place of the list (no stacked modal). Early-returned so
+  // the Content pane swaps list↔card; CardModal keeps its Archive/Delete/Save
+  // footer, and the breadcrumb ("Cards ›") backs out.
+  if (cardModalOpen && cardModalCard) {
+    return (
+      <CardModal
+        embedded
+        open
+        card={cardModalCard}
+        board={cardModalBoard}
+        client={client}
+        onClose={() => setCardModalOpen(false)}
+        afterClose={() => setCardModalCard(null)}
+        onCardUpdated={(updated) => setCardModalCard(updated)}
+        onCardDeleted={() => setCardModalOpen(false)}
+      />
+    );
+  }
+
   return (
     <div>
       <ListPanelHeader
@@ -316,19 +347,6 @@ export const AllCardsPanel: React.FC<AllCardsPanelProps> = ({
           emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No cards yet" />,
         }}
       />
-
-      {cardModalCard && (
-        <CardModal
-          open={cardModalOpen}
-          card={cardModalCard}
-          board={cardModalBoard}
-          client={client}
-          onClose={() => setCardModalOpen(false)}
-          afterClose={() => setCardModalCard(null)}
-          onCardUpdated={(updated) => setCardModalCard(updated)}
-          onCardDeleted={() => setCardModalOpen(false)}
-        />
-      )}
     </div>
   );
 };
