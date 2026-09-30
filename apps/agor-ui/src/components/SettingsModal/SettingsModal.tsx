@@ -33,7 +33,7 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
-import { Button, Layout, Menu, Modal, Tag, theme } from 'antd';
+import { Button, Grid, Layout, Menu, Modal, Select, Tag, theme } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMCPCatalogModal } from '@/contexts/MCPCatalogModalContext';
 import { useAuthenticatedAuthorityScope } from '@/hooks/useAuthorityOperationGuard';
@@ -200,6 +200,11 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
   );
 
   const { token } = theme.useToken();
+  // Responsive shell: below AntD's `md` breakpoint the persistent Sider nav is
+  // replaced by a full-width Select, and the Modal fills the viewport — mirrors
+  // the compact pattern in UserSettingsModal so both Settings surfaces match.
+  const screens = Grid.useBreakpoint();
+  const compact = !screens.md;
   // MCP config lives in the MCP Marketplace, which is now a modal (opened via
   // this context) rather than the old /marketplace route.
   const catalog = useMCPCatalogModal();
@@ -474,6 +479,35 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
     [canSeeSection, canListUsers, isAdmin, token]
   );
 
+  // Flat "Group · Section" options for the compact nav Select. Mirrors the
+  // grouped menuItems gating above (plain strings so the Select is searchable).
+  const mobileSectionOptions = useMemo(() => {
+    const opts: { value: string; label: string }[] = [];
+    if (canListUsers) opts.push({ value: 'users', label: 'People · Users' });
+    if (isAdmin) opts.push({ value: 'groups', label: 'People · Groups' });
+    opts.push({ value: 'boards', label: 'Resources · Boards' });
+    opts.push({ value: 'repos', label: 'Resources · Repositories' });
+    opts.push({ value: 'branches', label: 'Resources · Branches' });
+    opts.push({ value: 'teammates', label: 'Resources · Teammates' });
+    opts.push({ value: 'artifacts', label: 'Resources · Artifacts' });
+    if (isAdmin) {
+      opts.push({ value: 'workspace-preferences', label: 'Resources · Preferences' });
+    }
+    opts.push({ value: 'card-types', label: 'Cards · Card Types' });
+    opts.push({ value: 'cards', label: 'Cards · All Cards' });
+    if (isAdmin) {
+      if (canSeeSection('agentic-tools')) {
+        opts.push({ value: 'agentic-tools', label: 'Integrations · Agentic Tools' });
+      }
+      opts.push({ value: 'mcp-marketplace', label: 'Integrations · MCP Marketplace' });
+      if (canSeeSection('gateway')) {
+        opts.push({ value: 'gateway', label: 'Integrations · Gateway Channels' });
+      }
+    }
+    opts.push({ value: 'about', label: 'System · About' });
+    return opts;
+  }, [canListUsers, isAdmin, canSeeSection]);
+
   // The shared BranchModal, rendered in-place as the drill-in for both the
   // Branches and Teammates sections (embedded → no stacked modal).
   const branchEditor = branchDrill ? (
@@ -658,8 +692,8 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
       onCancel={handleModalClose}
       footer={drillFooter}
       closable
-      width={1200}
-      style={{ top: 40 }}
+      width={compact ? 'calc(100vw - 16px)' : 1200}
+      style={{ top: compact ? 8 : 40 }}
       styles={{
         wrapper: {
           padding: 0,
@@ -675,13 +709,13 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
         },
         body: {
           padding: 0,
-          height: 'calc(100vh - 200px)',
-          minHeight: 500,
-          maxHeight: 800,
+          height: compact ? 'calc(100dvh - 96px)' : 'calc(100vh - 200px)',
+          minHeight: compact ? 0 : 500,
+          maxHeight: compact ? 'none' : 800,
         },
         footer: {
           margin: 0,
-          padding: '12px 24px',
+          padding: compact ? '12px 16px' : '12px 24px',
           background: token.colorBgContainer,
           borderTop: `1px solid ${token.colorBorderSecondary}`,
         },
@@ -696,38 +730,84 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
         controller={controller}
         setController={setController}
       >
-        <Layout style={{ height: '100%', background: token.colorBgContainer }}>
-          <Sider
-            width={240}
+        <Layout
+          style={{
+            height: '100%',
+            background: token.colorBgContainer,
+            flexDirection: compact ? 'column' : 'row',
+          }}
+        >
+          {compact ? (
+            // Compact: the persistent Sider is replaced by a full-width section
+            // Select in a top bar, so the nav doesn't eat horizontal space.
+            <div
+              style={{
+                flex: '0 0 auto',
+                padding: `${token.paddingSM}px ${token.paddingMD}px`,
+                background: token.colorBgElevated,
+                borderBottom: `1px solid ${token.colorBorderSecondary}`,
+              }}
+            >
+              <div
+                style={{
+                  fontWeight: 600,
+                  fontSize: 16,
+                  color: token.colorText,
+                  marginBottom: token.marginSM,
+                }}
+              >
+                Workspace Settings
+              </div>
+              <Select
+                aria-label="Settings section"
+                showSearch
+                optionFilterProp="label"
+                value={activeTab}
+                options={mobileSectionOptions}
+                onChange={(key) => handleNavClick(key)}
+                style={{ width: '100%' }}
+                size="large"
+              />
+            </div>
+          ) : (
+            <Sider
+              width={240}
+              style={{
+                background: token.colorBgElevated,
+                borderRight: `1px solid ${token.colorBorderSecondary}`,
+                overflow: 'auto',
+                padding: '20px 0',
+              }}
+            >
+              {/* Text-only label: at the 240px Sider width the icon + text wrapped
+                  to two lines, so the leading icon was dropped. This header is the
+                  only chrome that never scrolls away inside a drill-in, so the
+                  distinct wording — "Workspace Settings" vs "User Settings" — is
+                  what now marks the surface at a glance. Mirrored in UserSettingsModal. */}
+              <div style={{ padding: '0 24px 16px' }}>
+                <span style={{ fontWeight: 600, fontSize: 18, color: token.colorText }}>
+                  Workspace Settings
+                </span>
+              </div>
+              <Menu
+                mode="inline"
+                selectedKeys={[activeTab]}
+                onClick={({ key }) => handleNavClick(key)}
+                items={menuItems}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                }}
+              />
+            </Sider>
+          )}
+          <Content
             style={{
-              background: token.colorBgElevated,
-              borderRight: `1px solid ${token.colorBorderSecondary}`,
+              padding: compact ? '20px 16px 24px' : '40px 32px 32px',
               overflow: 'auto',
-              padding: '20px 0',
+              minWidth: 0,
             }}
           >
-            {/* Text-only label: at the 240px Sider width the icon + text wrapped
-                to two lines, so the leading icon was dropped. This header is the
-                only chrome that never scrolls away inside a drill-in, so the
-                distinct wording — "Workspace Settings" vs "User Settings" — is
-                what now marks the surface at a glance. Mirrored in UserSettingsModal. */}
-            <div style={{ padding: '0 24px 16px' }}>
-              <span style={{ fontWeight: 600, fontSize: 18, color: token.colorText }}>
-                Workspace Settings
-              </span>
-            </div>
-            <Menu
-              mode="inline"
-              selectedKeys={[activeTab]}
-              onClick={({ key }) => handleNavClick(key)}
-              items={menuItems}
-              style={{
-                border: 'none',
-                background: 'transparent',
-              }}
-            />
-          </Sider>
-          <Content style={{ padding: '40px 32px 32px', overflow: 'auto' }}>
             {renderContent()}
           </Content>
         </Layout>

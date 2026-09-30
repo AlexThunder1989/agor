@@ -47,6 +47,23 @@ describe('AdaptiveSettingsModal', () => {
     expect(onOk).toHaveBeenCalledTimes(1);
   });
 
+  it('renders embedded in place at a mobile width (no stacked dialog)', () => {
+    vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: false });
+    const onOk = vi.fn();
+    renderWithSettingsShell(
+      <AdaptiveSettingsModal embedded open title="Create board" okText="Create" onOk={onOk}>
+        Board form
+      </AdaptiveSettingsModal>
+    );
+
+    // Embedded never becomes a Modal/Drawer, on desktop or mobile — it always
+    // renders in place inside the drill frame (the shell handles compact layout).
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('Board form')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    expect(onOk).toHaveBeenCalledTimes(1);
+  });
+
   it('renders nothing when embedded and closed', () => {
     vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: true });
     renderWithSettingsShell(

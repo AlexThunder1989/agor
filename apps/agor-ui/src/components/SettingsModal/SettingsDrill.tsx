@@ -1,4 +1,4 @@
-import { App as AntApp, Breadcrumb, Button, Flex, Typography, theme } from 'antd';
+import { App as AntApp, Breadcrumb, Button, Flex, Grid, Typography, theme } from 'antd';
 import {
   createContext,
   type ReactNode,
@@ -237,6 +237,8 @@ export const DrillInFrame: React.FC<DrillInFrameProps> = ({
   children,
 }) => {
   const { token } = theme.useToken();
+  const screens = Grid.useBreakpoint();
+  const compact = !screens.md;
   const { drill, confirmLeaveIfDirty, closeDrill, registerController } = useSettingsDrill();
   // First crumb = the section/list this drill-in was opened from, derived from
   // the active drill target (no caller needs to pass it).
@@ -299,7 +301,8 @@ export const DrillInFrame: React.FC<DrillInFrameProps> = ({
         align="center"
         justify="space-between"
         gap={token.marginXS}
-        style={{ marginBottom: token.marginLG }}
+        wrap
+        style={{ marginBottom: compact ? token.marginMD : token.marginLG }}
       >
         {/* Breadcrumb replaces the old back-arrow + title. The section crumb is a
             clickable link that goes back to the list; it routes through the same
