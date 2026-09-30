@@ -12,8 +12,6 @@ import {
   getFormValuesFromConfig,
 } from '../AgenticToolConfigForm';
 
-import { AdaptiveSettingsModal } from './AdaptiveSettingsModal';
-
 interface Props {
   client: AgorClient;
   tool: TenantAgenticToolName;
@@ -111,6 +109,43 @@ export const AgenticToolPresetsManager: React.FC<Props> = ({
     }
   };
 
+  // Preset create/edit renders in place of the list. This manager is nested
+  // inside a tool's config panel, so a modal here would stack on the Settings
+  // modal ("no modal on modal"); the inline form avoids that.
+  if (modalOpen) {
+    return (
+      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Typography.Text strong>
+          {editing ? `Edit ${editing.name}` : `New ${tool} preset`}
+        </Typography.Text>
+        <Form form={form} layout="vertical">
+          <Form.Item name="name" label="Name" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="description" label="Description">
+            <Input.TextArea rows={2} />
+          </Form.Item>
+          <Form.Item
+            name="is_default"
+            label="Default for new configurations"
+            valuePropName="checked"
+          >
+            <Switch />
+          </Form.Item>
+          <AgenticToolConfigForm agenticTool={tool} client={client} />
+        </Form>
+        <Space style={{ justifyContent: 'flex-end', width: '100%' }}>
+          <Button onClick={() => setModalOpen(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="primary" loading={saving} onClick={() => void save()}>
+            Save
+          </Button>
+        </Space>
+      </Space>
+    );
+  }
+
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Space style={{ justifyContent: 'space-between', width: '100%' }}>
@@ -174,32 +209,6 @@ export const AgenticToolPresetsManager: React.FC<Props> = ({
           )}
         />
       )}
-      <AdaptiveSettingsModal
-        title={editing ? `Edit ${editing.name}` : `New ${tool} preset`}
-        open={modalOpen}
-        onCancel={() => setModalOpen(false)}
-        onOk={() => void save()}
-        confirmLoading={saving}
-        destroyOnHidden
-        width={680}
-      >
-        <Form form={form} layout="vertical">
-          <Form.Item name="name" label="Name" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="description" label="Description">
-            <Input.TextArea rows={2} />
-          </Form.Item>
-          <Form.Item
-            name="is_default"
-            label="Default for new configurations"
-            valuePropName="checked"
-          >
-            <Switch />
-          </Form.Item>
-          <AgenticToolConfigForm agenticTool={tool} client={client} />
-        </Form>
-      </AdaptiveSettingsModal>
     </Space>
   );
 };

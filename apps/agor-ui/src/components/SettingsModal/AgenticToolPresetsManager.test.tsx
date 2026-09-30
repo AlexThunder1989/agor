@@ -38,17 +38,17 @@ describe('AgenticToolPresetsManager authority lifetime', () => {
     // async act boundary so React commits the pending-save render before the
     // test inspects it, independent of scheduler load in the sharded suite.
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     });
     await waitFor(() => expect(create).toHaveBeenCalledOnce());
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /OK$/ })).toHaveClass('ant-btn-loading')
+      expect(screen.getByRole('button', { name: /Save$/ })).toHaveClass('ant-btn-loading')
     );
 
     rendered.rerender(view(2));
     await waitFor(() => expect(find).toHaveBeenCalledTimes(2));
     expect(screen.getByLabelText('Name')).toHaveValue('A reconnect draft');
-    expect(screen.getByRole('button', { name: /OK$/ })).not.toHaveClass('ant-btn-loading');
+    expect(screen.getByRole('button', { name: /Save$/ })).not.toHaveClass('ant-btn-loading');
 
     await act(async () => {
       pending.resolve({
