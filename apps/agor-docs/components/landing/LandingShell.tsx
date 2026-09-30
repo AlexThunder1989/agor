@@ -6,6 +6,7 @@ import { DISCORD_INVITE_URL, GITHUB_REPO_URL, PRESET_URL, presetUtm } from '../.
 import { getBasePath, LOGO_MARK_PATH } from '../../lib/siteMetadata';
 import { CloudCtaLink } from '../CloudCtaLink';
 import styles from '../LandingPage.module.css';
+import { SocialLinks } from '../SocialLinks';
 import { DemoButton } from './DemoButton';
 import { LandingLink } from './LandingLink';
 import { LANDING_PAGES } from './pages';
@@ -106,6 +107,7 @@ export function LandingShell({ ctaPrefix, children }: LandingShellProps) {
             <Link href="/blog/making-of-agor" className={styles.footerEtymology}>
               <span>AG</span>ent <span>OR</span>chestration
             </Link>
+            <SocialLinks placement={`${ctaPrefix}-footer`} />
           </div>
         </div>
         <div className={styles.footerLinks}>
