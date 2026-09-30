@@ -99,6 +99,14 @@ describe('SettingsModal navigation gating', () => {
     expect(screen.getByText('Admin')).toBeInTheDocument();
   });
 
+  it('never surfaces the MCP Marketplace in Settings, even for an admin', () => {
+    // The Marketplace is reachable only from the global navbar; there is no nav
+    // row or signpost inside Settings for any role.
+    renderNav('admin');
+
+    expect(menuLabels()).not.toContain('MCP Marketplace');
+  });
+
   it('offers a member Users but not Groups', () => {
     renderNav('member');
 
@@ -120,8 +128,8 @@ describe('SettingsModal navigation gating', () => {
   it('keeps the admin-only integrations gated the way they already were', () => {
     renderNav('member');
 
-    // MCP server config moved out of Settings into the MCP Marketplace, and the
-    // whole Integrations group (Agentic Tools, the MCP Marketplace pointer,
+    // MCP server config lives in the navbar-only MCP Marketplace (no Settings
+    // entry at all now), and the whole Integrations group (Agentic Tools,
     // Gateway Channels) is admin-only, so a member sees none of it.
     expect(menuLabels()).not.toContain('Agentic Tools');
     expect(menuLabels()).not.toContain('Gateway Channels');

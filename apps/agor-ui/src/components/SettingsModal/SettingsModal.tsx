@@ -16,7 +16,6 @@ import type {
 } from '@agor-live/client';
 import { hasMinimumRole, ROLES } from '@agor-live/client';
 import {
-  ApiOutlined,
   AppstoreOutlined,
   BranchesOutlined,
   CloseOutlined,
@@ -24,7 +23,6 @@ import {
   ControlOutlined,
   CreditCardOutlined,
   ExperimentOutlined,
-  ExportOutlined,
   FolderOutlined,
   InfoCircleOutlined,
   MessageOutlined,
@@ -35,7 +33,6 @@ import {
 import type { MenuProps } from 'antd';
 import { Button, Grid, Layout, Menu, Modal, Select, Tag, theme } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useMCPCatalogModal } from '@/contexts/MCPCatalogModalContext';
 import { useAuthenticatedAuthorityScope } from '@/hooks/useAuthorityOperationGuard';
 import type { BranchStorageConfig } from '@/utils/branchStorage';
 import { mapToArray } from '@/utils/mapHelpers';
@@ -205,9 +202,6 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
   // the compact pattern in UserSettingsModal so both Settings surfaces match.
   const screens = Grid.useBreakpoint();
   const compact = !screens.md;
-  // MCP config lives in the MCP Marketplace, which is now a modal (opened via
-  // this context) rather than the old /marketplace route.
-  const catalog = useMCPCatalogModal();
   const settingsSectionKeys = useMemo(() => new Set<string>(SETTINGS_SECTIONS), []);
 
   // Drill-in navigation: the Content pane swaps between a section's list view
@@ -259,20 +253,8 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
 
   const handleNavClick = useCallback(
     (key: string) => {
-      // MCP server configuration lives in the MCP Marketplace, opened as a modal
-      // (its own context) rather than a Settings section. This entry points to it.
-      if (key === 'mcp-marketplace') {
-        const openIt = () => {
-          catalog?.openCatalog();
-          onClose();
-        };
-        if (drill) {
-          void confirmLeaveIfDirty().then((ok) => ok && openIt());
-        } else {
-          openIt();
-        }
-        return;
-      }
+      // The MCP Marketplace is intentionally NOT reachable from Settings — it
+      // lives only on the global navbar. No nav row or signpost here.
       if (!settingsSectionKeys.has(key)) return;
       if (key === activeTab) return;
       const go = () => {
@@ -285,16 +267,7 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
         go();
       }
     },
-    [
-      activeTab,
-      catalog,
-      closeDrill,
-      confirmLeaveIfDirty,
-      drill,
-      onClose,
-      onTabChange,
-      settingsSectionKeys,
-    ]
+    [activeTab, closeDrill, confirmLeaveIfDirty, drill, onTabChange, settingsSectionKeys]
   );
 
   const handleModalClose = useCallback(() => {
@@ -450,18 +423,8 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
                       },
                     ]
                   : []),
-                {
-                  key: 'mcp-marketplace',
-                  label: (
-                    <span>
-                      MCP Marketplace{' '}
-                      <ExportOutlined
-                        style={{ fontSize: token.fontSizeSM, color: token.colorTextTertiary }}
-                      />
-                    </span>
-                  ),
-                  icon: <ApiOutlined />,
-                },
+                // The MCP Marketplace is reachable only from the global navbar,
+                // never from Settings (no nav row or signpost here).
                 ...(canSeeSection('gateway')
                   ? [{ key: 'gateway', label: 'Gateway Channels', icon: <MessageOutlined /> }]
                   : []),
@@ -499,7 +462,6 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
       if (canSeeSection('agentic-tools')) {
         opts.push({ value: 'agentic-tools', label: 'Integrations · Agentic Tools' });
       }
-      opts.push({ value: 'mcp-marketplace', label: 'Integrations · MCP Marketplace' });
       if (canSeeSection('gateway')) {
         opts.push({ value: 'gateway', label: 'Integrations · Gateway Channels' });
       }
