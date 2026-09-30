@@ -117,30 +117,30 @@ export function HomeHero() {
         </p>
         <div className={styles.homeCtaRow}>
           <CloudCtaLink placement="landing-hero" className={styles.homePrimary} />
-          <DemoButton className={styles.homeTextLink}>
-            Book a demo <span aria-hidden="true">→</span>
-          </DemoButton>
+          <DemoButton className={styles.homeSecondary}>Book a demo</DemoButton>
         </div>
-        <div className={styles.homeInstallRow}>
+        {/* Agor Community Edition: copy the install command, open the setup
+            guide, or star the repo. */}
+        <div className={styles.homeCeBar}>
+          <span className={styles.homeCeLabel}>Agor Community Edition</span>
           <InstallCommand />
           <Link
             href="/guide/getting-started"
-            className={styles.homeGithub}
+            className={`${styles.homeCeBtn} ${styles.homeCeBtnAccent}`}
             onClick={() =>
               trackEvent('nav_click', {
                 target: '/guide/getting-started',
-                placement: 'home-hero-install',
+                placement: 'home-hero-ce',
               })
             }
           >
-            Run Agor locally <span aria-hidden="true">→</span>
+            Install locally
           </Link>
-          <span aria-hidden="true">·</span>
           <a
             href={GITHUB_REPO_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className={styles.homeGithub}
+            className={styles.homeCeBtn}
           >
             <GitHubIcon />
             Star on GitHub
