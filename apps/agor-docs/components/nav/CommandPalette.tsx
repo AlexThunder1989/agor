@@ -1,19 +1,19 @@
 'use client';
 
-import { CornerDownLeft, FileText, type LucideIcon, Search } from 'lucide-react';
+import { CornerDownLeft, FileText, Search } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { trackEvent } from '../../lib/analytics';
 import { getBasePath } from '../../lib/siteMetadata';
 import styles from './IslandNav.module.css';
-import { isExternal, NAV_MENUS } from './navData';
+import { isExternal, NAV_MENUS, type NavIcon } from './navData';
 
 export interface PaletteItem {
   section: string;
   label: string;
   desc?: string;
-  icon: LucideIcon;
+  icon: NavIcon;
   /** Navigate here, or run `action` instead. */
   href?: string;
   action?: () => void;

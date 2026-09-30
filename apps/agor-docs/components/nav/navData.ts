@@ -4,7 +4,6 @@ import {
   Braces,
   Cloud,
   Command,
-  GitBranch,
   HelpCircle,
   LayoutDashboard,
   type LucideIcon,
@@ -15,14 +14,19 @@ import {
   ShieldCheck,
   Users,
 } from 'lucide-react';
-import { DISCORD_INVITE_URL, GITHUB_REPO_URL } from '../../lib/links';
+import type { ComponentType } from 'react';
+import { DISCORD_INVITE_URL, GITHUB_REPO_URL, LINKEDIN_URL, X_URL } from '../../lib/links';
+import { DiscordIcon, GitHubIcon, LinkedInIcon, XIcon } from '../BrandIcons';
 import { type LandingPageId, landingPage } from '../landing/pages';
+
+/** A Lucide icon or one of the brand marks in components/BrandIcons. */
+export type NavIcon = ComponentType<{ size?: number | string; 'aria-hidden'?: boolean | 'true' }>;
 
 export interface NavItem {
   label: string;
   desc: string;
   href: string;
-  icon: LucideIcon;
+  icon: NavIcon;
   /** Set for landing pages, so clicks also count toward landing_page_click. */
   landing?: LandingPageId;
 }
@@ -145,13 +149,25 @@ export const NAV_MENUS: NavMenu[] = [
             label: 'GitHub',
             desc: 'Star, fork, and contribute.',
             href: GITHUB_REPO_URL,
-            icon: GitBranch,
+            icon: GitHubIcon,
           },
           {
             label: 'Discord',
             desc: 'Ask questions, share workflows.',
             href: DISCORD_INVITE_URL,
-            icon: MessagesSquare,
+            icon: DiscordIcon,
+          },
+          {
+            label: 'X',
+            desc: 'Follow @agorcloud for updates.',
+            href: X_URL,
+            icon: XIcon,
+          },
+          {
+            label: 'LinkedIn',
+            desc: 'News from the Agor team.',
+            href: LINKEDIN_URL,
+            icon: LinkedInIcon,
           },
         ],
       },

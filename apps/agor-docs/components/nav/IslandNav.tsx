@@ -1,16 +1,6 @@
 'use client';
 
-import {
-  BookOpen,
-  CalendarDays,
-  ChevronDown,
-  Cloud,
-  Menu,
-  MessagesSquare,
-  Search,
-  Star,
-  X,
-} from 'lucide-react';
+import { BookOpen, CalendarDays, ChevronDown, Cloud, Menu, Search, X } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { setMenu, useMenu } from 'nextra-theme-docs';
@@ -27,6 +17,7 @@ import { createPortal } from 'react-dom';
 import { trackEvent } from '../../lib/analytics';
 import { DISCORD_INVITE_URL, GITHUB_REPO_URL } from '../../lib/links';
 import { getBasePath, LOGO_MARK_PATH } from '../../lib/siteMetadata';
+import { DiscordIcon, GitHubIcon } from '../BrandIcons';
 import { CloudCtaLink } from '../CloudCtaLink';
 import { HubSpotMeetingModal } from '../HubSpotMeetingModal';
 import { LANDING_PAGES } from '../landing/pages';
@@ -253,14 +244,14 @@ export function IslandNav() {
         section: 'Actions',
         label: 'Star on GitHub',
         desc: 'Support the project',
-        icon: Star,
+        icon: GitHubIcon,
         href: GITHUB_REPO_URL,
       },
       {
         section: 'Actions',
         label: 'Join Discord',
         desc: 'Community chat',
-        icon: MessagesSquare,
+        icon: DiscordIcon,
         href: DISCORD_INVITE_URL,
       },
     ],
@@ -494,10 +485,10 @@ export function IslandNav() {
         <div className={styles.sheetFooter}>
           <div className={styles.sheetFooterPair}>
             <a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer">
-              <Star size={17} aria-hidden /> Star
+              <GitHubIcon size={17} aria-hidden /> Star
             </a>
             <a href={DISCORD_INVITE_URL} target="_blank" rel="noopener noreferrer">
-              <MessagesSquare size={17} aria-hidden /> Discord
+              <DiscordIcon size={17} aria-hidden /> Discord
             </a>
           </div>
           <CloudCtaLink placement="mobile-nav" className={styles.sheetCta} />
