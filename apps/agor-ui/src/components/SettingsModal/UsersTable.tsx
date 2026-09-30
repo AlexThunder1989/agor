@@ -49,6 +49,7 @@ import { AdaptiveSettingsModal } from './AdaptiveSettingsModal';
 import { ResponsiveSettingsHeader } from './ResponsiveSettingsHeader';
 import { ResponsiveTable } from './ResponsiveTable';
 import { SettingsActionGroup } from './SettingsActionGroup';
+import { useSettingsDrill } from './SettingsDrill';
 import { UserAvatarsTab } from './UserAvatarsTab';
 import { UserSettingsModal } from './UserSettingsModal';
 
@@ -77,7 +78,10 @@ export const UsersTable: React.FC<UsersTableProps> = ({
 }) => {
   const { showError } = useThemedMessage();
   const { config: authConfig, identityContractState } = useAuthConfig();
-  const [createModalOpen, setCreateModalOpen] = useState(false);
+  // Create user is a drill-in (no stacked modal): the shell footer drives
+  // Save/Cancel and the nav-switch / modal-close guards key on `drill`.
+  const { drill, openDrill, closeDrill } = useSettingsDrill();
+  const [createDirty, setCreateDirty] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [groups, setGroups] = useState<Group[]>([]);
   const [memberships, setMemberships] = useState<GroupMembership[]>([]);
@@ -93,13 +97,23 @@ export const UsersTable: React.FC<UsersTableProps> = ({
   // biome-ignore lint/correctness/useExhaustiveDependencies: authenticated identity and role intentionally erase password-bearing forms
   useLayoutEffect(() => {
     form.resetFields();
-    setCreateModalOpen(false);
+    closeDrill();
     setEditingUser(null);
-  }, [currentUser?.role, currentUser?.user_id, form]);
+  }, [currentUser?.role, currentUser?.user_id, form, closeDrill]);
   const externallyManaged =
     authConfig?.identity?.userLifecycle === AgorUserLifecycleAuthority.EXTERNAL;
   const canCreateUsers =
     isAdmin && isIdentityCapabilityAvailable(authConfig, identityContractState, 'create');
+  // Create drill-in is active when the shell's drill targets this section in
+  // create mode (and the caller is allowed to create).
+  const isCreating = canCreateUsers && drill?.kind === 'users' && drill.mode === 'create';
+  // Reset the form to create defaults each time the drill-in opens.
+  useEffect(() => {
+    if (isCreating) {
+      form.resetFields();
+      setCreateDirty(false);
+    }
+  }, [isCreating, form]);
   const canDeleteUsers = isIdentityCapabilityAvailable(authConfig, identityContractState, 'delete');
   const passwordRequirements = passwordPolicyRequirements(authConfig?.passwordPolicy);
   const canManageAvatarSettings =
@@ -204,7 +218,8 @@ export const UsersTable: React.FC<UsersTableProps> = ({
       );
       if (!operation.isCurrent()) return;
       form.resetFields();
-      setCreateModalOpen(false);
+      setCreateDirty(false);
+      closeDrill();
     } catch (error) {
       if (!operation.isCurrent()) return;
       const code = (error as { data?: { code?: unknown } } | undefined)?.data?.code;
@@ -335,6 +350,93 @@ export const UsersTable: React.FC<UsersTableProps> = ({
     },
   ];
 
+  // Create user drills in place of the list (no stacked modal). Early-returned
+  // so the Content pane swaps list↔editor; the shared shell footer renders
+  // Create/Cancel and the breadcrumb ("Users ›") backs out via closeDrill.
+  if (isCreating) {
+    return (
+      <AdaptiveSettingsModal
+        embedded
+        open
+        title="Create User"
+        okText="Create"
+        dirty={createDirty}
+        onOk={handleCreate}
+        onCancel={() => {
+          form.resetFields();
+          setCreateDirty(false);
+          closeDrill();
+        }}
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          style={{ maxWidth: 520 }}
+          onValuesChange={() => setCreateDirty(true)}
+        >
+          <Form.Item label="Name" name="name" style={{ marginBottom: 24 }}>
+            <Input placeholder="John Doe" />
+          </Form.Item>
+
+          <Form.Item
+            label="Email"
+            name="email"
+            rules={[
+              { required: true, message: 'Please enter an email' },
+              { type: 'email', message: 'Please enter a valid email' },
+            ]}
+          >
+            <Input placeholder="user@example.com" />
+          </Form.Item>
+
+          <Form.Item
+            label="Execution Home Key"
+            name="unix_username"
+            help="Optional transitional home key for delegated execution"
+            rules={[
+              {
+                pattern: EXECUTION_HOME_KEY_PATTERN,
+                message:
+                  'Start with a lowercase letter or underscore; then use lowercase letters, numbers, hyphens, or underscores',
+              },
+              { max: 32, message: 'Execution home key must be 32 characters or less' },
+            ]}
+          >
+            <Input placeholder="johnsmith" maxLength={32} />
+          </Form.Item>
+
+          <Form.Item
+            label="Password"
+            name="password"
+            extra={passwordPolicyHelp(passwordRequirements)}
+            rules={passwordRules(passwordRequirements, { required: true })}
+          >
+            <Input.Password placeholder="••••••••" autoComplete="new-password" />
+          </Form.Item>
+
+          <Form.Item
+            label="Role"
+            name="role"
+            initialValue={ROLES.MEMBER}
+            rules={[{ required: true, message: 'Please select a role' }]}
+          >
+            <Select
+              options={assignableRoleOptions.map((opt) => ({
+                value: opt.value,
+                label: opt.label,
+                title: opt.description,
+              }))}
+            />
+          </Form.Item>
+
+          <Form.Item name="must_change_password" valuePropName="checked" initialValue={false}>
+            <Checkbox>Force password change on first login</Checkbox>
+          </Form.Item>
+        </Form>
+      </AdaptiveSettingsModal>
+    );
+  }
+
   const usersTable = (
     <div>
       <ResponsiveSettingsHeader
@@ -355,7 +457,11 @@ export const UsersTable: React.FC<UsersTableProps> = ({
         count={`${users.length} ${users.length === 1 ? 'user' : 'users'}`}
         primaryActions={
           canCreateUsers ? (
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => openDrill({ kind: 'users', mode: 'create' })}
+            >
               New User
             </Button>
           ) : undefined
@@ -370,82 +476,6 @@ export const UsersTable: React.FC<UsersTableProps> = ({
         size="small"
         scroll={{ x: 900 }}
       />
-
-      {/* Create User Modal */}
-      {canCreateUsers && (
-        <AdaptiveSettingsModal
-          title="Create User"
-          open={createModalOpen}
-          onOk={handleCreate}
-          onCancel={() => {
-            form.resetFields();
-            setCreateModalOpen(false);
-          }}
-          okText="Create"
-          width={800}
-        >
-          <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-            <Form.Item label="Name" name="name" style={{ marginBottom: 24 }}>
-              <Input placeholder="John Doe" />
-            </Form.Item>
-
-            <Form.Item
-              label="Email"
-              name="email"
-              rules={[
-                { required: true, message: 'Please enter an email' },
-                { type: 'email', message: 'Please enter a valid email' },
-              ]}
-            >
-              <Input placeholder="user@example.com" />
-            </Form.Item>
-
-            <Form.Item
-              label="Execution Home Key"
-              name="unix_username"
-              help="Optional transitional home key for delegated execution"
-              rules={[
-                {
-                  pattern: EXECUTION_HOME_KEY_PATTERN,
-                  message:
-                    'Start with a lowercase letter or underscore; then use lowercase letters, numbers, hyphens, or underscores',
-                },
-                { max: 32, message: 'Execution home key must be 32 characters or less' },
-              ]}
-            >
-              <Input placeholder="johnsmith" maxLength={32} />
-            </Form.Item>
-
-            <Form.Item
-              label="Password"
-              name="password"
-              extra={passwordPolicyHelp(passwordRequirements)}
-              rules={passwordRules(passwordRequirements, { required: true })}
-            >
-              <Input.Password placeholder="••••••••" autoComplete="new-password" />
-            </Form.Item>
-
-            <Form.Item
-              label="Role"
-              name="role"
-              initialValue={ROLES.MEMBER}
-              rules={[{ required: true, message: 'Please select a role' }]}
-            >
-              <Select
-                options={assignableRoleOptions.map((opt) => ({
-                  value: opt.value,
-                  label: opt.label,
-                  title: opt.description,
-                }))}
-              />
-            </Form.Item>
-
-            <Form.Item name="must_change_password" valuePropName="checked" initialValue={false}>
-              <Checkbox>Force password change on first login</Checkbox>
-            </Form.Item>
-          </Form>
-        </AdaptiveSettingsModal>
-      )}
 
       {/* Edit User Modal - reuses UserSettingsModal */}
       <UserSettingsModal

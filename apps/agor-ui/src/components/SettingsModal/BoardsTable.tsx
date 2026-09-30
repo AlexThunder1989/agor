@@ -15,7 +15,7 @@ import {
   UploadOutlined,
 } from '@ant-design/icons';
 import { App, Button, Form, Input, Popconfirm, Select, Tooltip, Typography } from 'antd';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { mapToSortedArray } from '@/utils/mapHelpers';
 import { useThemedMessage } from '@/utils/message';
 import { filterBySettingsSearch } from '@/utils/settingsSearch';
@@ -29,6 +29,7 @@ import { AdaptiveSettingsModal } from './AdaptiveSettingsModal';
 import { ResponsiveSettingsHeader } from './ResponsiveSettingsHeader';
 import { ResponsiveTable } from './ResponsiveTable';
 import { SettingsActionGroup } from './SettingsActionGroup';
+import { useSettingsDrill } from './SettingsDrill';
 
 interface BoardsTableProps {
   client: AgorClient | null;
@@ -57,11 +58,23 @@ export const BoardsTable: React.FC<BoardsTableProps> = ({
 }) => {
   const { modal } = App.useApp();
   const { showSuccess, showError, showWarning } = useThemedMessage();
-  const [createModalOpen, setCreateModalOpen] = useState(false);
+  // Create board is a drill-in (no stacked modal on top of Settings).
+  const { drill, openDrill, closeDrill } = useSettingsDrill();
+  const [createDirty, setCreateDirty] = useState(false);
   const [editingBoard, setEditingBoard] = useState<Board | null>(null);
   const [archiveFilter, setArchiveFilter] = useState<'active' | 'archived' | 'all'>('active');
   const [searchTerm, setSearchTerm] = useState('');
   const [form] = Form.useForm();
+
+  const isCreating = drill?.kind === 'boards' && drill.mode === 'create';
+  // New boards start on the theme-aware default (no persisted background); the
+  // editor's Default mode reflects a fresh form.
+  useEffect(() => {
+    if (isCreating) {
+      form.resetFields();
+      setCreateDirty(false);
+    }
+  }, [isCreating, form]);
 
   // Calculate session count per board (branch-centric model). Build the
   // board buckets once so opening Settings is O(branches + sessions) instead
@@ -92,7 +105,8 @@ export const BoardsTable: React.FC<BoardsTableProps> = ({
       .then(() => {
         onCreate?.(extractBoardFormValues(form));
         form.resetFields();
-        setCreateModalOpen(false);
+        setCreateDirty(false);
+        closeDrill();
       })
       .catch(() => {
         // Antd displays inline field errors; nothing to do here.
@@ -320,6 +334,37 @@ export const BoardsTable: React.FC<BoardsTableProps> = ({
     },
   ];
 
+  // Create board drills in place of the list (no stacked modal). Early-returned
+  // so the Content pane swaps list↔editor; the shell footer renders
+  // Create/Cancel and the breadcrumb ("Boards ›") backs out via closeDrill.
+  if (isCreating) {
+    return (
+      <AdaptiveSettingsModal
+        embedded
+        open
+        title="Create Board"
+        okText="Create"
+        dirty={createDirty}
+        onOk={handleCreate}
+        onCancel={() => {
+          form.resetFields();
+          setCreateDirty(false);
+          closeDrill();
+        }}
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          preserve
+          style={{ maxWidth: 520 }}
+          onValuesChange={() => setCreateDirty(true)}
+        >
+          <BoardFormFields form={form} extra={customContextField} />
+        </Form>
+      </AdaptiveSettingsModal>
+    );
+  }
+
   return (
     <div>
       <ResponsiveSettingsHeader
@@ -354,12 +399,7 @@ export const BoardsTable: React.FC<BoardsTableProps> = ({
             <Button
               type="primary"
               icon={<PlusOutlined />}
-              onClick={() => {
-                // New boards start on the theme-aware default (no persisted
-                // background); the editor's Default mode reflects this.
-                form.resetFields();
-                setCreateModalOpen(true);
-              }}
+              onClick={() => openDrill({ kind: 'boards', mode: 'create' })}
             >
               New Board
             </Button>
@@ -378,23 +418,6 @@ export const BoardsTable: React.FC<BoardsTableProps> = ({
           style: record.archived ? { opacity: 0.5 } : undefined,
         })}
       />
-
-      {/* Create Board Modal */}
-      <AdaptiveSettingsModal
-        title="Create Board"
-        open={createModalOpen}
-        width={760}
-        onOk={handleCreate}
-        onCancel={() => {
-          form.resetFields();
-          setCreateModalOpen(false);
-        }}
-        okText="Create"
-      >
-        <Form form={form} layout="vertical" preserve style={{ marginTop: 16 }}>
-          <BoardFormFields form={form} extra={customContextField} />
-        </Form>
-      </AdaptiveSettingsModal>
 
       <BoardEditModal
         board={editingBoard}
