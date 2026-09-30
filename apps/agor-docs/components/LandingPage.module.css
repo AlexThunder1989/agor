@@ -2920,13 +2920,36 @@ a.radarBlip {
    * The slight scale pushes blur's feathered edges past the clipped hero. */
   filter: blur(5px);
   transform: scale(1.03);
+  /* Clips the tilting video; cqw units below resolve against this width. */
+  overflow: hidden;
+  container-type: inline-size;
 }
 
+/* A slow "walking past a monitor" tilt. Perspective lives inside the
+ * transform in container units, so the look is identical at any width.
+ * Coverage: with a centered origin the receding edge still reaches the
+ * container edge when S >= 1 / (cos θ - (W/2 / d) · sin θ). With
+ * d = 150cqw, (W/2)/d = 1/3, so θ = 6° needs S >= 1.042; 1.045 leaves
+ * room for subpixel rounding. Height never binds before width does.
+ * Retuning: change θ (angle), d (depth: smaller = more dramatic) or the
+ * duration, then recompute S from the formula and round up. */
 .homeHeroVideo video {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
   object-position: center top;
+  transform-origin: 50% 50%;
+  animation: homeHeroTilt 12s cubic-bezier(0.37, 0, 0.63, 1) infinite alternate;
+}
+
+@keyframes homeHeroTilt {
+  from {
+    transform: perspective(150cqw) rotateY(-6deg) scale(1.045);
+  }
+  to {
+    transform: perspective(150cqw) rotateY(6deg) scale(1.045);
+  }
 }
 
 /* Legibility scrim: a soft wash behind the centered pitch, and a deepening
@@ -3206,6 +3229,7 @@ a.radarBlip {
 @media (prefers-reduced-motion: reduce) {
   .homeHeroVideo video {
     display: none;
+    animation: none;
   }
 
   .homeHero a.homeRowItem:hover {
