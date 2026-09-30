@@ -405,6 +405,9 @@ export interface Task {
    */
   queue_position?: number;
 
+  /** Server-owned durable prompt hold; only explicit resubmission creates runnable work. */
+  tenant_restriction_hold?: { reason: 'tenant_restricted'; held_at: string };
+
   /**
    * Structured metadata for the task. Fields here are load-bearing for
    * auth, lineage, and UI styling — see the per-field comments. When a
@@ -412,8 +415,6 @@ export interface Task {
    * `is_agor_callback` and `source` are copied onto the new message.metadata
    * so the UI styling for callbacks survives the queue → run hop.
    */
-  /** Server-owned durable prompt hold; only explicit resubmission creates runnable work. */
-  tenant_restriction_hold?: { reason: 'tenant_restricted'; held_at: string };
   metadata?: TaskMetadata;
 
   // Message range

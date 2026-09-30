@@ -71,12 +71,19 @@ export class TenantRestrictionReconciler {
       this.cursor = refs.at(-1)?.cursor;
       let stopping = 0;
       let failures = 0;
+      // One restriction read per tenant per pass; a failed read still fails each of its tasks.
+      const activeByTenant = new Map<string, Promise<boolean>>();
       for (const ref of refs) {
         const tenantId = this.tenantId ?? ref.tenant_id;
         if (!tenantId) throw new Error('Restriction candidate omitted tenant authority');
         try {
           await runWithTenantContext(tenantId, async () => {
-            if (await isCurrentTenantRuntimeActive(this.db)) return;
+            let active = activeByTenant.get(tenantId);
+            if (!active) {
+              active = isCurrentTenantRuntimeActive(this.db);
+              activeByTenant.set(tenantId, active);
+            }
+            if (await active) return;
             const params: AuthenticatedParams = {
               provider: undefined,
               tenant: { tenant_id: tenantId as TenantID, source: 'explicit' },
