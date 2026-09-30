@@ -17,14 +17,14 @@ export function CloudInviteCTA({ placement, demoLabel = 'Book a Demo' }: CloudIn
   const [isDemoOpen, setIsDemoOpen] = useState(false);
   return (
     <div className={styles.wrapper}>
-      <CloudCtaLink placement={placement} className={styles.primary} suffix=" →" />
+      <CloudCtaLink placement={placement} className={styles.primary} />
       <button
         type="button"
         className={styles.secondary}
         style={{ cursor: 'pointer', font: 'inherit' }}
         onClick={() => setIsDemoOpen(true)}
       >
-        {demoLabel} →
+        {demoLabel}
       </button>
       <HubSpotMeetingModal isOpen={isDemoOpen} onClose={() => setIsDemoOpen(false)} />
     </div>

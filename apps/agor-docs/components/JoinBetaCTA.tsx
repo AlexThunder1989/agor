@@ -10,7 +10,7 @@ interface JoinBetaCTAProps {
 export function JoinBetaCTA({ placement }: JoinBetaCTAProps) {
   return (
     <div className={styles.wrapper}>
-      <CloudCtaLink placement={placement} className={styles.primary} suffix=" →" />
+      <CloudCtaLink placement={placement} className={styles.primary} />
     </div>
   );
 }

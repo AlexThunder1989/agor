@@ -3109,13 +3109,31 @@ a.radarBlip {
 }
 
 .homeHero a.homeRowItem {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding-top: 14px;
   border-top: 1px solid rgba(255, 255, 255, 0.18);
   text-decoration: none;
-  transition: border-color 0.2s;
+  transition:
+    border-color 0.2s,
+    transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Hover wash: a barely-there aqua gradient that fades in behind the item.
+ * On a pseudo-element so it can bleed past the text without moving it, and
+ * so it fades via opacity (gradients themselves don't transition). */
+.homeHero a.homeRowItem::before {
+  content: "";
+  position: absolute;
+  inset: 0 -12px -12px;
+  z-index: -1;
+  border-radius: 0 0 12px 12px;
+  background: linear-gradient(180deg, rgba(69, 196, 187, 0.12), rgba(69, 196, 187, 0.02));
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
 }
 
 .homeRowLabel {
@@ -3128,7 +3146,7 @@ a.radarBlip {
   transition: color 0.2s;
 }
 
-.homeRowLabel svg {
+.homeRowLabel span {
   opacity: 0.55;
 }
 
@@ -3140,6 +3158,11 @@ a.radarBlip {
 
 .homeHero a.homeRowItem:hover {
   border-top-color: #45c4bb;
+  transform: translateY(-3px);
+}
+
+.homeHero a.homeRowItem:hover::before {
+  opacity: 1;
 }
 
 .homeHero a.homeRowItem:hover .homeRowLabel {
@@ -3179,6 +3202,10 @@ a.radarBlip {
 @media (prefers-reduced-motion: reduce) {
   .homeHeroVideo video {
     display: none;
+  }
+
+  .homeHero a.homeRowItem:hover {
+    transform: none;
   }
 }
 

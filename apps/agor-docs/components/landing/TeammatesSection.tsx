@@ -144,7 +144,7 @@ export function TeammatesSection({
                 placement={placement}
                 className={styles.ringButton}
               >
-                Learn more <span aria-hidden="true">→</span>
+                Learn more
               </LandingLink>
             </div>
           </div>

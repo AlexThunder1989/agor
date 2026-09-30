@@ -1,6 +1,5 @@
 'use client';
 
-import { ArrowDown } from 'lucide-react';
 import Link from 'next/link';
 import type { CSSProperties } from 'react';
 import { AI_ENABLEMENT_POST_URL } from '../../lib/links';
@@ -163,7 +162,11 @@ export function GovernanceSection({
                 className={styles.titleLink}
               >
                 {item.title}
-                {hero ? <ArrowDown size={16} aria-hidden className={styles.busJump} /> : null}
+                {hero ? (
+                  <span aria-hidden="true" className={styles.busJump}>
+                    ↓
+                  </span>
+                ) : null}
               </LandingLink>
             </h3>
             <div className={styles.busDesc}>

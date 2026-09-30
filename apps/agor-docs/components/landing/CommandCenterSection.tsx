@@ -168,7 +168,7 @@ export function CommandCenterSection({
                       placement={sampler ? 'home-section' : 'command-center-page-carousel'}
                       className={styles.secondaryButton}
                     >
-                      Learn more →
+                      Learn more
                     </LandingLink>
                   </div>
                   <button

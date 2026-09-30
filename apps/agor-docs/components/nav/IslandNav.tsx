@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  ArrowRight,
   BookOpen,
   CalendarDays,
   ChevronDown,
@@ -342,12 +341,7 @@ export function IslandNav() {
               <Search size={17} aria-hidden />
             </button>
             <span className={styles.ctaSlot} onMouseEnter={closeMenu}>
-              <CloudCtaLink
-                placement="navbar"
-                compact
-                className={styles.cta}
-                suffix={<ArrowRight size={14} aria-hidden />}
-              />
+              <CloudCtaLink placement="navbar" compact className={styles.cta} />
             </span>
             <button
               type="button"
@@ -414,7 +408,7 @@ export function IslandNav() {
                     <span className={styles.featureKicker}>{menu.feature.kicker}</span>
                     <span className={styles.featureTitle}>{menu.feature.title}</span>
                     <span className={styles.featureCta}>
-                      {menu.feature.cta} <ArrowRight size={14} aria-hidden />
+                      {menu.feature.cta} <span aria-hidden="true">→</span>
                     </span>
                   </Link>
                 ) : null}
@@ -443,7 +437,7 @@ export function IslandNav() {
               <span className={styles.sheetRowLead}>
                 <BookOpen size={18} aria-hidden /> Browse this section
               </span>
-              <ArrowRight size={16} aria-hidden />
+              <span aria-hidden="true">→</span>
             </button>
           ) : null}
           {NAV_MENUS.map((menu) => {
@@ -506,11 +500,7 @@ export function IslandNav() {
               <MessagesSquare size={17} aria-hidden /> Discord
             </a>
           </div>
-          <CloudCtaLink
-            placement="mobile-nav"
-            className={styles.sheetCta}
-            suffix={<ArrowRight size={16} aria-hidden />}
-          />
+          <CloudCtaLink placement="mobile-nav" className={styles.sheetCta} />
         </div>
       </div>
 

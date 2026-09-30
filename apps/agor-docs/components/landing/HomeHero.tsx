@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowRight, ArrowUpRight, Check, Copy, Pause, Play } from 'lucide-react';
+import { Check, Copy, Pause, Play } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { trackEvent } from '../../lib/analytics';
 import { GITHUB_REPO_URL } from '../../lib/links';
@@ -115,13 +115,9 @@ export function HomeHero() {
           <HighlightedText text={HOME_HERO.subheadline} />
         </p>
         <div className={styles.homeCtaRow}>
-          <CloudCtaLink
-            placement="landing-hero"
-            className={styles.homePrimary}
-            suffix={<ArrowRight size={18} aria-hidden />}
-          />
+          <CloudCtaLink placement="landing-hero" className={styles.homePrimary} />
           <DemoButton className={styles.homeTextLink}>
-            Book a demo <ArrowUpRight size={16} aria-hidden />
+            Book a demo <span aria-hidden="true">→</span>
           </DemoButton>
         </div>
         <div className={styles.homeInstallRow}>
@@ -149,7 +145,7 @@ export function HomeHero() {
           >
             <span className={styles.homeRowLabel}>
               {page.navLabel}
-              <ArrowRight size={14} aria-hidden />
+              <span aria-hidden="true">→</span>
             </span>
             <span className={styles.homeRowDesc}>{page.tagline}</span>
           </LandingLink>
