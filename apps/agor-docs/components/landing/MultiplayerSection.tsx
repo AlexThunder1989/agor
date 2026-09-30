@@ -53,9 +53,9 @@ export function MultiplayerSection({
   return (
     <div className={styles.auroraBand}>
       <div className={styles.bandAurora} aria-hidden="true">
-        {/* Warm ramp sampled from the demo board's background — ambient
-            edge-light echo of the hero video, TV-backlight style. */}
-        <Aurora colorStops={['#f12711', '#f5af19', '#ffd166']} amplitude={0.9} blend={1} />
+        {/* Aqua is the solution color (amber marks problems, as in the problem
+            section above); this ramp echoes the demo board's background. */}
+        <Aurora colorStops={['#1b6f8a', '#2ec4b6', '#9bf6ff']} amplitude={0.9} blend={1} />
       </div>
       <section
         className={hero ? `${styles.liveSection} ${styles.sectionHero}` : styles.liveSection}
