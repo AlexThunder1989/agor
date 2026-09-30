@@ -1786,9 +1786,15 @@ export const App: React.FC<AppProps> = ({
           onDeleteGatewayChannel={onDeleteGatewayChannel}
           onUpdateArtifact={onUpdateArtifact}
           onDeleteArtifact={onDeleteArtifact}
-          // Creates the teammate from the in-place Settings drill-in (does NOT
-          // close Settings — the drill-in handles its own back/close).
-          onCreateTeammate={handleCreateTeammate}
+          // Opens the teammate create flow (CreateDialog, teammate tab), matching
+          // main's TeammatesTable which triggers create at the app level.
+          onCreateTeammate={() => {
+            closeSettings();
+            onSettingsClose?.();
+            setNewBranchDefaultPosition(null);
+            setCreateDialogDefaultTab('teammate');
+            setCreateDialogOpen(true);
+          }}
           availableAgents={availableAgents}
           branchStorageConfig={branchStorageConfig}
         />

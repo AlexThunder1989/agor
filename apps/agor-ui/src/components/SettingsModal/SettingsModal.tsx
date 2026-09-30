@@ -57,7 +57,6 @@ import {
 import type { AgenticToolOption } from '../../types';
 import { BranchModal } from '../BranchModal';
 import type { BranchUpdate } from '../BranchModal/tabs/GeneralTab';
-import type { TeammateTabResult } from '../CreateDialog/tabs/TeammateTab';
 import { AboutTab } from './AboutTab';
 import { AgenticToolsSection } from './AgenticToolsSection';
 import { AllCardsPanel } from './AllCardsPanel';
@@ -74,7 +73,7 @@ import {
   SettingsDrillProvider,
   useDirtyLeaveGuard,
 } from './SettingsDrill';
-import { type TeammateCreateProgress, TeammatesTable } from './TeammatesTable';
+import { TeammatesTable } from './TeammatesTable';
 import { UsersTable } from './UsersTable';
 import { WorkspacePreferencesTab } from './WorkspacePreferencesTab';
 
@@ -139,10 +138,8 @@ export interface SettingsModalProps {
   onDeleteGatewayChannel?: (channelId: string, shouldApply?: () => boolean) => void;
   onUpdateArtifact?: (artifactId: string, updates: Partial<Artifact>) => void;
   onDeleteArtifact?: (artifactId: string) => void;
-  onCreateTeammate?: (
-    result: TeammateTabResult,
-    progress?: TeammateCreateProgress
-  ) => Promise<void>;
+  /** Opens the teammate create flow (main's TeammatesTable triggers it directly). */
+  onCreateTeammate?: () => void;
   availableAgents?: AgenticToolOption[];
   branchStorageConfig?: BranchStorageConfig;
 }
@@ -569,9 +566,6 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
                 openDrill({ kind: 'teammates', mode: 'edit', recordId: branch.branch_id })
               }
               onCreateTeammate={onCreateTeammate}
-              availableAgents={availableAgents}
-              onCreateRepo={onCreateRepo}
-              mcpServerById={mcpServerById}
               currentUser={currentUser}
               client={client}
               onClose={onClose}
@@ -597,6 +591,7 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
             artifactById={artifactById}
             branchById={branchById}
             boardById={boardById}
+            userById={userById}
             onUpdate={onUpdateArtifact}
             onDelete={onDeleteArtifact}
             onClose={onClose}

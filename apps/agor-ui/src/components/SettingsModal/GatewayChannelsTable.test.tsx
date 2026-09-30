@@ -1255,7 +1255,9 @@ it.each([false, true])(
     rerender(
       <MemoryRouter>
         <AntdApp>
-          {table(new Map([['unrelated', { ...makeBranch(), branch_id: 'unrelated' } as Branch]]))}
+          <StandaloneSettingsDrillProvider>
+            {table(new Map([['unrelated', { ...makeBranch(), branch_id: 'unrelated' } as Branch]]))}
+          </StandaloneSettingsDrillProvider>
         </AntdApp>
       </MemoryRouter>
     );
