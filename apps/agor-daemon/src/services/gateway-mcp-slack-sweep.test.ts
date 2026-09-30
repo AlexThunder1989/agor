@@ -62,6 +62,12 @@ vi.mock('@agor/core/gateway', async () => {
   };
 });
 
+const tenantAccess = vi.hoisted(() => ({ active: true }));
+vi.mock('../auth/tenant-access.js', async () => ({
+  ...(await vi.importActual<Record<string, unknown>>('../auth/tenant-access.js')),
+  isCurrentTenantRuntimeActive: async () => tenantAccess.active,
+}));
+
 import { GatewayService } from './gateway.js';
 
 const TENANT = 'default';
@@ -95,6 +101,7 @@ const services: GatewayService[] = [];
 afterEach(async () => {
   for (const service of services.splice(0)) await service.stopListeners();
   sent.messages.length = 0;
+  tenantAccess.active = true;
 });
 
 /**
@@ -404,6 +411,24 @@ describe('Slack MCP connect bounded repair sweep', () => {
     } finally {
       warn.mockRestore();
     }
+  }, 30_000);
+
+  it('starts no repair pass for a restricted tenant and keeps its marker', async () => {
+    const harness = await createSweepHarness();
+    const widgetId = await harness.seedWidget({
+      channelId: harness.aligned.id,
+      slackChannelId: 'C500',
+      requestedAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+
+    tenantAccess.active = false;
+    await harness.sweep();
+    expect(sent.messages).toHaveLength(0);
+    expect((await harness.widget(widgetId))?.slack_connect_due_at).toEqual(expect.any(String));
+
+    tenantAccess.active = true;
+    await harness.sweep();
+    expect(sent.messages).toHaveLength(1);
   }, 30_000);
 
   it('does not post a second card on the next sweep', async () => {

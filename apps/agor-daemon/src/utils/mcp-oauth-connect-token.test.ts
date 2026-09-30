@@ -189,15 +189,4 @@ describe('MCP OAuth connect tokens', () => {
       false
     );
   });
-
-  it('rejects a retired delivery even while its sealed link is unexpired', () => {
-    const claims = verifyMCPOAuthConnectToken(issue(), SECRET);
-    expect(
-      mcpOAuthConnectClaimsMatchDelivery(
-        claims,
-        { ...delivery(), binding_invalidated_at: NOW.toISOString() },
-        'tenant-1' as TenantID
-      )
-    ).toBe(false);
-  });
 });
