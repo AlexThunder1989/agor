@@ -17,12 +17,17 @@
  * `agorStore.getState().<map>` while load-state reads stay on `result.current`.
  */
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getRevision } from '../store/agorHydration';
 import { agorStore } from '../store/agorStore';
 // Session `patched`/`updated` writes are coalesced to one flush per frame (see
 // realtimeBatch); flush synchronously in tests that assert the post-patch store.
 import { flushRealtimeNow } from '../store/realtimeBatch';
+import {
+  beginInitialLoadDebug,
+  getInitialLoadDebugTimer,
+  type InitialLoadDebugTimings,
+} from '../utils/initialLoadDebug';
 import { useAgorData } from './useAgorData';
 
 const STANDALONE_AUTHORITY_SCOPE = '__standalone__:__standalone__:0';
@@ -51,7 +56,7 @@ type Listener = (payload: unknown) => void;
  * so a method-specific key (`sessions:findAll`, `sessions:find`) takes
  * precedence over the bare name when present. `name:get` seeds `get`.
  */
-function makeMockClient(seed: Record<string, unknown[]> = {}) {
+function makeMockClient(seed: Record<string, unknown> = {}) {
   const serviceListeners = new Map<string, Map<string, Listener[]>>();
   const ioListeners = new Map<string, Listener[]>();
   // Side effects fired at call time of `service(name)[method]()` — used by the
@@ -1383,4 +1388,171 @@ describe('session MCP initialization events', () => {
       expect(agorStore.getState().sessionMcpServerIds.size).toBe(0);
     }
   );
+});
+
+describe('opt-in initial-load blocker tracing', () => {
+  const snapshot = () =>
+    (window as Window & { __AGOR_INITIAL_LOAD_TIMINGS__?: InitialLoadDebugTimings })
+      .__AGOR_INITIAL_LOAD_TIMINGS__;
+  afterEach(() => {
+    getInitialLoadDebugTimer()?.discard();
+    window.localStorage.clear();
+    window.history.replaceState({}, '', '/');
+    delete (window as Window & { __AGOR_INITIAL_LOAD_TIMINGS__?: InitialLoadDebugTimings })
+      .__AGOR_INITIAL_LOAD_TIMINGS__;
+  });
+  it('records actual starts for both previously hidden board blockers, not just recent sessions', async () => {
+    window.history.replaceState({}, '', '/b/displayed/?debugLoad=1');
+    const board = { board_id: '01a012d8-1b9b-7909-b6f4-2024dfc7c51e', slug: 'displayed' };
+    const { client, onFetch } = makeMockClient({ boards: [board] });
+    let releaseLight!: () => void;
+    let releaseSessions!: () => void;
+    let releaseBoard!: () => void;
+    onFetch('boards', 'findAll', (call) =>
+      call === 1
+        ? new Promise<void>((r) => {
+            releaseLight = r;
+          })
+        : undefined
+    );
+    onFetch('sessions', 'findAll', (call) =>
+      call === 1
+        ? new Promise<void>((r) => {
+            releaseSessions = r;
+          })
+        : undefined
+    );
+    onFetch(
+      'boards',
+      'get',
+      () =>
+        new Promise<void>((r) => {
+          releaseBoard = r;
+        })
+    );
+    beginInitialLoadDebug();
+    const { result } = renderHook(() => useAgorData(client));
+    await waitFor(() =>
+      expect(snapshot()?.fetches.find((row) => row.key === 'sessions')?.status).toBe('success')
+    );
+    expect(snapshot()?.fetches.find((row) => row.key === 'board-sessions')?.status).toBe('queued');
+    act(() => releaseLight());
+    await waitFor(() =>
+      expect(snapshot()?.fetches.find((row) => row.key === 'board-sessions')?.status).toBe(
+        'pending'
+      )
+    );
+    expect(snapshot()?.fetches.find((row) => row.key === 'displayed-board')?.status).toBe(
+      'pending'
+    );
+    expect(result.current.loading).toBe(true);
+    act(() => releaseSessions());
+    await waitFor(() =>
+      expect(snapshot()?.fetches.find((row) => row.key === 'board-sessions')?.status).toBe(
+        'success'
+      )
+    );
+    expect(result.current.loading).toBe(true);
+    act(() => releaseBoard());
+    await waitForInitialLoad(result);
+    expect(snapshot()?.stageTransitions.map((row) => row.stage)).toContain('data-ready');
+    expect(snapshot()?.fetches.find((row) => row.key === 'direct-session')?.status).toBe('skipped');
+  });
+
+  it.each(['session', 'branch'] as const)(
+    'traces direct %s lookup failures even though load recovers',
+    async (kind) => {
+      window.history.replaceState(
+        {},
+        '',
+        `/${kind === 'session' ? 's' : 'w'}/missing/?debugLoad=1`
+      );
+      const { client, onFetch } = makeMockClient();
+      onFetch(kind === 'session' ? 'sessions' : 'branches', 'get', () =>
+        Promise.reject(new Error('private server error'))
+      );
+      beginInitialLoadDebug();
+      const { result } = renderHook(() =>
+        useAgorData(client, { directSessionId: kind === 'session' ? 'missing' : null })
+      );
+      await waitForInitialLoad(result);
+      expect(snapshot()?.fetches.find((row) => row.key === `direct-${kind}`)?.status).toBe('error');
+      expect(snapshot()?.status).toBe('pending'); // data ready is not presentation ready
+      expect(JSON.stringify(snapshot())).not.toContain('private');
+    }
+  );
+
+  it('discards pending diagnostics on auth generation replacement and ignores late completion', async () => {
+    window.history.replaceState({}, '', '/?debugLoad=1');
+    const { client, onFetch } = makeMockClient();
+    let release!: () => void;
+    onFetch('boards', 'findAll', (call) =>
+      call === 1
+        ? new Promise<void>((r) => {
+            release = r;
+          })
+        : undefined
+    );
+    beginInitialLoadDebug();
+    const { rerender } = renderHook(
+      ({ generation }) =>
+        useAgorData(client, {
+          authenticatedUserId: 'user',
+          authenticatedUserRole: 'admin',
+          authGeneration: generation,
+          connectionReady: true,
+        }),
+      { initialProps: { generation: 1 } }
+    );
+    await waitFor(() =>
+      expect(snapshot()?.fetches.find((row) => row.key === 'boards')?.status).toBe('pending')
+    );
+    rerender({ generation: 2 });
+    expect(snapshot()?.status).toBe('discarded');
+    const copy = JSON.stringify(snapshot());
+    await act(async () => release());
+    expect(JSON.stringify(snapshot())).toBe(copy);
+  });
+
+  it.each(['displayed-board', 'board-sessions'] as const)(
+    'records %s failure without changing its recovery policy',
+    async (key) => {
+      window.history.replaceState({}, '', '/b/displayed/?debugLoad=1');
+      const { client, onFetch } = makeMockClient({
+        boards: [{ board_id: '01a012d8-1b9b-7909-b6f4-2024dfc7c51e', slug: 'displayed' }],
+      });
+      onFetch(
+        key === 'displayed-board' ? 'boards' : 'sessions',
+        key === 'displayed-board' ? 'get' : 'findAll',
+        (call) => (call === 1 ? Promise.reject(new Error('private failure')) : undefined)
+      );
+      beginInitialLoadDebug();
+      const { result } = renderHook(() => useAgorData(client));
+      await waitFor(() =>
+        expect(snapshot()?.fetches.find((row) => row.key === key)?.status).toBe('error')
+      );
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      if (key === 'displayed-board') {
+        expect(result.current.error).toBeNull();
+        expect(snapshot()?.status).toBe('pending');
+        expect(snapshot()?.stageTransitions.map((row) => row.stage)).toContain('data-ready');
+      } else {
+        expect(result.current.error).toBe('private failure');
+        expect(snapshot()?.status).toBe('error');
+        expect(snapshot()?.stageTransitions.map((row) => row.stage)).not.toContain('data-ready');
+      }
+      expect(JSON.stringify(snapshot())).not.toContain('private failure');
+    }
+  );
+
+  it('does not create diagnostics for debug-off startup or silent reconnects', async () => {
+    const { client, emitIo } = makeMockClient();
+    beginInitialLoadDebug();
+    const { result } = renderHook(() => useAgorData(client));
+    await waitForInitialLoad(result);
+    expect(snapshot()).toBeUndefined();
+    window.history.replaceState({}, '', '/?debugLoad=1');
+    await act(async () => emitIo('connect'));
+    expect(snapshot()).toBeUndefined();
+  });
 });

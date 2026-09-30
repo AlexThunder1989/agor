@@ -8,10 +8,11 @@ export interface InitialLoadDebugItem {
 export interface InitialLoadDebugFetchTiming {
   key: string;
   label: string;
-  durationMs: number;
+  startMs: number | null;
+  endMs: number | null;
+  durationMs: number | null;
   count: number | null;
-  status: 'success' | 'error';
-  error?: string;
+  status: 'queued' | 'pending' | 'success' | 'error' | 'skipped' | 'not-started' | 'abandoned';
 }
 
 export interface InitialLoadDebugStageTransition {
@@ -22,11 +23,11 @@ export interface InitialLoadDebugStageTransition {
 export interface InitialLoadDebugTimings {
   label: string;
   startedAt: string;
+  navigationToStartMs: number;
   totalMs: number;
   fetchPhaseMs: number | null;
   indexingMs: number | null;
-  status: 'success' | 'error';
-  error?: string;
+  status: 'pending' | 'success' | 'error' | 'discarded';
   fetches: InitialLoadDebugFetchTiming[];
   stageTransitions: InitialLoadDebugStageTransition[];
 }
@@ -48,10 +49,6 @@ function getNow(): number {
 
 function roundMs(ms: number): number {
   return Math.round(ms * 10) / 10;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 export function syncInitialLoadDebugFlagFromUrl(win = getWindow()): boolean {
@@ -81,100 +78,192 @@ export function isInitialLoadDebugEnabled(): boolean {
   return syncInitialLoadDebugFlagFromUrl();
 }
 
-export function createInitialLoadDebugTimer(items: readonly InitialLoadDebugItem[]) {
+// One bounded, in-memory startup snapshot. No Performance entries, request bodies,
+// IDs, URLs, error messages, or persistent metrics. Promise tracking never cancels
+// application work; discard only fences diagnostic continuations.
+export type InitialLoadDebugTimer = ReturnType<typeof createInitialLoadDebugTimer>;
+let activeTimer: InitialLoadDebugTimer | null = null;
+
+export function getInitialLoadDebugTimer() {
+  return activeTimer;
+}
+
+export function beginInitialLoadDebug() {
+  activeTimer?.discard();
+  activeTimer = isInitialLoadDebugEnabled()
+    ? createInitialLoadDebugTimer(
+        [],
+        /\/(s|m\/session)\//.test(getWindow()?.location.pathname ?? '')
+          ? 'conversation'
+          : /\/(b|w|m\/board)\//.test(getWindow()?.location.pathname ?? '')
+            ? 'board'
+            : 'home'
+      )
+    : null;
+  return activeTimer;
+}
+
+export function createInitialLoadDebugTimer(
+  items: readonly InitialLoadDebugItem[],
+  target?: 'home' | 'board' | 'conversation'
+) {
   const start = getNow();
-  const startedAt = new Date().toISOString();
-  const labels = new Map(items.map((item) => [item.key, item.label]));
-  const fetches: InitialLoadDebugFetchTiming[] = [];
-  const stageTransitions: InitialLoadDebugStageTransition[] = [];
-  let fetchStart: number | null = null;
-  let fetchEnd: number | null = null;
-  let indexingStart: number | null = null;
-  let indexingEnd: number | null = null;
-
-  const markStage = (stage: string) => {
-    stageTransitions.push({ stage, atMs: roundMs(getNow() - start) });
+  const timings: InitialLoadDebugTimings = {
+    label: 'Agor initial load',
+    startedAt: new Date().toISOString(),
+    // performance.now is relative to navigation in browsers. This explicitly
+    // exposes time BEFORE App mounted, rather than calling data-fetch time E2E.
+    navigationToStartMs: roundMs(start),
+    totalMs: 0,
+    fetchPhaseMs: null,
+    indexingMs: null,
+    status: 'pending',
+    fetches: [],
+    stageTransitions: [],
   };
-
-  return {
+  let closed = false;
+  let fetchStart: number | null = null;
+  let indexingStart: number | null = null;
+  const elapsed = () => roundMs(getNow() - start);
+  const publish = () => {
+    if (closed) return;
+    timings.totalMs = elapsed();
+    const win = getWindow();
+    if (win) win.__AGOR_INITIAL_LOAD_TIMINGS__ = timings;
+  };
+  const queue = (entries: readonly InitialLoadDebugItem[]) => {
+    if (closed) return;
+    for (const item of entries) {
+      if (timings.fetches.length >= 32 || timings.fetches.some((row) => row.key === item.key))
+        continue;
+      timings.fetches.push({
+        ...item,
+        startMs: null,
+        endMs: null,
+        durationMs: null,
+        count: null,
+        status: 'queued',
+      });
+    }
+    publish();
+  };
+  const markStage = (stage: string) => {
+    if (
+      closed ||
+      timings.stageTransitions.length >= 64 ||
+      timings.stageTransitions.some((row) => row.stage === stage)
+    )
+      return;
+    timings.stageTransitions.push({ stage, atMs: elapsed() });
+    publish();
+  };
+  const settle = (status: 'success' | 'error' | 'discarded') => {
+    if (closed) return timings;
+    for (const row of timings.fetches) {
+      if (row.status === 'queued') row.status = 'not-started';
+      else if (row.status === 'pending') {
+        row.status = 'abandoned';
+        row.endMs = elapsed();
+        row.durationMs = roundMs(row.endMs - row.startMs!);
+      }
+    }
+    timings.status = status;
+    publish();
+    closed = true;
+    if (activeTimer === timer) activeTimer = null;
+    return timings;
+  };
+  const timer = {
+    queue,
     markStage,
+    surfaceReady(surface: 'home' | 'board' | 'conversation') {
+      markStage(`${surface}-paint-opportunity`);
+      if (surface === target) timer.finish('success');
+    },
+    skip(key: string) {
+      if (closed) return;
+      const row = timings.fetches.find((row) => row.key === key);
+      if (row?.status === 'queued') row.status = 'skipped';
+      publish();
+    },
     startFetchPhase() {
-      fetchStart = getNow();
+      if (!closed) fetchStart = getNow();
     },
     endFetchPhase() {
-      fetchEnd = getNow();
+      if (!closed && fetchStart !== null) timings.fetchPhaseMs = roundMs(getNow() - fetchStart);
+      publish();
     },
     startIndexing() {
-      indexingStart = getNow();
+      if (!closed) indexingStart = getNow();
     },
     endIndexing() {
-      indexingEnd = getNow();
+      if (!closed && indexingStart !== null) timings.indexingMs = roundMs(getNow() - indexingStart);
+      publish();
     },
-    track<T extends ReadonlyArray<unknown>>(key: string, promise: Promise<T>): Promise<T> {
-      const itemStart = getNow();
-      return promise.then(
-        (result) => {
-          fetches.push({
-            key,
-            label: labels.get(key) ?? key,
-            durationMs: roundMs(getNow() - itemStart),
-            count: result.length,
-            status: 'success',
-          });
-          return result;
-        },
-        (error) => {
-          fetches.push({
-            key,
-            label: labels.get(key) ?? key,
-            durationMs: roundMs(getNow() - itemStart),
-            count: null,
-            status: 'error',
-            error: errorMessage(error),
-          });
-          throw error;
-        }
-      );
-    },
-    finish(status: 'success' | 'error', error?: unknown): InitialLoadDebugTimings {
-      const timings: InitialLoadDebugTimings = {
-        label: 'Agor initial load',
-        startedAt,
-        totalMs: roundMs(getNow() - start),
-        fetchPhaseMs: fetchStart === null ? null : roundMs((fetchEnd ?? getNow()) - fetchStart),
-        indexingMs:
-          indexingStart === null ? null : roundMs((indexingEnd ?? getNow()) - indexingStart),
-        status,
-        error: error === undefined ? undefined : errorMessage(error),
-        fetches: [...fetches].sort((a, b) => a.key.localeCompare(b.key)),
-        stageTransitions: [...stageTransitions],
+    track<T>(key: string, request: () => Promise<T>): Promise<T> {
+      queue([{ key, label: key }]);
+      const row = closed
+        ? undefined
+        : timings.fetches.find((row) => row.key === key && row.status === 'queued');
+      if (row) {
+        row.startMs = elapsed();
+        row.status = 'pending';
+        publish();
+      }
+      const end = (status: 'success' | 'error', result?: T) => {
+        if (closed || !row) return;
+        row.endMs = elapsed();
+        row.durationMs = roundMs(row.endMs - row.startMs!);
+        row.status = status;
+        row.count =
+          status === 'success'
+            ? Array.isArray(result)
+              ? result.length
+              : result == null
+                ? 0
+                : 1
+            : null;
+        publish();
       };
-
-      const win = getWindow();
-      if (win) {
-        win.__AGOR_INITIAL_LOAD_TIMINGS__ = timings;
+      // Start immediately, preserving the caller's existing scheduling, including
+      // synchronous throws. Rejections propagate unchanged without copying errors.
+      try {
+        return request().then(
+          (result) => {
+            end('success', result);
+            return result;
+          },
+          (error) => {
+            end('error');
+            throw error;
+          }
+        );
+      } catch (error) {
+        end('error');
+        throw error;
       }
-
-      if (typeof console !== 'undefined') {
-        const group = console.groupCollapsed ?? console.group;
-        group?.call(console, '[Agor initial load]', {
-          status: timings.status,
-          totalMs: timings.totalMs,
-          fetchPhaseMs: timings.fetchPhaseMs,
-          indexingMs: timings.indexingMs,
-        });
-        console.table?.(timings.fetches);
-        if (timings.stageTransitions.length > 0) {
-          console.log('stageTransitions', timings.stageTransitions);
-        }
-        if (timings.error) {
-          console.warn('[Agor initial load] failed', timings.error);
-        }
-        console.log('Copy from window.__AGOR_INITIAL_LOAD_TIMINGS__', timings);
-        console.groupEnd?.();
-      }
-
+    },
+    discard() {
+      return settle('discarded');
+    },
+    finish(status: 'success' | 'error'): InitialLoadDebugTimings {
+      if (closed) return timings;
+      settle(status);
+      console.groupCollapsed?.('[Agor initial load]', { status, totalMs: timings.totalMs });
+      console.table?.(timings.fetches);
+      console.log('Copy from window.__AGOR_INITIAL_LOAD_TIMINGS__', timings);
+      console.groupEnd?.();
       return timings;
     },
   };
+  queue(items);
+  return timer;
+}
+
+/** Two animation frames are only a paint OPPORTUNITY, never proof of paint. */
+export function afterInitialLoadPaintOpportunity(callback: () => void): () => void {
+  let frame = requestAnimationFrame(() => {
+    frame = requestAnimationFrame(callback);
+  });
+  return () => cancelAnimationFrame(frame);
 }

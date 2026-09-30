@@ -50,7 +50,7 @@ describe('initial load debug timer', () => {
     const timer = createInitialLoadDebugTimer([{ key: 'sessions', label: 'Sessions' }]);
     timer.markStage('fetching');
     timer.startFetchPhase();
-    await timer.track('sessions', Promise.resolve([{}, {}]));
+    await timer.track('sessions', () => Promise.resolve([{}, {}]));
     timer.endFetchPhase();
     timer.markStage('indexing');
     timer.startIndexing();
@@ -83,14 +83,122 @@ describe('initial load debug timer', () => {
 
     const timer = createInitialLoadDebugTimer([{ key: 'branches', label: 'Branches' }]);
 
-    await expect(timer.track('branches', Promise.reject(new Error('boom')))).rejects.toThrow(
+    await expect(timer.track('branches', () => Promise.reject(new Error('boom')))).rejects.toThrow(
       'boom'
     );
 
-    const timings = timer.finish('error', new Error('boom'));
-    expect(timings).toMatchObject({ status: 'error', error: 'boom' });
+    const timings = timer.finish('error');
+    expect(timings).toMatchObject({ status: 'error' });
     expect(timings.fetches).toMatchObject([
-      { key: 'branches', label: 'Branches', count: null, status: 'error', error: 'boom' },
+      { key: 'branches', label: 'Branches', count: null, status: 'error' },
     ]);
+  });
+});
+
+describe('startup lifecycle', () => {
+  it('distinguishes queued, pending, skipped and failed work; redacts errors', async () => {
+    const timer = createInitialLoadDebugTimer([
+      { key: 'light', label: 'Light' },
+      { key: 'heavy', label: 'Heavy' },
+      { key: 'optional', label: 'Optional' },
+      { key: 'failed', label: 'Failed' },
+    ]);
+    let resolve!: (rows: unknown[]) => void;
+    const pending = timer.track(
+      'light',
+      () =>
+        new Promise<unknown[]>((r) => {
+          resolve = r;
+        })
+    );
+    const snapshot = () =>
+      (window as Window & { __AGOR_INITIAL_LOAD_TIMINGS__?: InitialLoadDebugTimings })
+        .__AGOR_INITIAL_LOAD_TIMINGS__!;
+    expect(snapshot().fetches.map((row) => row.status)).toEqual([
+      'pending',
+      'queued',
+      'queued',
+      'queued',
+    ]);
+    expect(snapshot().fetches[0].startMs).not.toBeNull();
+    expect(snapshot().fetches[1].startMs).toBeNull();
+    timer.skip('optional');
+    await expect(
+      timer.track('failed', () => Promise.reject(new Error('SECRET user-content')))
+    ).rejects.toThrow('SECRET');
+    const result = timer.finish('error');
+    expect(result.fetches.map((row) => row.status)).toEqual([
+      'abandoned',
+      'not-started',
+      'skipped',
+      'error',
+    ]);
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('SECRET');
+    resolve([{}]);
+    await pending;
+    timer.markStage('late');
+    expect(JSON.stringify(result)).toBe(serialized);
+  });
+
+  it('separates frame wait from synchronous index work', () => {
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const timer = createInitialLoadDebugTimer([]);
+    timer.markStage('index-frame-wait-start');
+    now = 40;
+    timer.markStage('index-frame-wait-end');
+    timer.startIndexing();
+    now = 45;
+    timer.endIndexing();
+    const result = timer.finish('success');
+    expect(result.indexingMs).toBe(5);
+    expect(result.stageTransitions).toEqual([
+      { stage: 'index-frame-wait-start', atMs: 0 },
+      { stage: 'index-frame-wait-end', atMs: 40 },
+    ]);
+  });
+
+  it('keeps data readiness distinct from conversation readiness and paint proxy', () => {
+    const timer = createInitialLoadDebugTimer([], 'conversation');
+    timer.markStage('data-ready');
+    timer.surfaceReady('board');
+    timer.markStage('conversation-ready-commit');
+    const snapshot = (
+      window as Window & { __AGOR_INITIAL_LOAD_TIMINGS__?: InitialLoadDebugTimings }
+    ).__AGOR_INITIAL_LOAD_TIMINGS__!;
+    expect(snapshot.status).toBe('pending');
+    timer.surfaceReady('conversation');
+    expect(snapshot.status).toBe('success');
+    expect(snapshot.stageTransitions.map((row) => row.stage)).toEqual([
+      'data-ready',
+      'board-paint-opportunity',
+      'conversation-ready-commit',
+      'conversation-paint-opportunity',
+    ]);
+  });
+
+  it('bounds snapshots and ignores discarded completions', async () => {
+    const timer = createInitialLoadDebugTimer([]);
+    for (let i = 0; i < 100; i++) {
+      timer.queue([{ key: `key${i}`, label: 'bounded' }]);
+      timer.markStage(`stage${i}`);
+    }
+    let resolve!: () => void;
+    const pending = timer.track(
+      'key0',
+      () =>
+        new Promise<void>((r) => {
+          resolve = r;
+        })
+    );
+    const snapshot = timer.discard();
+    const copy = JSON.stringify(snapshot);
+    resolve();
+    await pending;
+    expect(JSON.stringify(snapshot)).toBe(copy);
+    expect(snapshot.fetches).toHaveLength(32);
+    expect(snapshot.stageTransitions).toHaveLength(64);
+    expect(snapshot.status).toBe('discarded');
   });
 });

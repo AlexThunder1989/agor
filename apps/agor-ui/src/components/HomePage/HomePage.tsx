@@ -4,6 +4,7 @@ import { Button, Dropdown, Layout, Modal, Segmented, Select, Space, Typography, 
 import type React from 'react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_BACKGROUNDS } from '../../constants/ui';
+import { useInitialLoadReadiness } from '../../hooks/useInitialLoadReadiness';
 import {
   type AgorState,
   agorStore,
@@ -135,6 +136,7 @@ const HomeOnboarding: React.FC<{
 };
 
 export const HomePage = memo(function HomePage(props: HomePageProps) {
+  useInitialLoadReadiness('home', true);
   const { token } = theme.useToken();
   const homeBackground = DEFAULT_BACKGROUNDS[isDarkTheme(token) ? 'dark' : 'light'];
 

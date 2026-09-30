@@ -1648,8 +1648,8 @@ export class BranchRepository implements BaseRepository<Branch, Partial<Branch>>
   /**
    * Enrich multiple branches with zone information (batch operation)
    *
-   * Uses a single efficient query with LEFT JOINs to fetch board_objects + boards.
-   * No N+1 queries - all data fetched in one round trip to the database.
+   * Fetches placements, then board data once per distinct board in bounded batches.
+   * Avoids decoding the same (potentially large) board JSON per branch placement.
    *
    * IMPORTANT: This only enriches branches that have board_objects entries.
    * Branches on a board but not yet positioned (no board_object) will not have zone info.
@@ -1673,7 +1673,7 @@ export class BranchRepository implements BaseRepository<Branch, Partial<Branch>>
         return branches;
       }
 
-      // Single query with LEFT JOINs to get board_objects and boards
+      // Fetch lightweight placements without repeating boards.data for every row
       // NOTE: This only fetches branches that have board_objects entries.
       // Branches on a board without board_objects (not positioned yet) won't appear here.
       // This is correct - no board_object means no zone assignment.
@@ -1685,12 +1685,35 @@ export class BranchRepository implements BaseRepository<Branch, Partial<Branch>>
         object_id: boardObjectsTable.object_id,
         zone_id: jsonExtract(this.db, boardObjectsTable.data, 'zone_id'),
         position: jsonExtract(this.db, boardObjectsTable.data, 'position'),
-        board_data: boardsTable.data,
+        board_id: boardObjectsTable.board_id,
       })
         .from(boardObjectsTable)
-        .leftJoin(boardsTable, eq(boardObjectsTable.board_id, boardsTable.board_id))
         .where(inArray(boardObjectsTable.branch_id, branchIds))
         .all();
+
+      // Use the same scoped handle for both reads (PostgreSQL RLS / tenant units).
+      // Only placements with zone references need board JSON. Keep JavaScript key
+      // lookup: zone IDs are arbitrary strings, not SQL JSON paths. Do not reorder
+      // placements; the existing last-placement-wins behavior remains unchanged.
+      const distinctBoardIds = new Set<string>();
+      for (const row of rows) {
+        if (row.zone_id) distinctBoardIds.add(row.board_id);
+      }
+      const boardIds = [...distinctBoardIds];
+      const boardDataById = new Map<
+        string,
+        { objects?: Record<string, { type: string; label?: string }> }
+      >();
+      for (let offset = 0; offset < boardIds.length; offset += 500) {
+        const boardRows = await select(this.db, {
+          board_id: boardsTable.board_id,
+          data: boardsTable.data,
+        })
+          .from(boardsTable)
+          .where(inArray(boardsTable.board_id, boardIds.slice(offset, offset + 500)))
+          .all();
+        for (const board of boardRows) boardDataById.set(board.board_id, board.data);
+      }
 
       // Build a map of branch_id -> board object info for O(1) lookup
       const boardObjectInfoByBranch = new Map<
@@ -1729,9 +1752,7 @@ export class BranchRepository implements BaseRepository<Branch, Partial<Branch>>
         if (row.zone_id) {
           info.zone_id = row.zone_id;
 
-          const boardData = row.board_data as {
-            objects?: Record<string, { type: string; label?: string }>;
-          } | null;
+          const boardData = boardDataById.get(row.board_id);
 
           const zone = boardData?.objects?.[row.zone_id];
           info.zone_label = zone?.type === 'zone' ? zone.label : undefined;

@@ -49,6 +49,7 @@ import {
   useEdgesState,
   useNodesState,
 } from 'reactflow';
+import { useInitialLoadReadiness } from '../../hooks/useInitialLoadReadiness';
 import {
   type EntityPlacementIntent,
   EntityPlacementWrites,
@@ -1120,6 +1121,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
     const reactFlowWrapperRef = useRef<HTMLDivElement | null>(null);
     // Track when ReactFlow instance is ready (state to trigger re-renders)
     const [isReactFlowReady, setIsReactFlowReady] = useState(false);
+    useInitialLoadReadiness('board', isReactFlowReady && !!board);
 
     // Track which board we last fit the view for (prevents repeated fitView on node changes)
     const lastFitBoardIdRef = useRef<string | null>(null);

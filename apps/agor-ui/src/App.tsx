@@ -33,7 +33,16 @@ import {
   sessionPath,
 } from '@agor-live/client';
 import { Alert, ConfigProvider, theme } from 'antd';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { AVAILABLE_AGENTS } from './components/AgentSelectionGrid';
 import { resolveAvailableUserAgenticTool } from './components/AgentSelectionGrid/availableAgents';
@@ -106,6 +115,7 @@ import {
   hasObservedOnboardingCompletion,
 } from './utils/currentUserAuthority';
 import { completeLocalPasswordChange } from './utils/forcePasswordChange';
+import { beginInitialLoadDebug, getInitialLoadDebugTimer } from './utils/initialLoadDebug';
 import { useThemedMessage } from './utils/message';
 import { buildCompletedOnboardingPreferences } from './utils/onboardingGoals';
 import {
@@ -294,6 +304,18 @@ function AppContent() {
   const { showSuccess, showError, showWarning, showLoading, destroy } = useThemedMessage();
   const navigate = useNavigate();
   const location = useLocation();
+  const startupPath = useRef(location.pathname);
+  useLayoutEffect(() => {
+    const timer = beginInitialLoadDebug();
+    timer?.markStage('app-mounted');
+    return () => {
+      timer?.discard();
+    };
+  }, []);
+  useLayoutEffect(() => {
+    // This is a cold-start trace, not a navigation or reconnect tracer.
+    if (location.pathname !== startupPath.current) getInitialLoadDebugTimer()?.discard();
+  }, [location.pathname]);
   const { currentSurface, workspaceSurfaceShouldRun } = useWorkspaceSurfaceLifecycle(
     location.pathname
   );
@@ -317,8 +339,11 @@ function AppContent() {
       setRouteModuleReady(false);
     }
 
-    preloadRouteModule(routeModuleKey)
+    const timer = getInitialLoadDebugTimer();
+    const loadModule = () => preloadRouteModule(routeModuleKey);
+    (timer ? timer.track('route-module', loadModule) : loadModule())
       .catch(() => {
+        timer?.finish('error');
         // Let React.lazy/ErrorBoundary surface the route-load failure.
       })
       .finally(() => {
@@ -363,6 +388,23 @@ function AppContent() {
     logoutForAuthorityCycle,
     refreshCurrentUserForAuthorityCycle,
   } = useAuth();
+
+  // Bind diagnostics to the first authenticated owner even before the socket
+  // can start useAgorData. Its request-scope cleanup handles later transitions.
+  const startupAuthority = useRef<{ userId: string; generation: number } | null>(null);
+  useLayoutEffect(() => {
+    const previous = startupAuthority.current;
+    if (
+      previous &&
+      (!authenticated ||
+        previous.userId !== user?.user_id ||
+        previous.generation !== authenticationGeneration)
+    ) {
+      getInitialLoadDebugTimer()?.discard();
+    }
+    if (authenticated && user)
+      startupAuthority.current = { userId: user.user_id, generation: authenticationGeneration };
+  }, [authenticated, user, authenticationGeneration]);
 
   // Call ALL hooks unconditionally BEFORE any conditional returns.
   // Connect to daemon with authentication token (auth is always required —
@@ -533,6 +575,38 @@ function AppContent() {
     // and then pop back to opacity 1 while the lazy route module finishes.
     initialLoadComplete: initialLoadComplete && routeModuleReady,
   });
+
+  useEffect(() => {
+    const timer = getInitialLoadDebugTimer();
+    if (!timer) return;
+    if (!workspaceSurfaceShouldRun) {
+      timer.discard();
+      return;
+    }
+    if (authConfigError || authError || connectionError || dataError) {
+      timer.markStage('startup-gate-error');
+      timer.finish('error');
+      return;
+    }
+    if (!authConfigLoading) timer.markStage('auth-config-ready');
+    if (!authLoading && authenticated) timer.markStage('authenticated');
+    if (connected && !connecting) timer.markStage('socket-ready');
+    if (routeModuleReady) timer.markStage('route-module-ready');
+    timer.markStage(`loader-${loaderPhase}`);
+  }, [
+    workspaceSurfaceShouldRun,
+    authConfigError,
+    authError,
+    connectionError,
+    dataError,
+    authConfigLoading,
+    authLoading,
+    authenticated,
+    connected,
+    connecting,
+    routeModuleReady,
+    loaderPhase,
+  ]);
 
   const workspaceLoadingFallback = (
     <InitialLoadingScreen

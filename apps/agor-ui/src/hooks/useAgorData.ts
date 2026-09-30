@@ -61,7 +61,7 @@ import {
   tombstoneSession,
   untombstoneSession,
 } from '../store/realtimeBatch';
-import { createInitialLoadDebugTimer, isInitialLoadDebugEnabled } from '../utils/initialLoadDebug';
+import { getInitialLoadDebugTimer } from '../utils/initialLoadDebug';
 import { runLatestMCPOAuthStatusRequest } from '../utils/mcpOAuthAttempt';
 import { TOKENS_REFRESHED_EVENT } from '../utils/singleFlightRefresh';
 import {
@@ -83,7 +83,7 @@ import {
 // them. Their realtime subscriptions are still attached immediately in the
 // subscribe effect, so live updates land even before their fetch resolves.
 const INITIAL_LOAD_ITEMS = [
-  { key: 'sessions', label: 'Sessions' },
+  { key: 'sessions', label: 'Recent sessions' },
   { key: 'boards', label: 'Boards' },
   { key: 'board-objects', label: 'Board objects' },
   { key: 'board-comments', label: 'Board comments' },
@@ -354,6 +354,15 @@ export function useAgorData(
     identityRoleKey,
   ]);
 
+  const loadDebugTimerRef = useRef<ReturnType<typeof getInitialLoadDebugTimer>>(null);
+  useLayoutEffect(() => {
+    if (!authorityScopeKey) loadDebugTimerRef.current?.discard();
+    return () => {
+      loadDebugTimerRef.current?.discard();
+      loadDebugTimerRef.current = null;
+    };
+  }, [authorityScopeKey]);
+
   // Reset the shared singleton store once per hook (re)mount, synchronously
   // BEFORE the first store-subscription read below. This mirrors the old per-mount
   // `useState(EMPTY_MAPS)` / `useState(true)` semantics: the store is a module
@@ -479,12 +488,18 @@ export function useAgorData(
           if (authorityIsCurrent()) apply(value);
         });
 
-      const debugTimer =
-        !silent && isInitialLoadDebugEnabled()
-          ? createInitialLoadDebugTimer(INITIAL_LOAD_ITEMS)
-          : null;
-      let debugFinishStatus: 'success' | 'error' | null = null;
-      let debugFinishError: unknown;
+      // App owns the cold-start trace through presentation. Never start a
+      // replacement here after navigation, auth invalidation or a failed gate.
+      const debugTimer = !silent ? getInitialLoadDebugTimer() : null;
+      debugTimer?.queue([
+        ...INITIAL_LOAD_ITEMS,
+        { key: 'direct-session', label: 'Direct session lookup' },
+        { key: 'direct-branch', label: 'Direct branch lookup' },
+        { key: 'board-sessions', label: 'Full selected-board sessions' },
+        { key: 'displayed-board', label: 'Full displayed board' },
+      ]);
+      if (loadDebugTimerRef.current !== debugTimer) loadDebugTimerRef.current?.discard();
+      loadDebugTimerRef.current = debugTimer;
 
       try {
         if (!silent) {
@@ -500,15 +515,18 @@ export function useAgorData(
         // silent (reconnect) refetches so initial-load progress isn't mutated.
         const track = <T extends ReadonlyArray<unknown>>(
           key: InitialLoadItemKey,
-          p: Promise<T>
+          request: () => Promise<T>
         ): Promise<T> => {
-          const timedPromise = debugTimer?.track(key, p) ?? p;
+          const timedPromise = debugTimer ? debugTimer.track(key, request) : request();
           return timedPromise.then((r) => {
             if (!silent && authorityIsCurrent())
               agorStore.getState().setItemCounts((prev) => ({ ...prev, [key]: r.length }));
             return r;
           });
         };
+
+        const traceRequest = <T>(key: string, request: () => Promise<T>): Promise<T> =>
+          debugTimer ? debugTimer.track(key, request) : request();
 
         // ── Background (non-gated) fetches ──────────────────────────────
         // These collections are NOT needed to paint the canvas, so they must
@@ -601,10 +619,11 @@ export function useAgorData(
         // workspace), so they are NOT fetched in full here: sessions are capped
         // at recent-N, branches are deferred to the board-scoped heavy batch, and
         // BOTH full sets are background-hydrated after the gate opens.
+        if (!canListUsers) debugTimer?.skip('users');
+        if (!canUseMemberWorkspaceServices) debugTimer?.skip('board-objects');
         debugTimer?.startFetchPhase();
         const [sessionsList, boardsList, cardTypesList, reposList, usersList] = await Promise.all([
-          track(
-            'sessions',
+          track('sessions', () =>
             silent
               ? // Reconnect resyncs must fully repopulate every board, so they stay
                 // GLOBAL/full (mirrors the heavy + hydration paths below).
@@ -632,8 +651,7 @@ export function useAgorData(
                   })
                   .then((result) => (Array.isArray(result) ? result : result.data))
           ),
-          track(
-            'boards',
+          track('boards', () =>
             // First paint: LEAN list — omit each board's heavy `objects` /
             // `custom_css` annotations (68% of the boards payload — only the
             // displayed board needs them to paint). Metadata still covers the
@@ -646,16 +664,13 @@ export function useAgorData(
               query: { ...(silent ? {} : { lean: true }), $limit: PAGINATION.DEFAULT_LIMIT },
             })
           ),
-          track(
-            'card-types',
+          track('card-types', () =>
             client.service('card-types').findAll({ query: { $limit: PAGINATION.DEFAULT_LIMIT } })
           ),
-          track(
-            'repos',
+          track('repos', () =>
             client.service('repos').findAll({ query: { $limit: PAGINATION.DEFAULT_LIMIT } })
           ),
-          track(
-            'users',
+          track('users', () =>
             canListUsers
               ? client.service('users').findAll({ query: { $limit: PAGINATION.DEFAULT_LIMIT } })
               : Promise.resolve([])
@@ -680,9 +695,9 @@ export function useAgorData(
           !hasIdMatchingPrefix(directSessionId, sessionsList, (s) => s.session_id)
         ) {
           try {
-            const directSession = (await client
-              .service('sessions')
-              .get(directSessionId)) as Session;
+            const directSession = (await traceRequest('direct-session', () =>
+              client.service('sessions').get(directSessionId)
+            )) as Session;
             if (!sessionsList.some((s) => s.session_id === directSession.session_id)) {
               sessionsList.push(directSession);
             }
@@ -711,9 +726,9 @@ export function useAgorData(
             !hasIdMatchingPrefix(parsedPath.token, healedBranches, (b) => b.branch_id)
           ) {
             try {
-              const directBranch = (await client
-                .service('branches')
-                .get(parsedPath.token)) as Branch;
+              const directBranch = (await traceRequest('direct-branch', () =>
+                client.service('branches').get(parsedPath.token)
+              )) as Branch;
               if (!directBranch.archived) healedBranches.push(directBranch);
             } catch {
               // Unresolvable branch link → fall back to a GLOBAL first paint.
@@ -721,6 +736,9 @@ export function useAgorData(
           }
         }
 
+        debugTimer?.skip('direct-session');
+        debugTimer?.skip('direct-branch');
+        debugTimer?.markStage('route-resolution-start');
         // Build the light global Maps + interim session/branch lookups used to
         // resolve the board scope. `interimBranchById` holds only healed branches;
         // the board-scoped set lands in the heavy batch below.
@@ -752,6 +770,12 @@ export function useAgorData(
           : (resolveDisplayedBoardId(pathname, boardsMap, interimBranchById, interimSessionById) ??
             undefined);
 
+        debugTimer?.markStage('route-resolution-end');
+        if (!boardScope || silent) {
+          if (!silent) debugTimer?.skip('branches');
+          debugTimer?.skip('board-sessions');
+          debugTimer?.skip('displayed-board');
+        }
         // ── Essential gated fetches — HEAVY + board-scoped batch ────────
         // Scoped to the first-paint board when resolved (board_id pushes to SQL
         // for sessions / board-objects / board-comments; cards filter it
@@ -767,8 +791,7 @@ export function useAgorData(
           cardsList,
           displayedBoardFull,
         ] = await Promise.all([
-          track(
-            'branches',
+          track('branches', () =>
             silent
               ? client.service('branches').findAll({
                   query: { archived: false, $limit: PAGINATION.DEFAULT_LIMIT },
@@ -785,19 +808,20 @@ export function useAgorData(
           ),
           // Board-scoped sessions: only when a board is displayed and we didn't
           // already fetch the full set (silent path). Merged with the recent
-          // slice below. Not tracked — not part of the loading checklist.
+          // slice below. Traced separately from the unchanged loading checklist.
           !silent && boardScope
-            ? client.service('sessions').findAll({
-                query: {
-                  archived: false,
-                  board_id: boardScope,
-                  $limit: PAGINATION.DEFAULT_LIMIT,
-                  $sort: { updated_at: -1 },
-                },
-              })
+            ? traceRequest('board-sessions', () =>
+                client.service('sessions').findAll({
+                  query: {
+                    archived: false,
+                    board_id: boardScope,
+                    $limit: PAGINATION.DEFAULT_LIMIT,
+                    $sort: { updated_at: -1 },
+                  },
+                })
+              )
             : Promise.resolve([] as Session[]),
-          track(
-            'board-objects',
+          track('board-objects', () =>
             // The daemon intentionally keeps the whole board-objects service at
             // the MEMBER floor (the rows carry editable canvas layout). A global
             // viewer can still read the workspace shell and Marketplace, so an
@@ -812,8 +836,7 @@ export function useAgorData(
                 })
               : Promise.resolve([])
           ),
-          track(
-            'board-comments',
+          track('board-comments', () =>
             client.service('board-comments').findAll({
               query: {
                 $limit: PAGINATION.DEFAULT_LIMIT,
@@ -821,8 +844,7 @@ export function useAgorData(
               },
             })
           ),
-          track(
-            'cards',
+          track('cards', () =>
             client.service('cards').findAll({
               query: {
                 $limit: PAGINATION.DEFAULT_LIMIT,
@@ -834,13 +856,16 @@ export function useAgorData(
           // zones/text/markdown paint at first load — the gated boards fetch
           // above is lean. Only when a board is actually displayed; Home and
           // silent reconnect (boardScope undefined) skip it and let the boards
-          // hydration restore objects. Not tracked — not a loading-checklist item.
+          // hydration restore objects. Traced, but not a loading-checklist item.
           !silent && boardScope
             ? // A failed get degrades gracefully rather than blocking first paint:
               // the displayed board's objects backfill via the boards background
               // hydration a beat later, so one board's annotation fetch failing
               // must not fail or stall the whole load.
-              (client.service('boards').get(boardScope) as Promise<Board>).catch(() => null)
+              traceRequest(
+                'displayed-board',
+                () => client.service('boards').get(boardScope) as Promise<Board>
+              ).catch(() => null)
             : Promise.resolve(null),
         ]);
         if (!authorityIsCurrent()) return false;
@@ -849,7 +874,7 @@ export function useAgorData(
         if (!silent) {
           agorStore.getState().setLoadingStage('indexing');
           debugTimer?.markStage('indexing');
-          debugTimer?.startIndexing();
+          debugTimer?.markStage('index-frame-wait-start');
           // Give the browser one paint opportunity so large instances can
           // visibly advance from "loading lists" to "indexing workspace data"
           // before the synchronous Map construction below.
@@ -866,6 +891,8 @@ export function useAgorData(
         }
         if (!authorityIsCurrent()) return false;
 
+        debugTimer?.markStage('index-frame-wait-end');
+        debugTimer?.startIndexing();
         // Build board object Maps for efficient lookups (shared with the
         // background full-hydration pass so the two index builds stay identical)
         const {
@@ -951,7 +978,7 @@ export function useAgorData(
         // so they're unaffected.
         bumpFirstPaintMergeRevisions();
         debugTimer?.endIndexing();
-        debugFinishStatus = 'success';
+        debugTimer?.markStage('data-ready');
 
         // ── Background full hydration (skip-apply-on-race) ──────────────
         // First paint is now open with ONLY the recent sessions + the displayed
@@ -1128,21 +1155,19 @@ export function useAgorData(
           console.warn('[useAgorData] silent refetch failed:', err);
           lastSilentFetchFailedRef.current = true;
         } else {
-          debugFinishStatus = 'error';
-          debugFinishError = err;
+          debugTimer?.finish('error');
+
           agorStore
             .getState()
             .setError(err instanceof Error ? err.message : 'Failed to fetch data');
         }
         return true;
       } finally {
+        if (!authorityIsCurrent()) debugTimer?.discard();
         if (!silent && authorityIsCurrent()) {
           agorStore.getState().setLoading(false);
           agorStore.getState().setLoadingStage('idle');
           debugTimer?.markStage('idle');
-          if (debugFinishStatus) {
-            debugTimer?.finish(debugFinishStatus, debugFinishError);
-          }
         }
       }
     },

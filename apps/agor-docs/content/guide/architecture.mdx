@@ -52,6 +52,42 @@ Key properties:
 - Agor does not create host accounts, POSIX branch groups, or sudo-impersonate
   executor processes.
 
+## Diagnosing workspace startup
+
+Add `?debugLoad=1` to a Home, board, or direct-session URL and reload. The
+opt-in persists in this browser; `?debugLoad=0` disables it. Inspect
+`window.__AGOR_INITIAL_LOAD_TIMINGS__` during loading or the **Agor initial
+load** console group when it settles. This is a bounded, local diagnostic,
+not telemetry: it contains timings, fixed operation names, statuses and row
+counts, never entity IDs, content, tokens or server error text.
+
+- Request `startMs` / `endMs` are relative to trace creation. `queued` means
+  not started; `pending` means in flight. Conditional lookups can be `skipped`.
+  Full selected-board sessions and the displayed board's full record are
+  separate from the recent-session and lean-board lists. A collection duration
+  covers the entire `findAll` operation, including any pages (not individual
+  network requests). Recovered lookup failures remain visible as `error`.
+- `navigationToStartMs` exposes the time before App mounted. Auth/config/socket
+  gate observations, route-module loading, data readiness, and the existing
+  loader hold/fade phases are distinct. `indexingMs` measures synchronous
+  index construction and store publication, excluding the frame wait.
+- Home readiness is its committed initial content; board readiness requires
+  React Flow initialization with the initially available board data (annotation
+  fetch failures remain visible in the request table). Conversation readiness is
+  the committed initial transcript window after reactive hydration, **not all
+  historical messages**. Background collections are not startup blockers.
+- `*-paint-opportunity` is a two-animation-frame **proxy**, not a measurement
+  of actual browser paint or full interactivity. A successful data fetch alone
+  does not claim the conversation is ready.
+- Navigation, authority changes and unmount discard an unfinished trace;
+  failures settle it. `abandoned` means diagnostic observation ended while a
+  request was pending, not that the request was cancelled. Silent reconnects
+  are excluded. Unsupported surfaces may not reach a surface-ready milestone.
+
+For server-side request time, correlate with the daemon's existing
+`feathers.request.duration_ms` diagnostics. Browser operation durations also
+include transport, decoding and scheduling; they are not server timings.
+
 ## Technology Stack
 
 ### Backend
