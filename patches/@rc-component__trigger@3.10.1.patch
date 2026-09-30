@@ -1,39 +1,79 @@
 diff --git a/es/hooks/useTarget.js b/es/hooks/useTarget.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..a0467b084b20f217c79f032d02ef337666b5765a
+index 0000000000000000000000000000000000000000..babc46a95c9f97e7a9dc7813cb3602adf92bc0ec
 --- /dev/null
 +++ b/es/hooks/useTarget.js
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,101 @@
 +import * as React from 'react';
 +import { getDOM, useLayoutEffect } from '@rc-component/util';
-+// This callback may outlive its owner through a deleted host Fiber.ref.
-+// Give it only an owner-cleared cell, never Trigger's render context or a
-+// state dispatch (whose queue can retain lastRenderedState after unmount).
-+function createTargetRef(cell, targetRef) {
++// DOM ref callbacks may survive their owner through a deleted host Fiber.ref.
++// Retain only owner-cleared cells, never Trigger's render context or a direct
++// state dispatcher (whose queue retains lastRenderedState after unmount).
++function publish(cell, domRef) {
++  const current = cell.current;
++  if (current.update && current.value !== domRef.current) {
++    current.value = domRef.current;
++    current.update(domRef.current);
++  }
++}
++function createTargetRef(cell, domRef) {
 +  return node => {
-+    const nextTarget = getDOM(node);
-+    if (targetRef.current !== nextTarget) {
-+      targetRef.current = nextTarget;
-+      cell.current.update?.(nextTarget);
++    const next = getDOM(node);
++    domRef.current = next;
++    const current = cell.current;
++    const revision = ++current.revision;
++    if (current.update) current.register?.(current.id, next);
++    if (next !== null) {
++      publish(cell, domRef);
++    } else {
++      // Ref replacement detaches and attaches within one commit. Notify the
++      // child ref immediately, but do not publish a transient internal null.
++      // A real descendant-only removal still publishes null after this commit.
++      queueMicrotask(() => {
++        if (cell.current.revision === revision) publish(cell, domRef);
++      });
 +    }
 +  };
 +}
-+function useTarget() {
++function useTarget(parentContext, id) {
 +  const [targetEle, setTargetEle] = React.useState(null);
-+  const cell = React.useRef({ update: setTargetEle });
++  const cell = React.useRef({ update: setTargetEle, value: null, revision: 0,
++    register: parentContext?.registerSubPopup, id });
 +  const externalForwardRef = React.useRef(null);
 +  const setTargetRef = React.useMemo(() => createTargetRef(cell, externalForwardRef), []);
 +  useLayoutEffect(() => {
-+    cell.current.update = setTargetEle;
-+    setTargetEle(externalForwardRef.current);
++    const current = cell.current;
++    current.update = setTargetEle;
++    current.register = parentContext?.registerSubPopup;
++    current.id = id;
++    current.register?.(id, externalForwardRef.current);
++    publish(cell, externalForwardRef);
 +    return () => {
-+      cell.current.update = null;
-+      externalForwardRef.current = null;
++      try {
++        current.register?.(current.id, null);
++      } finally {
++        current.update = null;
++        current.register = null;
++        current.value = null;
++        ++current.revision;
++        externalForwardRef.current = null;
++      }
 +    };
 +  }, []);
++  // Publish only committed context replacements, never a suspended render's.
++  useLayoutEffect(() => {
++    const current = cell.current;
++    const register = parentContext?.registerSubPopup;
++    if (current.register !== register || current.id !== id) {
++      current.register?.(current.id, null);
++      current.register = register;
++      current.id = id;
++      register?.(id, externalForwardRef.current);
++    }
++    publish(cell, externalForwardRef);
++  });
 +  return [targetEle, externalForwardRef, setTargetRef];
 +}
-+
 +// Use React's dependency comparison (the util hook misses single-ref changes)
 +// and preserve cleanup-return refs without retaining Trigger's render context.
 +const supportsRefCleanup = Number(React.version.split('.')[0]) >= 19;
@@ -66,7 +106,7 @@ index 0000000000000000000000000000000000000000..a0467b084b20f217c79f032d02ef3376
 +export { useTargetRef };
 +export default useTarget;
 diff --git a/es/index.js b/es/index.js
-index b14e0c30992cf97c8471b8a53e7004bfea67ee77..0c4875632566edc8fe3735f844ce6881ac2a2590 100644
+index b14e0c30992cf97c8471b8a53e7004bfea67ee77..2bf021071e748169a1d51341e0eca0b63808b8d4 100644
 --- a/es/index.js
 +++ b/es/index.js
 @@ -1,8 +1,9 @@
@@ -80,7 +120,22 @@ index b14e0c30992cf97c8471b8a53e7004bfea67ee77..0c4875632566edc8fe3735f844ce6881
  import Popup from "./Popup";
  import TriggerContext, { UniqueContext } from "./context";
  import useAction from "./hooks/useAction";
-@@ -114,17 +115,7 @@ export function generateTrigger(PortalComponent = Portal) {
+@@ -100,31 +101,11 @@ export function generateTrigger(PortalComponent = Portal) {
+ 
+     // =========================== Popup ============================
+     const id = useId();
+-    const [popupEle, setPopupEle] = React.useState(null);
+-
+-    // Used for forwardRef popup. Not use internal
+-    const externalPopupRef = React.useRef(null);
+-    const setPopupRef = useEvent(node => {
+-      externalPopupRef.current = node;
+-      if (isDOM(node) && popupEle !== node) {
+-        setPopupEle(node);
+-      }
+-      parentContext?.registerSubPopup(id, node);
+-    });
++    const [popupEle, externalPopupRef, setPopupRef] = useTarget(parentContext, id);
  
      // =========================== Target ===========================
      // Use state to control here since `useRef` update not trigger render
@@ -99,7 +154,7 @@ index b14e0c30992cf97c8471b8a53e7004bfea67ee77..0c4875632566edc8fe3735f844ce6881
      const cloneProps = {};
      const inPopupOrChild = useEvent(ele => {
        const childDOM = targetEle;
-@@ -478,7 +469,7 @@ export function generateTrigger(PortalComponent = Portal) {
+@@ -478,7 +459,7 @@ export function generateTrigger(PortalComponent = Portal) {
      useResizeObserver(mergedOpen, targetEle, onTargetResize);
  
      // Compose refs
@@ -110,42 +165,82 @@ index b14e0c30992cf97c8471b8a53e7004bfea67ee77..0c4875632566edc8fe3735f844ce6881
      const triggerNode = /*#__PURE__*/React.cloneElement(child, {
 diff --git a/lib/hooks/useTarget.js b/lib/hooks/useTarget.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..567085c5e3a0b4e1be61f28666ab3d32e9e80222
+index 0000000000000000000000000000000000000000..31c4ebaba6ad54de2431fc89eca4e9d66c7bdecc
 --- /dev/null
 +++ b/lib/hooks/useTarget.js
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,103 @@
 +"use strict";
 +Object.defineProperty(exports, "__esModule", { value: true });
 +const React = require("react");
 +const { getDOM, useLayoutEffect } = require("@rc-component/util");
-+// This callback may outlive its owner through a deleted host Fiber.ref.
-+// Give it only an owner-cleared cell, never Trigger's render context or a
-+// state dispatch (whose queue can retain lastRenderedState after unmount).
-+function createTargetRef(cell, targetRef) {
++// DOM ref callbacks may survive their owner through a deleted host Fiber.ref.
++// Retain only owner-cleared cells, never Trigger's render context or a direct
++// state dispatcher (whose queue retains lastRenderedState after unmount).
++function publish(cell, domRef) {
++  const current = cell.current;
++  if (current.update && current.value !== domRef.current) {
++    current.value = domRef.current;
++    current.update(domRef.current);
++  }
++}
++function createTargetRef(cell, domRef) {
 +  return node => {
-+    const nextTarget = getDOM(node);
-+    if (targetRef.current !== nextTarget) {
-+      targetRef.current = nextTarget;
-+      cell.current.update?.(nextTarget);
++    const next = getDOM(node);
++    domRef.current = next;
++    const current = cell.current;
++    const revision = ++current.revision;
++    if (current.update) current.register?.(current.id, next);
++    if (next !== null) {
++      publish(cell, domRef);
++    } else {
++      // Ref replacement detaches and attaches within one commit. Notify the
++      // child ref immediately, but do not publish a transient internal null.
++      // A real descendant-only removal still publishes null after this commit.
++      queueMicrotask(() => {
++        if (cell.current.revision === revision) publish(cell, domRef);
++      });
 +    }
 +  };
 +}
-+function useTarget() {
++function useTarget(parentContext, id) {
 +  const [targetEle, setTargetEle] = React.useState(null);
-+  const cell = React.useRef({ update: setTargetEle });
++  const cell = React.useRef({ update: setTargetEle, value: null, revision: 0,
++    register: parentContext?.registerSubPopup, id });
 +  const externalForwardRef = React.useRef(null);
 +  const setTargetRef = React.useMemo(() => createTargetRef(cell, externalForwardRef), []);
 +  useLayoutEffect(() => {
-+    cell.current.update = setTargetEle;
-+    setTargetEle(externalForwardRef.current);
++    const current = cell.current;
++    current.update = setTargetEle;
++    current.register = parentContext?.registerSubPopup;
++    current.id = id;
++    current.register?.(id, externalForwardRef.current);
++    publish(cell, externalForwardRef);
 +    return () => {
-+      cell.current.update = null;
-+      externalForwardRef.current = null;
++      try {
++        current.register?.(current.id, null);
++      } finally {
++        current.update = null;
++        current.register = null;
++        current.value = null;
++        ++current.revision;
++        externalForwardRef.current = null;
++      }
 +    };
 +  }, []);
++  // Publish only committed context replacements, never a suspended render's.
++  useLayoutEffect(() => {
++    const current = cell.current;
++    const register = parentContext?.registerSubPopup;
++    if (current.register !== register || current.id !== id) {
++      current.register?.(current.id, null);
++      current.register = register;
++      current.id = id;
++      register?.(id, externalForwardRef.current);
++    }
++    publish(cell, externalForwardRef);
++  });
 +  return [targetEle, externalForwardRef, setTargetRef];
 +}
-+
 +// Use React's dependency comparison (the util hook misses single-ref changes)
 +// and preserve cleanup-return refs without retaining Trigger's render context.
 +const supportsRefCleanup = Number(React.version.split('.')[0]) >= 19;
@@ -178,7 +273,7 @@ index 0000000000000000000000000000000000000000..567085c5e3a0b4e1be61f28666ab3d32
 +exports.useTargetRef = useTargetRef;
 +exports.default = useTarget;
 diff --git a/lib/index.js b/lib/index.js
-index 1727a7fbfb68de729d5937aebbdc96ae809dbb95..29cf6c6b36974341c48d1632a37bea26e56e76c0 100644
+index 1727a7fbfb68de729d5937aebbdc96ae809dbb95..db2b3cceb5f233c97fce434e8c0c2f95a4fc4374 100644
 --- a/lib/index.js
 +++ b/lib/index.js
 @@ -18,6 +18,7 @@ var _util = require("@rc-component/util");
@@ -189,7 +284,22 @@ index 1727a7fbfb68de729d5937aebbdc96ae809dbb95..29cf6c6b36974341c48d1632a37bea26
  var _useAction = _interopRequireDefault(require("./hooks/useAction"));
  var _useAlign = _interopRequireDefault(require("./hooks/useAlign"));
  var _useDelay = _interopRequireDefault(require("./hooks/useDelay"));
-@@ -127,17 +128,7 @@ function generateTrigger(PortalComponent = _portal.default) {
+@@ -113,31 +114,11 @@ function generateTrigger(PortalComponent = _portal.default) {
+ 
+     // =========================== Popup ============================
+     const id = (0, _util.useId)();
+-    const [popupEle, setPopupEle] = React.useState(null);
+-
+-    // Used for forwardRef popup. Not use internal
+-    const externalPopupRef = React.useRef(null);
+-    const setPopupRef = (0, _util.useEvent)(node => {
+-      externalPopupRef.current = node;
+-      if ((0, _util.isDOM)(node) && popupEle !== node) {
+-        setPopupEle(node);
+-      }
+-      parentContext?.registerSubPopup(id, node);
+-    });
++    const [popupEle, externalPopupRef, setPopupRef] = (0, _useTarget.default)(parentContext, id);
  
      // =========================== Target ===========================
      // Use state to control here since `useRef` update not trigger render
@@ -208,7 +318,7 @@ index 1727a7fbfb68de729d5937aebbdc96ae809dbb95..29cf6c6b36974341c48d1632a37bea26
      const cloneProps = {};
      const inPopupOrChild = (0, _util.useEvent)(ele => {
        const childDOM = targetEle;
-@@ -491,7 +482,7 @@ function generateTrigger(PortalComponent = _portal.default) {
+@@ -491,7 +472,7 @@ function generateTrigger(PortalComponent = _portal.default) {
      (0, _resizeObserver.useResizeObserver)(mergedOpen, targetEle, onTargetResize);
  
      // Compose refs

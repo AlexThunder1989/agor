@@ -1,16 +1,20 @@
 import type { TriggerRef } from '@rc-component/trigger/es';
 import TriggerEsm from '@rc-component/trigger/es';
 import TriggerCjs from '@rc-component/trigger/lib';
+import { composeRef } from '@rc-component/util';
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import { Dropdown } from 'antd';
 import {
   Component,
   createRef,
   forwardRef,
+  Profiler,
   type ReactNode,
   type Ref,
   StrictMode,
   Suspense,
   startTransition,
+  useRef,
   useState,
 } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -25,7 +29,8 @@ const Child = forwardRef<HTMLButtonElement, { visible: boolean; name?: string }>
 );
 
 // Exercise the actual installed entrypoints, not a test-only event/DOM workaround.
-// The production GC regression is kept in the private review fixture.
+// Under NODE_ENV=test, util uses a passive layout-effect fallback. Production
+// ordering and GC are validated separately, not inferred from these tests.
 describe.each([
   ['ESM', TriggerEsm],
   ['CJS', TriggerCjs],
@@ -60,6 +65,99 @@ describe.each([
     const remount = render(view(true));
     expect(ownerRef.current?.nativeElement).toBe(screen.getByRole('button'));
     remount.unmount();
+  });
+
+  it('notifies replacement child refs without extra Trigger commits for the same DOM node', () => {
+    const calls = vi.fn();
+    let commits = 0;
+    let bump = () => {};
+    function Parent() {
+      const [, setVersion] = useState(0);
+      bump = () => setVersion((value) => value + 1);
+      const stable = useRef<HTMLButtonElement>(null);
+      // rc-dropdown composes a new child ref on each parent render.
+      return (
+        <Profiler
+          id="trigger"
+          onRender={() => {
+            commits += 1;
+          }}
+        >
+          <Trigger popup={<div>Tip</div>}>
+            <button type="button" ref={composeRef(stable, calls)}>
+              Target
+            </button>
+          </Trigger>
+        </Profiler>
+      );
+    }
+    const { unmount } = render(<Parent />);
+    for (let i = 0; i < 5; i += 1) {
+      calls.mockClear();
+      const before = commits;
+      act(() => bump());
+      // Correct external detach/attach is required; baseline silently keeps stale refs.
+      expect(calls.mock.calls.map(([node]) => (node === null ? 'null' : 'node'))).toEqual([
+        'null',
+        'node',
+      ]);
+      expect(commits - before).toBe(1);
+    }
+    unmount();
+  });
+
+  it('keeps actual Dropdown parent updates to one commit while notifying its child ref', () => {
+    const calls = vi.fn();
+    let commits = 0;
+    const view = (version: number) => (
+      <Profiler
+        id="dropdown"
+        onRender={() => {
+          commits += 1;
+        }}
+      >
+        <Dropdown menu={{ items: [{ key: 'one', label: 'One' }] }}>
+          <button type="button" ref={calls}>
+            Dropdown {version}
+          </button>
+        </Dropdown>
+      </Profiler>
+    );
+    const { rerender, unmount } = render(view(0));
+    for (let i = 1; i <= 5; i += 1) {
+      calls.mockClear();
+      const before = commits;
+      rerender(view(i));
+      expect(calls.mock.calls.map(([node]) => (node === null ? 'null' : 'node'))).toEqual([
+        'null',
+        'node',
+      ]);
+      expect(commits - before).toBe(1);
+    }
+    unmount();
+  });
+
+  it('publishes nativeElement=null after descendant-only target removal', async () => {
+    const owner = createRef<TriggerRef>();
+    let remove = () => {};
+    const Independent = forwardRef<HTMLButtonElement>((_props, ref) => {
+      const [visible, setVisible] = useState(true);
+      remove = () => setVisible(false);
+      return visible ? (
+        <button type="button" ref={ref}>
+          Target
+        </button>
+      ) : null;
+    });
+    const { unmount } = render(
+      <Trigger ref={owner} popup={<div>Tip</div>}>
+        <Independent />
+      </Trigger>
+    );
+    expect(owner.current?.nativeElement).toBe(screen.getByRole('button'));
+    await act(async () => remove());
+    expect(owner.current?.nativeElement).toBeNull();
+    unmount();
   });
 
   it('preserves React 19 cleanup-return semantics on the forwarded owner ref', () => {
