@@ -964,9 +964,7 @@ export function configureRealtimePublish(options: RealtimePublishOptions): void 
       }
     }
 
-    // The exact task termination signal is a safety channel, not ordinary
-    // tenant access. All other publications (including relayed events and
-    // permission/MCP refresh signals) must revalidate durable admission.
+    // Only the exact task termination signal is a safety channel; every other publication revalidates admission.
     let credentialAdmitted = (_connection: unknown) => true;
     if (
       db &&

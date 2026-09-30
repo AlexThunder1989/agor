@@ -6968,8 +6968,7 @@ export class GatewayService {
           if (
             !(await isCurrentTenantEventAdmitted(this.db, gatewayOccurrenceTime(msg.timestamp)))
           ) {
-            // Consume the durable delivery without creating a prompt, downloading
-            // attachments, or materializing a provider thread. Retry dedup remains.
+            // Consume the delivery (retry dedup stays) without prompts, downloads, or provider threads.
             if (eventId && lease) {
               const completed = await this.inboundEventRepo.complete({
                 eventId,
