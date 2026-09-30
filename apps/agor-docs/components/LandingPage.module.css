@@ -3140,7 +3140,7 @@ a.radarBlip {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding-top: 14px;
+  padding: 14px 12px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.18);
   text-decoration: none;
   transition:
@@ -3148,18 +3148,22 @@ a.radarBlip {
     transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-/* Hover wash: a barely-there aqua gradient that fades in behind the item.
- * On a pseudo-element so it can bleed past the text without moving it, and
- * so it fades via opacity (gradients themselves don't transition). */
+/* Hover wash: a barely-there aqua gradient behind the item, exactly as wide
+ * as its rule. On a pseudo-element so it fades via opacity (gradients don't
+ * transition) and unfurls down from the rule on the same curve as the lift. */
 .homeHero a.homeRowItem::before {
   content: "";
   position: absolute;
-  inset: 0 -12px -12px;
+  inset: 0 0 -12px;
   z-index: -1;
   border-radius: 0 0 12px 12px;
   background: linear-gradient(180deg, rgba(69, 196, 187, 0.12), rgba(69, 196, 187, 0.02));
   opacity: 0;
-  transition: opacity 0.25s ease;
+  transform: scaleY(0.4);
+  transform-origin: top;
+  transition:
+    opacity 0.35s ease,
+    transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
   pointer-events: none;
 }
 
@@ -3190,6 +3194,7 @@ a.radarBlip {
 
 .homeHero a.homeRowItem:hover::before {
   opacity: 1;
+  transform: none;
 }
 
 .homeHero a.homeRowItem:hover .homeRowLabel {
@@ -3232,7 +3237,8 @@ a.radarBlip {
     animation: none;
   }
 
-  .homeHero a.homeRowItem:hover {
+  .homeHero a.homeRowItem:hover,
+  .homeHero a.homeRowItem::before {
     transform: none;
   }
 }
