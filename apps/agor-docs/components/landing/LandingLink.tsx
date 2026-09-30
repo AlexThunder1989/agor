@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { trackEvent } from '../../lib/analytics';
 import styles from '../LandingPage.module.css';
 import { type LandingPageId, landingPage } from './pages';
@@ -13,16 +13,28 @@ interface LandingLinkProps {
   /** Where the link sits, e.g. `home-hero` or `home-section`. */
   placement: string;
   className?: string;
+  style?: CSSProperties;
+  tabIndex?: number;
   children: ReactNode;
 }
 
 /** Internal link to a landing page that records which page (and block) visitors pick. */
-export function LandingLink({ page, anchor, placement, className, children }: LandingLinkProps) {
+export function LandingLink({
+  page,
+  anchor,
+  placement,
+  className,
+  style,
+  tabIndex,
+  children,
+}: LandingLinkProps) {
   const { href } = landingPage(page);
   return (
     <Link
       href={anchor ? `${href}#${anchor}` : href}
       className={className}
+      style={style}
+      tabIndex={tabIndex}
       onClick={() =>
         trackEvent('landing_page_click', {
           landing_page: page,

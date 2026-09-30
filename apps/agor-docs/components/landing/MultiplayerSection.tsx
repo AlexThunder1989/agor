@@ -3,8 +3,9 @@
 import type { CSSProperties } from 'react';
 import Aurora from '../Aurora/Aurora';
 import styles from '../LandingPage.module.css';
-import { LandingLink, LearnMore } from './LandingLink';
+import { LandingLink } from './LandingLink';
 import { SectionHeroActions } from './SectionHeroActions';
+import { WorkTogetherDemo } from './WorkTogetherDemo';
 
 // Harnesses with an executor handler in packages/executor/src/sdk-handlers.
 // Logos mirror the in-app ToolIcon set (apps/agor-ui/src/assets/tools), copied
@@ -101,45 +102,33 @@ export function MultiplayerSection({
             </div>
           </div>
         ) : (
-          <>
-            <Heading className={styles.liveStatement}>
-              Work <span className={styles.headingStrong}>together</span>{' '}
-              <span className={styles.headingAccent}>again</span>
-            </Heading>
-            <p className={styles.liveSub}>
-              One shared board instead of ten private terminals.
-              <br />
-              <span className={styles.headingDim}>
-                Bring your team and agents together on one live,{' '}
-                <span className={styles.headingAccent}>multiplayer canvas</span>.
-              </span>
-            </p>
-            {hero && <SectionHeroActions page="multiplayer" align="start" />}
-          </>
+          // Home: the self-playing demo, which ends on the same three cards.
+          <WorkTogetherDemo />
         )}
-        <div className={styles.liveGrid}>
-          {liveCards.map((card, index) => (
-            <article
-              className={styles.numberedCard}
-              key={card.title}
-              data-reveal
-              style={revealDelay(index)}
-            >
-              <h3>
-                <LandingLink
-                  page="multiplayer"
-                  anchor={card.anchor}
-                  placement={sampler ? 'home-section' : 'multiplayer-page-cards'}
-                  className={styles.titleLink}
-                >
-                  {card.title}
-                </LandingLink>
-              </h3>
-              <p>{card.body}</p>
-            </article>
-          ))}
-        </div>
-        {sampler && <LearnMore page="multiplayer" />}
+        {hero && (
+          <div className={styles.liveGrid}>
+            {liveCards.map((card, index) => (
+              <article
+                className={styles.numberedCard}
+                key={card.title}
+                data-reveal
+                style={revealDelay(index)}
+              >
+                <h3>
+                  <LandingLink
+                    page="multiplayer"
+                    anchor={card.anchor}
+                    placement="multiplayer-page-cards"
+                    className={styles.titleLink}
+                  >
+                    {card.title}
+                  </LandingLink>
+                </h3>
+                <p>{card.body}</p>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className={styles.harnessStrip} data-reveal>
