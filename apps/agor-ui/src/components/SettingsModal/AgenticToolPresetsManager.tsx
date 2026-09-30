@@ -6,6 +6,7 @@ import {
   type AuthorityOperation,
   useAuthorityOperationGuard,
 } from '../../hooks/useAuthorityOperationGuard';
+import { useThemedMessage } from '../../utils/message';
 import {
   AgenticToolConfigForm,
   buildConfigFromFormValues,
@@ -33,6 +34,7 @@ export const AgenticToolPresetsManager: React.FC<Props> = ({
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const operationGuard = useAuthorityOperationGuard(operationScope);
+  const { showSuccess } = useThemedMessage();
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: identityKey intentionally erases the replacement caller's modal/form state
   useLayoutEffect(() => {
@@ -99,6 +101,7 @@ export const AgenticToolPresetsManager: React.FC<Props> = ({
       if (editing) await client.service('agentic-tool-presets').patch(editing.preset_id, data);
       else await client.service('agentic-tool-presets').create({ ...data, tool });
       if (!operation.isCurrent()) return;
+      showSuccess(editing ? 'Preset updated' : 'Preset created');
       setModalOpen(false);
       await load(operation);
     } catch (error) {
@@ -185,6 +188,7 @@ export const AgenticToolPresetsManager: React.FC<Props> = ({
                     try {
                       await client.service('agentic-tool-presets').remove(preset.preset_id);
                       if (!operation.isCurrent()) return;
+                      showSuccess('Preset deleted');
                       await load(operation);
                     } catch (error) {
                       if (!operation.isCurrent()) return;

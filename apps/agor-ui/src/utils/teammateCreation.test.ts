@@ -80,7 +80,8 @@ describe('createTeammateBranch', () => {
           }),
         },
         notes: 'Helps with pineapple tasks.',
-      })
+      }),
+      { silent: true }
     );
     expect(boardsService.create).toHaveBeenCalledWith({
       name: "Pineapple Helper's Board",
@@ -138,7 +139,8 @@ describe('createTeammateBranch', () => {
       expect.objectContaining({
         sourceBranch: 'template/deal-desk-revops-analyst',
         sourceRemoteUrl: 'https://github.com/preset-io/agor-teammate.git',
-      })
+      }),
+      { silent: true }
     );
   });
 });
@@ -162,7 +164,8 @@ it.each([undefined, 'custom-start'])(
     );
     expect(onCreateBranch).toHaveBeenCalledWith(
       repo.repo_id,
-      expect.objectContaining({ sourceBranch: sourceBranch ?? 'trunk' })
+      expect.objectContaining({ sourceBranch: sourceBranch ?? 'trunk' }),
+      { silent: true }
     );
     expect(onCreateBranch.mock.calls[0][1]).not.toHaveProperty('sourceRemoteUrl');
   }
