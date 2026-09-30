@@ -62,7 +62,7 @@ export const demoBoard: Board = {
   archived: false,
   url: '/demo/marketing-screenshots',
   // Aqua is Agor's solution color on the marketing site (amber marks problems).
-  background_color: 'linear-gradient(135deg, #0891b2 0%, #0d9488 30%, #0891b2 60%, #0f766e 100%)',
+  background_color: 'linear-gradient(135deg, #066d85 0%, #0a6f66 30%, #066d85 60%, #0b5953 100%)',
   objects: {
     'zone-ship': {
       type: 'zone',
