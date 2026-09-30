@@ -1560,6 +1560,7 @@
 
 .problemCard:hover {
   border-color: rgba(232, 196, 104, 0.35);
+  translate: none;
 }
 
 .problemIcon {
@@ -1573,21 +1574,33 @@
   border-radius: 10px;
   background: rgba(232, 196, 104, 0.08);
   color: #e8c468;
+  transition:
+    color 0.35s ease,
+    border-color 0.35s ease,
+    background-color 0.35s ease;
 }
 
-/* Rhetorical hinge ABOVE the pileup — "Sound familiar?" points down at the
- * cards, so nobody reads it against the next section. */
-.problemPivot {
-  max-width: 30ch;
-  margin: 48px auto 0;
-  color: var(--landing-ink);
-  font-family: var(--font-display-stack);
-  font-size: clamp(1.55rem, 2.7vw, 2.3rem);
-  font-weight: 300;
-  letter-spacing: -0.02em;
-  line-height: 1.18;
-  text-align: center;
-  text-wrap: balance;
+/* Icon rides left of the title, so the card reads as one headline row. */
+.problemHead {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.problemHead .problemIcon {
+  flex: none;
+  margin-bottom: 0;
+}
+
+.problemHead h3 {
+  line-height: 1.25;
+}
+
+/* The problem words in each title: amber, like the section's "silo". */
+.problemKey {
+  color: #e8c468;
+  transition: color 0.35s ease;
 }
 
 .controlActions {
@@ -1952,35 +1965,95 @@
 /* Problem-section crash choreography. Slots hold opacity 0 until the
  * IntersectionObserver stamps .isVisible on the section (it carries
  * data-reveal); then the six per-slot pile-up timelines run on one shared
- * 1400ms clock (fill-mode both covers the pre-start hold and the settled
- * end state; each keyframe's own 0% opacity + final transform match the
- * gate and resting pose, so there's no flash or double-fade). */
+ * 1400ms clock. Fill-mode is backwards, not both: every final keyframe equals
+ * .problemSlot's resting transform, so releasing the animation at the end is
+ * pixel-identical, and it hands transform back to the cascade so the hover
+ * below can straighten the card. */
 .problemSection:not(.isVisible) .problemSlot {
   opacity: 0;
 }
 
 .problemSection.isVisible .problemSlot:nth-child(1) {
-  animation: problemCrash1 1400ms both;
+  animation: problemCrash1 1400ms backwards;
 }
 
 .problemSection.isVisible .problemSlot:nth-child(2) {
-  animation: problemCrash2 1400ms both;
+  animation: problemCrash2 1400ms backwards;
 }
 
 .problemSection.isVisible .problemSlot:nth-child(3) {
-  animation: problemCrash3 1400ms both;
+  animation: problemCrash3 1400ms backwards;
 }
 
 .problemSection.isVisible .problemSlot:nth-child(4) {
-  animation: problemCrash4 1400ms both;
+  animation: problemCrash4 1400ms backwards;
 }
 
 .problemSection.isVisible .problemSlot:nth-child(5) {
-  animation: problemCrash5 1400ms both;
+  animation: problemCrash5 1400ms backwards;
 }
 
 .problemSection.isVisible .problemSlot:nth-child(6) {
-  animation: problemCrash6 1400ms both;
+  animation: problemCrash6 1400ms backwards;
+}
+
+/* Problem card hover (desktop pile only): the card straightens out of the
+ * pile, flat and a hair larger, and rises above its neighbors. */
+@media (min-width: 981px) and (hover: hover) {
+  .problemSection .problemSlot {
+    transition:
+      rotate 0.35s cubic-bezier(0.2, 0.8, 0.2, 1),
+      transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1),
+      scale 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .problemSection.isVisible .problemSlot:hover,
+  .problemSection.isVisible .problemSlot:focus-within {
+    z-index: 10;
+    rotate: 0deg;
+    scale: 1.04;
+    transform: rotateX(0deg) rotateY(0deg);
+  }
+}
+
+/* Hovering the solution link turns its card from problem amber to solution
+ * aqua. The aqua background is a fading overlay (gradients don't transition). */
+.problemCard {
+  position: relative;
+  isolation: isolate;
+  transition:
+    translate 0.3s ease,
+    border-color 0.35s ease;
+}
+
+.problemCard::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(15, 42, 39, 0.92), rgba(10, 28, 26, 0.85));
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  pointer-events: none;
+}
+
+.problemCard:has(.problemLink:hover, .problemLink:focus-visible) {
+  border-color: rgba(52, 230, 196, 0.45);
+}
+
+.problemCard:has(.problemLink:hover, .problemLink:focus-visible)::before {
+  opacity: 1;
+}
+
+.problemCard:has(.problemLink:hover, .problemLink:focus-visible) .problemKey {
+  color: #45c4bb;
+}
+
+.problemCard:has(.problemLink:hover, .problemLink:focus-visible) .problemIcon {
+  border-color: rgba(69, 196, 187, 0.35);
+  background-color: rgba(69, 196, 187, 0.12);
+  color: #45c4bb;
 }
 
 /* --- Viewport media queries — kept AFTER every base rule they override
@@ -2084,8 +2157,8 @@
     padding: 64px 24px;
   }
 
-  /* Problem entries drop the card chrome on phones: icon rides left of the
-   * text so each entry is shorter, and thin dividers replace the boxes. */
+  /* Problem entries drop the card chrome on phones; thin dividers replace
+   * the boxes. */
   .problemScatter {
     grid-template-columns: 1fr;
     gap: 0;
@@ -2093,30 +2166,18 @@
   }
 
   .problemCard {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    column-gap: 14px;
-    row-gap: 2px;
     padding: 18px 2px;
     border: 0;
     border-radius: 0;
     background: none;
   }
 
-  .problemIcon {
-    grid-row: 1 / span 2;
-    align-self: start;
-    margin-bottom: 0;
+  .problemHead {
+    margin-bottom: 8px;
   }
 
-  .problemCard h3,
   .problemCard p {
-    grid-column: 2;
     margin: 0;
-  }
-
-  .problemCard h3 {
-    align-self: center;
   }
 
   .problemCard:hover {

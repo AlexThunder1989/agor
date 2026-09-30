@@ -9,19 +9,36 @@ import type { LandingPageId } from './pages';
 // "The problem" cards — the diagnosis before the pitch. Amber accents (see
 // .problemCard in the CSS module) mark these as the warning register; the
 // mint solution palette arrives at the pivot line below the grid.
-// Each card links to the landing page that answers it.
+// Each card links to the landing page that answers it, and the link text
+// foreshadows that answer (problem on the card, solution on the link).
+/** The problem words in a card title, in amber (aqua once the card's
+ * solution link is hovered). */
+function Key({ children }: { children: ReactNode }) {
+  return <span className={styles.problemKey}>{children}</span>;
+}
+
 const problemCards: Array<{
   icon: LucideIcon;
-  title: string;
+  /** Stable React key, since the title carries markup. */
+  id: string;
+  title: ReactNode;
   page: LandingPageId;
   anchor: string;
+  /** Link text: a hint at the answer waiting on the landing page. */
+  cta: string;
   body: ReactNode;
 }> = [
   {
+    id: 'alone',
     icon: UserX,
-    title: 'Everyone’s figuring it out alone',
+    title: (
+      <>
+        Everyone’s figuring out AI <Key>alone</Key>
+      </>
+    ),
     page: 'multiplayer',
     anchor: 'learn-together',
+    cta: 'Get better at AI together',
     body: (
       <>
         Each person experiments behind <strong>their own screen</strong>. Good techniques stay
@@ -30,10 +47,16 @@ const problemCards: Array<{
     ),
   },
   {
+    id: 'track',
     icon: Boxes,
-    title: 'Too many agents to track',
+    title: (
+      <>
+        Too many agents to <Key>track</Key>
+      </>
+    ),
     page: 'command-center',
     anchor: 'zones-and-prompts',
+    cta: 'Give every agent a place',
     body: (
       <>
         More agents and conversations mean more coordination. Which one is <strong>blocked</strong>?
@@ -42,10 +65,16 @@ const problemCards: Array<{
     ),
   },
   {
+    id: 'starting-over',
     icon: Repeat,
-    title: 'Starting over every time',
+    title: (
+      <>
+        <Key>Starting over</Key> every time
+      </>
+    ),
     page: 'teammates',
     anchor: 'memory',
+    cta: 'Pick up where you left off',
     body: (
       <>
         Good context gets buried in old conversations, so every recurring task needs the{' '}
@@ -54,10 +83,16 @@ const problemCards: Array<{
     ),
   },
   {
+    id: 'one-person',
     icon: Unlink,
-    title: 'Workflows only one person can run',
+    title: (
+      <>
+        Workflows <Key>only one person</Key> can run
+      </>
+    ),
     page: 'teammates',
     anchor: 'shared-ownership',
+    cta: 'Raise teammates together',
     body: (
       <>
         That useful PR reviewer lives in <strong>one person’s setup</strong>. Nobody else can
@@ -66,10 +101,16 @@ const problemCards: Array<{
     ),
   },
   {
+    id: 'scattered',
     icon: DatabaseZap,
-    title: 'Context scattered everywhere',
+    title: (
+      <>
+        Context <Key>scattered</Key> everywhere
+      </>
+    ),
     page: 'command-center',
     anchor: 'knowledge',
+    cta: 'Keep context close',
     body: (
       <>
         Knowledge is <strong>spread</strong> across repos, docs, and DMs, so agents answer without
@@ -78,10 +119,16 @@ const problemCards: Array<{
     ),
   },
   {
+    id: 'habits',
     icon: EyeOff,
-    title: 'New tools, same old habits',
+    title: (
+      <>
+        New tools, <Key>same old habits</Key>
+      </>
+    ),
     page: 'multiplayer',
     anchor: 'enablers',
+    cta: 'Turn wins into team practice',
     body: (
       <>
         Handing out AI accounts doesn’t create <strong>shared practices</strong>. Individual wins
@@ -178,13 +225,8 @@ export function ProblemSection() {
       <p className={styles.liveSub}>
         <span className={styles.headingDim}>
           We’re getting better at AI on our own, but not better together.
-        </span>
-      </p>
-      {/* Sits ABOVE the pileup so the question reads as pointing at the
-          cards below it, not at the next section. */}
-      <p className={styles.problemPivot}>
+        </span>{' '}
         Sound <span className={styles.headingAccentWarm}>familiar</span>?
-        <span aria-hidden="true"> ↓</span>
       </p>
       {/* Collision composition: slots carry the static scatter pose (rotate/
           translate/negative margins/z-index via CSS vars) plus the crash
@@ -194,12 +236,14 @@ export function ProblemSection() {
           keyframes. */}
       <div className={styles.problemScatter}>
         {problemCards.map((card, index) => (
-          <div className={styles.problemSlot} key={card.title} style={problemScatterSlots[index]}>
+          <div className={styles.problemSlot} key={card.id} style={problemScatterSlots[index]}>
             <article className={`${styles.numberedCard} ${styles.problemCard}`}>
-              <span className={styles.problemIcon}>
-                <card.icon size={17} aria-hidden />
-              </span>
-              <h3>{card.title}</h3>
+              <div className={styles.problemHead}>
+                <span className={styles.problemIcon}>
+                  <card.icon size={17} aria-hidden />
+                </span>
+                <h3>{card.title}</h3>
+              </div>
               <p>{card.body}</p>
               <LandingLink
                 page={card.page}
@@ -207,7 +251,9 @@ export function ProblemSection() {
                 placement="home-problem"
                 className={styles.problemLink}
               >
-                See how Agor helps <span aria-hidden="true">→</span>
+                {card.cta}
+                {/* nbsp: the arrow never wraps onto a line by itself */}
+                <span aria-hidden="true">{'\u00a0'}→</span>
               </LandingLink>
             </article>
           </div>
