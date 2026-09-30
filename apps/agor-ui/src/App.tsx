@@ -350,6 +350,7 @@ function AppContent() {
   const {
     user,
     authenticated,
+    hasLoggedOut,
     loading: authLoading,
     error: authError,
     accessToken,
@@ -1147,6 +1148,7 @@ function AppContent() {
     return (
       <LoginPage
         onLogin={login}
+        hasLoggedOut={hasLoggedOut}
         error={authError}
         externalLaunchLoginRedirectUrl={
           authConfig?.externalLaunch?.enabled

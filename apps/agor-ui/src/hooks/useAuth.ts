@@ -74,6 +74,8 @@ export type AuthorityCycleLoginResult =
   | { status: 'obsolete' };
 
 interface UseAuthReturn extends AuthState {
+  /** Tab-local receipt for an explicit user logout, never for auth expiry. */
+  hasLoggedOut: boolean;
   /** Monotonic owner for caller-scoped async work. Routine token refresh does not advance it. */
   authenticationGeneration: number;
   isAuthenticationGenerationCurrent: (generation: number) => boolean;
@@ -119,6 +121,7 @@ function loginErrorMessage(error: unknown): string {
  * Authentication hook
  */
 export function useAuth(): UseAuthReturn {
+  const [hasLoggedOut, setHasLoggedOut] = useState(false);
   const [state, setState] = useState<AuthState>({
     user: null,
     accessToken: null,
@@ -148,6 +151,7 @@ export function useAuth(): UseAuthReturn {
 
   const noteAuthenticatedUser = useCallback(
     (user: User) => {
+      setHasLoggedOut(false);
       const previous = activeAuthorityRef.current;
       if (!previous || previous.userId !== user.user_id || previous.role !== user.role) {
         advanceAuthenticationGeneration();
@@ -791,6 +795,7 @@ export function useAuth(): UseAuthReturn {
     };
     authStateRef.current = nextState;
     setState(nextState);
+    setHasLoggedOut(true);
   };
 
   const logoutForAuthorityCycle = async (
@@ -862,6 +867,7 @@ export function useAuth(): UseAuthReturn {
 
   return {
     ...state,
+    hasLoggedOut,
     authenticationGeneration,
     isAuthenticationGenerationCurrent,
     isAuthenticationOwnerCurrent,

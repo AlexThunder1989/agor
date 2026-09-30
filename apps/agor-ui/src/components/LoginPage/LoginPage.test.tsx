@@ -56,6 +56,25 @@ describe('LoginPage external launch redirect', () => {
     expect(screen.queryByText('agor user create-admin')).not.toBeInTheDocument();
   });
 
+  it('confirms local logout while keeping the sign-in form available', () => {
+    render(<LoginPage onLogin={vi.fn()} hasLoggedOut />);
+
+    expect(screen.getByText('You are signed out of this workspace')).toBeInTheDocument();
+    expect(screen.getByText('Sign in again to continue.')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Email address')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sign In' })).toBeInTheDocument();
+  });
+
+  it('keeps externally managed sign-in guidance after logout with no launcher URL', () => {
+    render(<LoginPage onLogin={vi.fn()} hasLoggedOut localLoginEnabled={false} />);
+
+    expect(screen.getByText('You are signed out of this workspace')).toBeInTheDocument();
+    expect(
+      screen.getByText('Open Agor from your workspace to start a new session.')
+    ).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Email address')).not.toBeInTheDocument();
+  });
+
   it('passes the current deep link to the external launcher as return_to', () => {
     window.history.replaceState({}, '', '/ui/s/session123/?panel=right#msg-1');
 
@@ -123,6 +142,23 @@ describe('LoginPage external launch redirect', () => {
 
     expect(screen.getByText('Sign-in is managed by your workspace')).toBeInTheDocument();
     expect(screen.queryByPlaceholderText('Email address')).not.toBeInTheDocument();
+  });
+
+  it('keeps launch-error recovery guidance when local login and a return URL are unavailable', () => {
+    render(
+      <LoginPage
+        onLogin={vi.fn()}
+        hasLoggedOut
+        localLoginEnabled={false}
+        error="Launch sign-in failed. The one-time launch code may have expired or already been used."
+      />
+    );
+
+    expect(screen.getByText('Launch sign-in failed')).toBeInTheDocument();
+    expect(
+      screen.getByText('Open Agor from your workspace to start a new session.')
+    ).toBeInTheDocument();
+    expect(screen.queryByText('You are signed out of this workspace')).not.toBeInTheDocument();
   });
 
   it('pairs launch errors with the external return action', () => {

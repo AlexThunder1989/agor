@@ -20,6 +20,7 @@ interface LoginPageProps {
   onLogin: (email: string, password: string) => Promise<boolean>;
   loading?: boolean;
   error?: string | null;
+  hasLoggedOut?: boolean;
   externalLaunchLoginRedirectUrl?: string;
   externalLaunchReturnHostParam?: string;
   localLoginEnabled?: boolean;
@@ -29,6 +30,7 @@ export function LoginPage({
   onLogin,
   loading = false,
   error,
+  hasLoggedOut = false,
   externalLaunchLoginRedirectUrl,
   externalLaunchReturnHostParam,
   localLoginEnabled = true,
@@ -43,6 +45,7 @@ export function LoginPage({
     : undefined;
   const showLoginForm = localLoginEnabled && (!useExternalLaunch || showLocalLogin);
   const isLaunchError = error?.startsWith('Launch sign-in failed') ?? false;
+  const showLogoutConfirmation = hasLoggedOut && !error;
 
   const handleSubmit = async (values: { email: string; password: string }) => {
     setSubmitting(true);
@@ -110,9 +113,23 @@ export function LoginPage({
           />
         )}
 
+        {showLogoutConfirmation && (
+          <Alert
+            type="success"
+            title="You are signed out of this workspace"
+            description={
+              useExternalLaunch || !localLoginEnabled
+                ? 'Sign in again to open this workspace.'
+                : 'Sign in again to continue.'
+            }
+            showIcon
+            style={{ marginBottom: 24 }}
+          />
+        )}
+
         {useExternalLaunch && (
           <Space orientation="vertical" size="middle" style={{ width: '100%', marginBottom: 24 }}>
-            {!error && (
+            {!error && !showLogoutConfirmation && (
               <Alert
                 type="info"
                 title="Open from your workspace"
@@ -126,7 +143,7 @@ export function LoginPage({
               block
               data-testid="external-launch-return"
             >
-              Return to workspace
+              {showLogoutConfirmation ? 'Sign in' : 'Return to workspace'}
             </Button>
             {localLoginEnabled && !showLocalLogin && (
               <Button type="link" block onClick={() => setShowLocalLogin(true)}>
@@ -139,7 +156,11 @@ export function LoginPage({
         {!localLoginEnabled && !useExternalLaunch && (
           <Alert
             type="info"
-            title="Sign-in is managed by your workspace"
+            title={
+              showLogoutConfirmation
+                ? 'Sign in from your workspace'
+                : 'Sign-in is managed by your workspace'
+            }
             description="Open Agor from your workspace to start a new session."
             showIcon
           />

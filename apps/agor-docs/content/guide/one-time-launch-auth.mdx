@@ -17,7 +17,7 @@ same runtime access and refresh tokens used by normal login.
    subject.
 5. The daemon verifies issuer, audience, expiration, subject, and the configured
    instance ID; then it maps or creates a local user by `(provider, issuer,
-   subject)`.
+subject)`.
 6. The daemon returns normal runtime auth tokens. The UI stores those tokens and
    removes `launch_code` from the URL with `replaceState`.
 
@@ -136,7 +136,14 @@ preserve deep links such as `/ui/s/<session>/` when it issues a fresh
 `launch_code`. Local username/password login is still available as a secondary
 fallback unless external identity authority disables it.
 
-If `login_redirect_url` is omitted, the normal local login screen is unchanged.
+After an explicit logout, the screen confirms **You are signed out of this workspace** and
+labels the workspace launch action **Sign in**. This confirms logout from
+Agor; the external provider may retain its own sign-in session. Opening that
+action starts a new Agor sign-in through the configured workspace launcher.
+Initial entry and failed launch attempts retain their sign-in guidance instead
+of showing a logout confirmation.
+
+On initial entry, omitting `login_redirect_url` preserves the normal local login screen.
 
 ### Direct-host entry
 
@@ -276,4 +283,4 @@ changed by this claim. Knowledge reader links need no `mode=edit` query; both
 - Configure exactly one assertion verification method (`jwks_url`, `public_key`,
   or dev-only `dev_shared_secret`).
 - Local users are mapped by stable external identity `(provider, issuer,
-  subject)`. A matching email alone never merges identities.
+subject)`. A matching email alone never merges identities.
