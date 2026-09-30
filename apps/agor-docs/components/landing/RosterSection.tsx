@@ -48,7 +48,15 @@ const radarTooltip = (r: number, a: number): { style: CSSProperties; below: bool
   };
 };
 
-export function RosterSection({ sampler = false }: { sampler?: boolean }) {
+export function RosterSection({
+  sampler = false,
+  hero = false,
+}: {
+  sampler?: boolean;
+  /** /agent-roster's hero: h1, the page's intro copy, first-screen spacing. */
+  hero?: boolean;
+}) {
+  const Heading = hero ? 'h1' : 'h2';
   const [hoveredMember, setHoveredMember] = useState<number | null>(null);
   const [radarInView, setRadarInView] = useState(false);
   const radarScopeRef = useRef<HTMLDivElement>(null);
@@ -72,19 +80,37 @@ export function RosterSection({ sampler = false }: { sampler?: boolean }) {
   }, []);
 
   return (
-    <section id="roster" className={styles.rosterSection} data-reveal>
+    <section
+      id="roster"
+      className={hero ? `${styles.rosterSection} ${styles.rosterHero}` : styles.rosterSection}
+      data-reveal
+    >
       <div className={styles.rosterCopy}>
         <div className={styles.sectionHeader}>
-          <span className={styles.eyebrow}>Meet the Preset agent team</span>
-          <h2>
-            Teammates we <span className={styles.headingStrong}>raised</span>{' '}
+          <span className={styles.eyebrow}>
+            {hero ? 'The Preset agent roster' : 'Meet the Preset agent team'}
+          </span>
+          <Heading>
+            Teammates we’ve <span className={styles.headingStrong}>raised</span>{' '}
             <span className={styles.headingAccent}>together</span>
-          </h2>
+          </Heading>
         </div>
-        <p className={styles.rosterBody}>
-          A few examples from our own Agor instance today. Each has a name, a job, its own memory,
-          and a team of people who teach it and keep it improving.
-        </p>
+        {hero ? (
+          <p className={styles.rosterBody}>
+            <span className={styles.rosterLead}>
+              On Preset’s internal Slack, AI teammates now outnumber the humans.
+            </span>{' '}
+            These are some we run on our own Agor instance, for deal desk, legal, market research,
+            bug fixing, security patches, data engineering, and more. Each has a name, a job, its
+            own memory, and a team of people who teach it and keep it improving. They’re examples of
+            the use cases we’re tackling; your team can raise whichever teammates it needs.
+          </p>
+        ) : (
+          <p className={styles.rosterBody}>
+            A few examples from our own Agor instance today. Each has a name, a job, its own memory,
+            and a team of people who teach it and keep it improving.
+          </p>
+        )}
         <p className={styles.rosterStatusLine}>
           <span className={styles.rosterStatusDot} aria-hidden="true" />
           <span>
@@ -132,19 +158,26 @@ export function RosterSection({ sampler = false }: { sampler?: boolean }) {
           ]
             .filter(Boolean)
             .join(' ');
+          // Written-up members link to their listing on /agent-roster (which
+          // links on to the post); the rest are quieter and only show a card.
           return member.story ? (
             <Link
               key={member.name}
-              href={member.story.href}
-              {...(member.story.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+              href={`/agent-roster#${member.id}`}
               className={blipClass}
               style={radarPosition(member.r, member.a)}
               onMouseEnter={() => setHoveredMember(index)}
               onMouseLeave={() => setHoveredMember(null)}
               onFocus={() => setHoveredMember(index)}
               onBlur={() => setHoveredMember(null)}
-              aria-label={`${member.name}: ${member.role}. Read the story`}
-              onClick={() => trackEvent('roster_story_click', { member: member.name })}
+              aria-label={`${member.name}: ${member.role}. Meet ${member.name}`}
+              onClick={() =>
+                trackEvent('landing_page_click', {
+                  landing_page: 'agent-roster',
+                  landing_anchor: member.id,
+                  placement: hero ? 'agent-roster-radar' : 'home-radar',
+                })
+              }
             >
               <span className={styles.blipIcon}>
                 <member.icon size={19} aria-hidden />
@@ -155,7 +188,7 @@ export function RosterSection({ sampler = false }: { sampler?: boolean }) {
             <button
               type="button"
               key={member.name}
-              className={blipClass}
+              className={`${blipClass} ${styles.radarBlipQuiet}`}
               style={radarPosition(member.r, member.a)}
               onMouseEnter={() => setHoveredMember(index)}
               onMouseLeave={() => setHoveredMember(null)}
@@ -194,7 +227,9 @@ export function RosterSection({ sampler = false }: { sampler?: boolean }) {
                 <span className={styles.tooltipMem}>{member.meta}</span>
               </div>
               {member.story ? (
-                <p className={styles.tooltipStory}>Click to read the story →</p>
+                <p className={styles.tooltipStory}>
+                  Click to meet them <span aria-hidden="true">{hero ? '↓' : '→'}</span>
+                </p>
               ) : null}
             </div>
           );
@@ -219,10 +254,11 @@ export function RosterSection({ sampler = false }: { sampler?: boolean }) {
             </div>
             {rosterMembers[hoveredMember].story ? (
               <Link
-                href={rosterMembers[hoveredMember].story?.href ?? ''}
+                href={`/agent-roster#${rosterMembers[hoveredMember].id}`}
                 className={styles.tooltipStory}
               >
-                Read the story →
+                Meet {rosterMembers[hoveredMember].name}{' '}
+                <span aria-hidden="true">{hero ? '↓' : '→'}</span>
               </Link>
             ) : null}
           </>

@@ -1600,6 +1600,20 @@
   line-height: 1.7;
 }
 
+/* /agent-roster hero: the radar section opens the page. */
+.rosterHero {
+  min-height: calc(100vh - 64px);
+  padding-top: clamp(112px, 14vh, 150px);
+}
+
+.rosterHero .rosterCopy {
+  max-width: 480px;
+}
+
+.rosterLead {
+  color: #fff;
+}
+
 .rosterStatusLine {
   display: flex;
   align-items: center;
@@ -2745,10 +2759,42 @@
   line-height: 1.5;
 }
 
-/* Roster members with a blog post render as links: keep the blip look. */
+/* Written-up members are links to their /agent-roster listing: a brighter,
+ * ringed blip that lifts on hover. The rest are quieter and not clickable. */
 a.radarBlip {
   color: inherit;
   text-decoration: none;
+}
+
+a.radarBlip .blipIcon {
+  border-color: rgba(94, 233, 208, 0.85);
+  background: #123029;
+  box-shadow: 0 0 0 4px rgba(94, 233, 208, 0.1);
+}
+
+a.radarBlip:hover .blipIcon,
+a.radarBlip:focus-visible .blipIcon {
+  box-shadow:
+    0 0 0 4px rgba(94, 233, 208, 0.2),
+    0 0 24px rgba(94, 233, 208, 0.5);
+}
+
+a.radarBlip .blipName {
+  color: #eafff9;
+}
+
+.radarBlipQuiet {
+  cursor: default;
+}
+
+.radarBlipQuiet .blipIcon {
+  border-color: rgba(94, 233, 208, 0.2);
+  background: #0b1714;
+  color: rgba(95, 233, 208, 0.55);
+}
+
+.radarBlipQuiet .blipName {
+  color: #7f9994;
 }
 
 .tooltipStory {

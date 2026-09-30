@@ -10,70 +10,38 @@ import { ROSTER } from './roster';
 
 const TEAMMATE_REPO_URL = 'https://github.com/preset-io/agor-teammate';
 
-// Written-up members first, so the listings open on the richest stories.
-const LISTINGS = [...ROSTER].sort(
-  (a, b) => Number(Boolean(b.abstract)) - Number(Boolean(a.abstract))
-);
+const FRAMEWORK_LINKS = [
+  {
+    title: 'Docs',
+    links: [
+      { label: 'Raise your first teammate', href: '/guide/first-teammate' },
+      { label: 'How teammates remember', href: '/guide/teammates' },
+      { label: 'AI teammates on Agor', href: '/teammates' },
+    ],
+  },
+  {
+    title: 'From the blog',
+    links: [
+      { label: 'Agent modeling 101', href: '/blog/agent-modeling-101' },
+      { label: 'Raise a team helper agent', href: '/blog/raise-team-helper-agent' },
+      { label: 'Agor and OpenClaw', href: '/blog/openclaw' },
+    ],
+  },
+];
+
+// Only members someone has written about get a listing; each card links on
+// to that post. The radar still shows the whole roster.
+const LISTINGS = ROSTER.filter((member) => member.story);
 
 /**
  * /agent-roster: the AI teammates Preset runs on its own Agor instance, as
- * worked examples of what a team can raise. Intro on the framework they're
- * built from, the radar, then one listing per teammate.
+ * worked examples of what a team can raise. The radar is the hero, then one
+ * listing per teammate, then how a teammate is defined.
  */
 export function AgentRoster() {
   return (
     <LandingShell ctaPrefix="agent-roster-page">
-      <section className={styles.intro} data-reveal>
-        <span className={landing.eyebrow}>The Preset agent roster</span>
-        <h1 className={styles.title}>
-          More <span className={landing.headingAccent}>teammates</span> than{' '}
-          <span className={landing.headingStrong}>people</span>
-        </h1>
-        <p className={styles.lead}>
-          <span className={styles.leadStrong}>
-            On Preset’s internal Slack, AI teammates now outnumber the humans.
-          </span>{' '}
-          These are some of the ones we run on our own Agor instance: deal desk, legal, market
-          research, bug fixing, security patches, data engineering, and more. They’re examples of
-          the use cases we’re tackling, not a catalog. Your team can raise whichever teammates it
-          needs.
-        </p>
-        <div className={styles.framework}>
-          <h2>How a teammate is defined</h2>
-          <p>
-            Each one is built on the{' '}
-            <Link href={TEAMMATE_REPO_URL} target="_blank" rel="noopener noreferrer">
-              agor-teammate framework
-            </Link>
-            , inspired by OpenClaw. A teammate lives on its own branch with a few plain markdown
-            files: <code>SOUL.md</code> for its values and voice, <code>IDENTITY.md</code> for its
-            name, board, and Knowledge namespace, <code>USER.md</code> for who it works with,{' '}
-            <code>BOOT.md</code> for its startup checklist, and an optional{' '}
-            <code>HEARTBEAT.md</code> for recurring work. Long-term memory lives in Agor Knowledge,
-            where the team can read and correct it. A new teammate onboards through its first
-            conversation, working toward a real result.
-          </p>
-          <ul className={styles.frameworkLinks}>
-            <li>
-              <Link href="/guide/first-teammate">
-                Raise your first teammate <span aria-hidden="true">→</span>
-              </Link>
-            </li>
-            <li>
-              <Link href="/teammates">
-                How AI teammates work <span aria-hidden="true">→</span>
-              </Link>
-            </li>
-            <li>
-              <Link href="/blog/agent-modeling-101">
-                Agent modeling 101 <span aria-hidden="true">→</span>
-              </Link>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <RosterSection />
+      <RosterSection hero />
 
       <section className={styles.listings} aria-labelledby="roster-listings" data-reveal>
         <h2 id="roster-listings" className={styles.listingsTitle}>
@@ -107,6 +75,46 @@ export function AgentRoster() {
               ) : null}
             </article>
           ))}
+        </div>
+      </section>
+
+      {/* Raise your own: how every teammate above is defined, with where to
+          read more. Set apart from the listings on purpose. */}
+      <section className={styles.frameworkSection} aria-labelledby="teammate-framework" data-reveal>
+        <div className={styles.framework}>
+          <div>
+            <span className={landing.eyebrow}>Raise your own</span>
+            <h2 id="teammate-framework">How a teammate is defined</h2>
+            <p>
+              Every teammate above is built on the{' '}
+              <Link href={TEAMMATE_REPO_URL} target="_blank" rel="noopener noreferrer">
+                agor-teammate framework
+              </Link>
+              , inspired by OpenClaw. A teammate lives on its own branch with a few plain markdown
+              files: <code>SOUL.md</code> for its values and voice, <code>IDENTITY.md</code> for its
+              name, board, and Knowledge namespace, <code>USER.md</code> for who it works with,{' '}
+              <code>BOOT.md</code> for its startup checklist, and an optional{' '}
+              <code>HEARTBEAT.md</code> for recurring work. Long-term memory lives in Agor
+              Knowledge, where the team can read and correct it. A new teammate onboards through its
+              first conversation, working toward a real result.
+            </p>
+          </div>
+          <div className={styles.frameworkLinks}>
+            {FRAMEWORK_LINKS.map((group) => (
+              <div key={group.title}>
+                <h3>{group.title}</h3>
+                <ul>
+                  {group.links.map((link) => (
+                    <li key={link.href}>
+                      <Link href={link.href}>
+                        {link.label} <span aria-hidden="true">→</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
     </LandingShell>
