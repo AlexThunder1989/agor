@@ -1,5 +1,4 @@
 import { useInitialLoadReadiness } from '../../hooks/useInitialLoadReadiness';
-import { getInitialLoadDebugTimer } from '../../utils/initialLoadDebug';
 /**
  * ConversationView - Task-centric conversation interface
  *
@@ -256,14 +255,6 @@ const ConversationViewInner = React.memo<ConversationViewProps>(
       }
     }, [onScrollRef, handleScrollToBottom, scrollToTop]);
 
-    useEffect(() => {
-      if (!isActive || !sessionId || !client) return;
-      const timer = getInitialLoadDebugTimer();
-      timer?.markStage('conversation-view-mounted');
-      return () => {
-        timer?.discard();
-      };
-    }, [sessionId, isActive, client]);
     const { handle: reactiveSession, state: reactiveState } = useSharedReactiveSession(
       client,
       sessionId,
@@ -279,7 +270,8 @@ const ConversationViewInner = React.memo<ConversationViewProps>(
         !!currentReactiveState?.lastSyncedAt &&
         !currentReactiveState.loading &&
         !currentReactiveState.error,
-      isActive && !!currentReactiveState?.error
+      isActive && !!currentReactiveState?.error,
+      isActive && client ? (sessionId ?? undefined) : undefined
     );
 
     // Queued tasks belong to the queue drawer, not the conversation. They

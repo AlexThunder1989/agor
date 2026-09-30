@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  beginInitialLoadDebug,
   createInitialLoadDebugTimer,
+  getInitialLoadDebugTimer,
   type InitialLoadDebugTimings,
   isInitialLoadDebugEnabled,
   syncInitialLoadDebugFlagFromUrl,
@@ -9,6 +11,7 @@ import {
 const originalUrl = window.location.href;
 
 afterEach(() => {
+  getInitialLoadDebugTimer()?.discard();
   window.history.replaceState({}, '', originalUrl);
   window.localStorage.clear();
   delete (window as Window & { __AGOR_INITIAL_LOAD_TIMINGS__?: InitialLoadDebugTimings })
@@ -161,6 +164,7 @@ describe('startup lifecycle', () => {
 
   it('keeps data readiness distinct from conversation readiness and paint proxy', () => {
     const timer = createInitialLoadDebugTimer([], 'conversation');
+    timer.configSettled();
     timer.markStage('data-ready');
     timer.surfaceReady('board');
     timer.markStage('conversation-ready-commit');
@@ -171,6 +175,7 @@ describe('startup lifecycle', () => {
     timer.surfaceReady('conversation');
     expect(snapshot.status).toBe('success');
     expect(snapshot.stageTransitions.map((row) => row.stage)).toEqual([
+      'auth-config-ready',
       'data-ready',
       'board-paint-opportunity',
       'conversation-ready-commit',
@@ -201,4 +206,21 @@ describe('startup lifecycle', () => {
     expect(snapshot.stageTransitions).toHaveLength(64);
     expect(snapshot.status).toBe('discarded');
   });
+});
+
+it.each([
+  '/a/artifact/',
+  '/settings/',
+  '/m/board/board/',
+  '/m/session/session/',
+  '/ui/m/board/board/',
+  '/settings/b/board/',
+  '/b/board/extra/',
+])('settles unsupported route %s explicitly', (path) => {
+  window.history.replaceState({}, '', `${path}?debugLoad=1`);
+  expect(beginInitialLoadDebug()).toBeNull();
+  expect(
+    (window as Window & { __AGOR_INITIAL_LOAD_TIMINGS__?: InitialLoadDebugTimings })
+      .__AGOR_INITIAL_LOAD_TIMINGS__
+  ).toMatchObject({ status: 'unsupported', stageTransitions: [{ stage: 'unsupported-route' }] });
 });

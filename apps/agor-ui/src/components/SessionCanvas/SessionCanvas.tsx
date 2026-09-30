@@ -49,7 +49,8 @@ import {
   useEdgesState,
   useNodesState,
 } from 'reactflow';
-import { useInitialLoadReadiness } from '../../hooks/useInitialLoadReadiness';
+import { useInitialBoardReadiness } from '../../hooks/useInitialBoardReadiness';
+import { getInitialLoadDebugTimer } from '../../utils/initialLoadDebug';
 import {
   type EntityPlacementIntent,
   EntityPlacementWrites,
@@ -1121,7 +1122,6 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
     const reactFlowWrapperRef = useRef<HTMLDivElement | null>(null);
     // Track when ReactFlow instance is ready (state to trigger re-renders)
     const [isReactFlowReady, setIsReactFlowReady] = useState(false);
-    useInitialLoadReadiness('board', isReactFlowReady && !!board);
 
     // Track which board we last fit the view for (prevents repeated fitView on node changes)
     const lastFitBoardIdRef = useRef<string | null>(null);
@@ -1745,6 +1745,17 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
       setEdges(initialEdges);
     }, [initialEdges, setEdges]); // REMOVED setEdges from dependencies
 
+    const observeInitialPosition = useInitialBoardReadiness(
+      isReactFlowReady,
+      board?.board_id,
+      getInitialLoadDebugTimer()
+        ? [...getBoardObjectNodes(), ...initialNodes, ...cardNodes, ...commentNodes]
+        : [],
+      reactFlowInstanceRef
+    );
+    const observeInitialPositionRef = useRef(observeInitialPosition);
+    observeInitialPositionRef.current = observeInitialPosition;
+
     // Fit view ONCE when entering a board (not on every node change)
     // This ensures nodes are visible when navigating between boards or on initial load,
     // but doesn't disrupt the user's zoom level when comments/zones change
@@ -1769,15 +1780,17 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
             ensureVisible: pending.ensureVisible,
           })
         ) {
+          observeInitialPositionRef.current(400);
           lastFitBoardIdRef.current = board?.board_id ?? null;
           return;
         }
-        reactFlowInstanceRef.current?.fitView({
+        const fitted = reactFlowInstanceRef.current?.fitView({
           padding: 0.2, // 20% padding around nodes
           minZoom: 0.1, // Allow zooming out far enough to see widely-spaced nodes
           maxZoom: 1.0, // Don't zoom in beyond 100% to keep nodes readable
           duration: 200, // Smooth animation
         });
+        if (fitted) observeInitialPositionRef.current(200);
         // Mark this board as fitted
         lastFitBoardIdRef.current = board?.board_id ?? null;
       }, 100);

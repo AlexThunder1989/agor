@@ -401,6 +401,78 @@ pnpm agor repo list
 
 ## Troubleshooting
 
+### Diagnosing workspace startup
+
+Add `?debugLoad=1` to a desktop Home, board, branch, or direct-session URL and reload. The
+opt-in persists in this browser; `?debugLoad=0` disables it. Inspect
+`window.__AGOR_INITIAL_LOAD_TIMINGS__` during loading or the **Agor initial
+load** console group when it settles. This is a bounded, local diagnostic,
+not telemetry: it contains timings, fixed operation names, statuses and row
+counts, never entity IDs, content, tokens or server error text.
+
+- Request `startMs` / `endMs` are relative to trace creation. `queued` means
+  not started; `pending` means in flight. Conditional lookups can be `skipped`.
+  Full selected-board sessions and the displayed board's full record are
+  separate from the recent-session and lean-board lists. A collection duration
+  covers the entire `findAll` operation, including any pages (not individual
+  network requests). Recovered lookup failures remain visible as `error`.
+- `navigationToStartMs` exposes the time before App mounted. Auth/config/socket
+  gate timestamps are passive-effect observations, not request start/end times.
+  Route-module loading, data readiness, and the existing
+  loader hold/fade phases are distinct. `indexingMs` measures synchronous
+  index construction and store publication, excluding the frame wait.
+- Home readiness is its committed initial content; board readiness requires
+  React Flow initialization, the expected nodes, and initial positioning. The
+  observer waits out the existing 100 ms fit delay / 200 ms fit animation (or
+  existing 400 ms recenter), then observes a stable viewport; it never drives
+  the viewport. Legitimately empty boards need no fit. Annotation fetch failures
+  remain visible in the request table. Conversation readiness is the committed
+  initial transcript window after reactive hydration, **not all historical
+  messages**. Only mount-to-ready aggregate hydration is observed, not its
+  individual requests. Background collection hydration is not traced; this is
+  a foreground-blocker diagnostic, **not a trace of all requests**.
+- `*-paint-opportunity` is a two-animation-frame **proxy**, not a measurement
+  of actual browser paint or full interactivity. A successful data fetch alone
+  does not claim the conversation is ready. Surface milestones and configuration
+  settlement are independent: diagnostic success requires both, without adding
+  a rendering gate. A late health failure can therefore follow a surface
+  milestone but still correctly settle the trace as an error.
+- Navigation, authority changes and unmount discard an unfinished trace;
+  failures settle it. `abandoned` means diagnostic observation ended while a
+  request was pending, not that the request was cancelled. Silent reconnects
+  are excluded. Unsupported routes (including artifact, settings, and all
+  mobile routes) terminate explicitly as `unsupported`, even if mobile later
+  redirects to desktop. A direct session's exhausted lookup or transcript
+  hydration failure terminates as `error`; URL healing and UI behavior are
+  unchanged. Harmless transcript remounts do not discard the App-owned trace.
+
+For server-side request time, correlate with the daemon's existing
+`feathers.request.duration_ms` diagnostics. Browser operation durations also
+include transport, decoding and scheduling; they are not server timings.
+
+Reproduce the browser regressions against your own managed, source-served
+`sqlite-demo` preview (never production). The script uses public seeded demo
+credentials, creates/removes two fixture boards, and requires a seeded session
+with transcript content. Start/stop the preview through the environment controls;
+the script does neither:
+
+```bash
+AGOR_STARTUP_DEMO_URL=http://host:ui-port \
+  node apps/agor-ui/scripts/startup-regression.mjs --demo
+pnpm --filter agor-ui exec vitest run --config vitest.browser.config.ts \
+  --project desktop src/components/SessionCanvas/SessionCanvas.initialLoad.browser.test.tsx \
+  src/App.initialLoad.browser.test.tsx
+```
+
+The script checks Home, off-origin/empty boards, direct transcript, debug-off,
+held config success/failure, navigation, missing sessions and unsupported routes.
+The App-observer browser composition additionally exercises config settlement
+after an independently mounted surface; the full App retains its existing
+initial config-loading render gate.
+It samples independent DOM visibility at terminal publication, rather than
+waiting for content after a success flag. Browser checks are regression evidence,
+not production timing or paint attribution.
+
 ### Build fails with `ERR_WORKER_OUT_OF_MEMORY` / `JS heap out of memory`
 
 `@agor/core` exports ~40 entry points and emits TypeScript declarations for

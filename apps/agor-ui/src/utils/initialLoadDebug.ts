@@ -1,3 +1,5 @@
+import { parseEntityPath } from './entityPath';
+
 const DEBUG_INITIAL_LOAD_STORAGE_KEY = 'agor.debug.initialLoad';
 
 export interface InitialLoadDebugItem {
@@ -27,7 +29,7 @@ export interface InitialLoadDebugTimings {
   totalMs: number;
   fetchPhaseMs: number | null;
   indexingMs: number | null;
-  status: 'pending' | 'success' | 'error' | 'discarded';
+  status: 'pending' | 'success' | 'error' | 'discarded' | 'unsupported';
   fetches: InitialLoadDebugFetchTiming[];
   stageTransitions: InitialLoadDebugStageTransition[];
 }
@@ -90,22 +92,33 @@ export function getInitialLoadDebugTimer() {
 
 export function beginInitialLoadDebug() {
   activeTimer?.discard();
-  activeTimer = isInitialLoadDebugEnabled()
-    ? createInitialLoadDebugTimer(
-        [],
-        /\/(s|m\/session)\//.test(getWindow()?.location.pathname ?? '')
+  const pathname = getWindow()?.location.pathname ?? '';
+  const routePath = pathname.replace(/^\/ui(?=\/|$)/, '') || '/';
+  const entity = /^\/[^/]+\/[^/]+\/?$/.test(routePath) ? parseEntityPath(routePath) : null;
+  const target =
+    routePath === '/'
+      ? 'home'
+      : /^\/(?:ui\/)?m(?:\/|$)/.test(pathname)
+        ? null
+        : entity?.kind === 'session'
           ? 'conversation'
-          : /\/(b|w|m\/board)\//.test(getWindow()?.location.pathname ?? '')
+          : entity?.kind === 'board' || entity?.kind === 'branch'
             ? 'board'
-            : 'home'
-      )
+            : null;
+  activeTimer = isInitialLoadDebugEnabled()
+    ? createInitialLoadDebugTimer([], target ?? undefined, entity?.token)
     : null;
+  if (activeTimer && !target) {
+    activeTimer.markStage('unsupported-route');
+    activeTimer.finish('unsupported');
+  }
   return activeTimer;
 }
 
 export function createInitialLoadDebugTimer(
   items: readonly InitialLoadDebugItem[],
-  target?: 'home' | 'board' | 'conversation'
+  target?: 'home' | 'board' | 'conversation',
+  targetToken?: string
 ) {
   const start = getNow();
   const timings: InitialLoadDebugTimings = {
@@ -122,6 +135,8 @@ export function createInitialLoadDebugTimer(
     stageTransitions: [],
   };
   let closed = false;
+  let configReady = false;
+  let surfaceReady = false;
   let fetchStart: number | null = null;
   let indexingStart: number | null = null;
   const elapsed = () => roundMs(getNow() - start);
@@ -157,7 +172,7 @@ export function createInitialLoadDebugTimer(
     timings.stageTransitions.push({ stage, atMs: elapsed() });
     publish();
   };
-  const settle = (status: 'success' | 'error' | 'discarded') => {
+  const settle = (status: 'success' | 'error' | 'discarded' | 'unsupported') => {
     if (closed) return timings;
     for (const row of timings.fetches) {
       if (row.status === 'queued') row.status = 'not-started';
@@ -178,7 +193,31 @@ export function createInitialLoadDebugTimer(
     markStage,
     surfaceReady(surface: 'home' | 'board' | 'conversation') {
       markStage(`${surface}-paint-opportunity`);
-      if (surface === target) timer.finish('success');
+      if (surface === target) surfaceReady = true;
+      if (surfaceReady && configReady) timer.finish('success');
+    },
+    configSettled() {
+      configReady = true;
+      markStage('auth-config-ready');
+      if (surfaceReady) timer.finish('success');
+    },
+    observeConversation(sessionId: string) {
+      if (target !== 'conversation') return;
+      // Compare the resolved identity, not component/client lifetimes. Tokens
+      // may be short or full UUIDs; never publish either in the diagnostic.
+      if (
+        targetToken &&
+        !sessionId.replaceAll('-', '').startsWith(targetToken.replaceAll('-', ''))
+      ) {
+        timer.discard();
+      } else {
+        markStage('conversation-view-mounted');
+      }
+    },
+    surfaceFailed(surface: 'home' | 'board' | 'conversation', stage = `${surface}-error`) {
+      if (surface !== target) return;
+      markStage(stage);
+      timer.finish('error');
     },
     skip(key: string) {
       if (closed) return;
@@ -246,7 +285,7 @@ export function createInitialLoadDebugTimer(
     discard() {
       return settle('discarded');
     },
-    finish(status: 'success' | 'error'): InitialLoadDebugTimings {
+    finish(status: 'success' | 'error' | 'unsupported'): InitialLoadDebugTimings {
       if (closed) return timings;
       settle(status);
       console.groupCollapsed?.('[Agor initial load]', { status, totalMs: timings.totalMs });

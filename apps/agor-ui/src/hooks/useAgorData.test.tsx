@@ -1477,7 +1477,13 @@ describe('opt-in initial-load blocker tracing', () => {
       );
       await waitForInitialLoad(result);
       expect(snapshot()?.fetches.find((row) => row.key === `direct-${kind}`)?.status).toBe('error');
-      expect(snapshot()?.status).toBe('pending'); // data ready is not presentation ready
+      await waitFor(() =>
+        expect(snapshot()?.status).toBe(kind === 'session' ? 'error' : 'pending')
+      );
+      if (kind === 'session') {
+        expect(snapshot()?.stageTransitions.at(-1)?.stage).toBe('direct-session-unresolved');
+        expect(window.location.pathname).toBe('/s/missing/'); // URL remains sticky
+      }
       expect(JSON.stringify(snapshot())).not.toContain('private');
     }
   );
