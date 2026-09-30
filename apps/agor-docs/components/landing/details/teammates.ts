@@ -31,7 +31,7 @@ export const teammatesDetails: LandingDetail[] = [
   },
   {
     id: 'memory',
-    navLabel: 'Memory',
+    navLabel: 'Memory & knowledge',
     eyebrow: 'Stop starting over',
     title: 'Pick up where you [left off]',
     body: [
@@ -61,7 +61,7 @@ export const teammatesDetails: LandingDetail[] = [
   },
   {
     id: 'channels',
-    navLabel: 'Channels',
+    navLabel: 'In your channels',
     eyebrow: 'Where your team works',
     title: 'Bring it where your team [already talks]',
     body: [
@@ -159,7 +159,7 @@ export const teammatesDetails: LandingDetail[] = [
   },
   {
     id: 'onboarding',
-    navLabel: 'Onboarding',
+    navLabel: 'Teach by talking',
     eyebrow: 'Teach it by talking',
     title: 'Onboard it like a new [teammate]',
     body: [
@@ -192,7 +192,7 @@ export const teammatesDetails: LandingDetail[] = [
   },
   {
     id: 'identity',
-    navLabel: 'Boundaries',
+    navLabel: 'Identity & boundaries',
     eyebrow: 'Identity and boundaries',
     title: 'A clear [job] and clear {limits}',
     body: [

@@ -404,7 +404,8 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 8%;
+  /* % padding resolves against the stage, not the node: keep it small. */
+  padding: 3%;
   border: 1px solid rgba(52, 230, 196, 0.18);
   border-radius: 50%;
   background: linear-gradient(180deg, rgba(15, 34, 31, 0.72), rgba(10, 22, 20, 0.55));
@@ -446,6 +447,13 @@
 
 .ringNodeIcon svg {
   flex-shrink: 0;
+}
+
+/* Nodes are links: keep the ink color and no underline over the global
+ * `.dark a` rule. */
+.featureRing a.ringNode {
+  color: var(--landing-ink);
+  text-decoration: none;
 }
 
 .ringNodeActive {
@@ -2536,9 +2544,10 @@
 .detailNav {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
   justify-content: center;
-  max-width: 1180px;
+  /* A little wider than the content column so seven jump links fit a row. */
+  max-width: 1280px;
   margin: 0 auto;
   padding: 40px 28px 0;
 }

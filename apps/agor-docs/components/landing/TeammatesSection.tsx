@@ -8,59 +8,56 @@ import {
   type LucideIcon,
   MessagesSquare,
   SlidersHorizontal,
+  Users,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { AI_ENABLEMENT_POST_URL } from '../../lib/links';
 import styles from '../LandingPage.module.css';
 import Orb from '../Orb/Orb';
-import { LandingLink, LearnMore } from './LandingLink';
+import { teammatesDetails } from './details/teammates';
+import { LandingLink } from './LandingLink';
 import { SectionHeroActions } from './SectionHeroActions';
 
-const featureCards: Array<{
-  title: string;
-  body: string;
-  /** Detail block on /teammates. */
-  anchor: string;
-  icon: LucideIcon;
-}> = [
-  {
-    title: 'Shared memory',
+// The ring is /teammates' table of contents: one node per detail block, in
+// page order, labeled with the block's jump-link label (details/teammates.ts)
+// so the ring, the jump links, and the blocks read as one set. The ring adds
+// an icon and a one-line summary for the hub.
+const RING: Record<string, { icon: LucideIcon; body: string }> = {
+  'shared-ownership': {
+    icon: Users,
+    body: 'A teammate lives on a shared branch, so its instructions, memory, and history belong to the team, not one person’s setup.',
+  },
+  memory: {
     icon: Brain,
-    body: 'Teammates keep durable notes in your team’s shared knowledge base, where people and agents can search and build on them.',
-    anchor: 'memory',
+    body: 'Teammates keep memory across conversations, and Knowledge gives people and agents one shared place for runbooks and decisions.',
   },
-  {
-    title: 'Skills + MCP',
-    icon: Blocks,
-    body: 'Package repeatable workflows as skills and connect teammates to the MCP servers your team already trusts.',
-    anchor: 'skills-and-mcp',
-  },
-  {
-    title: 'Conversational onboarding',
-    icon: MessagesSquare,
-    body: 'Teach a teammate by talking to it. Anyone on the team can refine it, and the useful parts become reusable context.',
-    anchor: 'onboarding',
-  },
-  {
-    title: 'Where your team works',
+  channels: {
     icon: Hash,
-    body: 'Reach teammates from Slack, GitHub, or wherever work already happens through gateway channels.',
-    anchor: 'channels',
+    body: 'Mention a teammate in Slack, Discord, GitHub, or Shortcut. It replies where you asked, running as the person who asked.',
   },
-  {
-    title: 'Scheduled agency',
+  schedules: {
     icon: CalendarClock,
-    body: 'Run heartbeats, daily standups, audits, digests, or longer workflows without waiting for a prompt.',
-    anchor: 'schedules',
+    body: 'Standups, digests, and audits run on a schedule, each leaving a full transcript your team can review.',
   },
-  {
-    title: 'Identity + boundaries',
+  'skills-and-mcp': {
+    icon: Blocks,
+    body: 'Package the steps your team repeats as skills, and connect teammates to your tools through MCP.',
+  },
+  onboarding: {
+    icon: MessagesSquare,
+    body: 'Onboard a teammate through a guided first conversation, then keep teaching it by correcting it, like a new colleague.',
+  },
+  identity: {
     icon: SlidersHorizontal,
-    body: 'Define each teammate’s purpose, voice, and level of agency, so it knows how bold to be and when to ask first.',
-    anchor: 'identity',
+    body: 'Give each teammate a clear job, a voice, and limits: what it does on its own and when it stops to ask.',
   },
-];
+};
+
+const featureCards = teammatesDetails.flatMap((detail) => {
+  const ring = RING[detail.id];
+  return ring ? [{ anchor: detail.id, title: detail.navLabel, ...ring }] : [];
+});
 
 export function TeammatesSection({
   sampler = false,
@@ -98,7 +95,6 @@ export function TeammatesSection({
           figure out becomes something the whole team can build on.
         </p>
         {hero && <SectionHeroActions page="teammates" align="start" />}
-        {sampler && <LearnMore page="teammates" />}
       </div>
       <div className={styles.featureRing} data-reveal>
         <div className={styles.ringStage}>
@@ -116,23 +112,24 @@ export function TeammatesSection({
             const top = 50 + radius * Math.sin(angle);
             const isActive = index === activeFeature;
             return (
-              <button
-                type="button"
-                key={feature.title}
+              // Each node jumps to its block on /teammates; hover and focus
+              // preview it in the hub.
+              <LandingLink
+                key={feature.anchor}
+                page="teammates"
+                anchor={feature.anchor}
+                placement={placement}
                 className={
                   isActive ? `${styles.ringNode} ${styles.ringNodeActive}` : styles.ringNode
                 }
                 style={{ left: `${left}%`, top: `${top}%` }}
-                onMouseEnter={() => setActiveFeature(index)}
-                onFocus={() => setActiveFeature(index)}
-                onClick={() => setActiveFeature(index)}
-                aria-pressed={isActive}
+                onPreview={() => setActiveFeature(index)}
               >
                 <span className={styles.ringNodeIcon} aria-hidden>
                   <feature.icon size={15} />
                 </span>
                 <span>{feature.title}</span>
-              </button>
+              </LandingLink>
             );
           })}
           <div className={styles.ringHub}>
@@ -155,7 +152,7 @@ export function TeammatesSection({
           icon left, content right, no interaction required. */}
       <div className={styles.featureList} data-reveal>
         {featureCards.map((feature) => (
-          <article key={feature.title} className={styles.featureListItem}>
+          <article key={feature.anchor} className={styles.featureListItem}>
             <span className={styles.featureListIcon} aria-hidden>
               <feature.icon size={15} />
             </span>

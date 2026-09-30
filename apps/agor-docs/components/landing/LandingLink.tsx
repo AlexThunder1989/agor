@@ -15,6 +15,8 @@ interface LandingLinkProps {
   className?: string;
   style?: CSSProperties;
   tabIndex?: number;
+  /** Hover or focus, e.g. to preview the target before the click. */
+  onPreview?: () => void;
   children: ReactNode;
 }
 
@@ -26,6 +28,7 @@ export function LandingLink({
   className,
   style,
   tabIndex,
+  onPreview,
   children,
 }: LandingLinkProps) {
   const { href } = landingPage(page);
@@ -35,6 +38,8 @@ export function LandingLink({
       className={className}
       style={style}
       tabIndex={tabIndex}
+      onMouseEnter={onPreview}
+      onFocus={onPreview}
       onClick={() =>
         trackEvent('landing_page_click', {
           landing_page: page,
