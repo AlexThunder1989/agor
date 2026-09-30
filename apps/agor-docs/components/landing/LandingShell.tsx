@@ -124,6 +124,7 @@ export function LandingShell({ ctaPrefix, children }: LandingShellProps) {
             <Link href="/guide/getting-started">Get started</Link>
             <Link href="/guide">Documentation</Link>
             <Link href="/blog">Blog</Link>
+            <Link href="/agent-roster">Agent roster</Link>
             <Link href="/faq">FAQ</Link>
             <Link href="/contact">Talk to us</Link>
           </div>

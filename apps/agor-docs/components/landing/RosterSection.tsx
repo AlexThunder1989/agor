@@ -1,144 +1,14 @@
 'use client';
 
-import {
-  Activity,
-  Bug,
-  ClipboardList,
-  Code2,
-  DoorOpen,
-  DraftingCompass,
-  Eye,
-  Hammer,
-  Handshake,
-  type LucideIcon,
-  Scale,
-  Target,
-  Telescope,
-} from 'lucide-react';
 import Link from 'next/link';
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import { trackEvent } from '../../lib/analytics';
 import styles from '../LandingPage.module.css';
-import { LearnMore } from './LandingLink';
+import { ROSTER } from './roster';
 
-// Meet the roster — real teammates from our own Agor instance (names and
-// jobs are the genuine article), rendered as blips on the Roster Radar.
-// `r`/`a` are polar coordinates (radius in radar units, angle in degrees)
-// around the scope's center; `status`/`mem` feed the hover tooltip.
-// Real teammates from the Preset Agor instance — names, jobs, and the meta
-// line are the genuine article (usage pulled from instance analytics,
-// 2026-07). `meta` is each agent's most interesting true fact.
-const rosterMembers: Array<{
-  icon: LucideIcon;
-  name: string;
-  role: string;
-  meta: string;
-  r: number;
-  a: number;
-  /** Blog post in the member's own words, when there is one. */
-  story?: string;
-}> = [
-  {
-    icon: Code2,
-    name: 'AgorClaw',
-    role: 'Main coding orchestrator, and the first teammate in the instance',
-    meta: '55B tokens · 1,600+ tasks',
-    r: 100,
-    a: -90,
-  },
-  {
-    icon: DraftingCompass,
-    name: 'Preset Architect',
-    role: 'Knows every repo and how they fit together',
-    meta: 'weekly release health check',
-    r: 170,
-    a: -58,
-  },
-  {
-    icon: Eye,
-    name: 'Princeton',
-    role: 'PR reviewer that learns from your human reviewers',
-    meta: 'learns from review comments',
-    r: 190,
-    a: 4,
-  },
-  {
-    icon: ClipboardList,
-    name: 'Milchick',
-    role: 'Chief-of-staff orchestrator',
-    meta: 'Slack-native · nightly 9pm run',
-    r: 135,
-    a: -28,
-  },
-  {
-    icon: Target,
-    name: 'Peyton Manning',
-    role: 'Sees the whole field, routes work to the right people',
-    meta: 'labels RC tickets every 4h',
-    r: 110,
-    a: 44,
-  },
-  {
-    icon: Activity,
-    name: 'SRE',
-    role: 'Datadog triage, tickets, and production fixes',
-    meta: '3 daily crons',
-    r: 155,
-    a: 92,
-  },
-  {
-    icon: Hammer,
-    name: 'Telchar',
-    role: 'Opens a ticket, branch, and PR per CVE',
-    meta: 'Snyk-fed · never merges alone',
-    r: 195,
-    a: 138,
-  },
-  {
-    icon: Scale,
-    name: 'Saul',
-    role: 'Legal, contracts, redlines expert',
-    meta: 'Slack-native · on call for redlines',
-    r: 145,
-    a: 182,
-  },
-  {
-    icon: Handshake,
-    name: 'Blake',
-    role: 'Deal desk, contracts, and order forms',
-    meta: '@-mention him in Slack',
-    r: 180,
-    a: -134,
-    story: '/blog/meet-blake',
-  },
-  {
-    icon: DoorOpen,
-    name: 'Hodor!',
-    role: 'Agor’s own PM: issues, roadmap, ritual notes',
-    meta: 'lives in #agor · attends rituals',
-    r: 200,
-    a: -158,
-    story: '/blog/meet-hodor',
-  },
-  {
-    icon: Telescope,
-    name: 'Wendy',
-    role: 'Competitive intelligence: who shipped what, and what it means',
-    meta: 'daily market scan · Monday briefing',
-    r: 210,
-    a: -99,
-    story: '/blog/meet-wendy-preset-ai-competitive-intelligence-analyst',
-  },
-  {
-    icon: Bug,
-    name: 'Bug Basher',
-    role: 'Takes Apache Superset bugs from report to merged PR',
-    meta: 'one branch per bug · tests first',
-    r: 210,
-    a: 60,
-    story: '/blog/meet-bug-basher',
-  },
-];
+// Meet the roster: blips on the Roster Radar, from the shared roster data
+// (roster.ts), which /agent-roster also lists in full.
+const rosterMembers = ROSTER;
 
 // Radar scope is authored on a 560×560 grid (center 280,280); positions are
 // expressed as percentages so the whole scope scales responsively. Values are
@@ -223,7 +93,21 @@ export function RosterSection({ sampler = false }: { sampler?: boolean }) {
           </span>
         </p>
         {sampler && (
-          <LearnMore page="teammates" anchor="roster" label="Meet the team behind them" />
+          <div className={styles.learnMore}>
+            <Link
+              href="/agent-roster"
+              className={styles.learnMoreLink}
+              onClick={() =>
+                trackEvent('landing_page_click', {
+                  landing_page: 'agent-roster',
+                  landing_anchor: '',
+                  placement: 'home-section',
+                })
+              }
+            >
+              Meet the whole roster <span aria-hidden="true">→</span>
+            </Link>
+          </div>
         )}
       </div>
       <div className={styles.radarScope} ref={radarScopeRef}>
@@ -251,7 +135,8 @@ export function RosterSection({ sampler = false }: { sampler?: boolean }) {
           return member.story ? (
             <Link
               key={member.name}
-              href={member.story}
+              href={member.story.href}
+              {...(member.story.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
               className={blipClass}
               style={radarPosition(member.r, member.a)}
               onMouseEnter={() => setHoveredMember(index)}
@@ -333,7 +218,10 @@ export function RosterSection({ sampler = false }: { sampler?: boolean }) {
               <span className={styles.tooltipMem}>{rosterMembers[hoveredMember].meta}</span>
             </div>
             {rosterMembers[hoveredMember].story ? (
-              <Link href={rosterMembers[hoveredMember].story ?? ''} className={styles.tooltipStory}>
+              <Link
+                href={rosterMembers[hoveredMember].story?.href ?? ''}
+                className={styles.tooltipStory}
+              >
                 Read the story →
               </Link>
             ) : null}

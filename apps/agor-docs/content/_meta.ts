@@ -49,6 +49,9 @@ export default {
   teammates: landingPageMeta,
   'command-center': landingPageMeta,
   governance: landingPageMeta,
+  // The Preset agent roster (linked from the home radar and the nav); not a
+  // spoke in LANDING_PAGES, but framed the same way.
+  'agent-roster': landingPageMeta,
   guide: 'Docs',
   blog: 'Blog',
   'api-reference': 'API Reference',

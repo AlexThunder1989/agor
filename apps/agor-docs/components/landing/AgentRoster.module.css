@@ -1,0 +1,191 @@
+/* /agent-roster: intro, the shared radar (RosterSection), then listings. */
+
+.intro {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: clamp(128px, 16vh, 168px) 28px 24px;
+}
+
+.title {
+  max-width: 16ch;
+  margin: 0;
+  color: var(--landing-ink);
+  font-family: var(--font-body-stack);
+  font-size: clamp(2.8rem, 6vw, 5rem);
+  font-weight: 100;
+  letter-spacing: -0.03em;
+  line-height: 1.02;
+}
+
+.lead {
+  max-width: 66ch;
+  margin: 26px 0 0;
+  color: var(--landing-muted);
+  font-size: clamp(1.08rem, 1.5vw, 1.3rem);
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+.leadStrong {
+  color: #fff;
+}
+
+.framework {
+  max-width: 820px;
+  margin-top: 48px;
+  padding: 28px 30px;
+  border: 1px solid rgba(52, 230, 196, 0.16);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(15, 34, 31, 0.6), rgba(10, 22, 20, 0.4));
+}
+
+.framework h2 {
+  margin: 0;
+  color: var(--landing-ink);
+  font-family: var(--font-body-stack);
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+
+.framework p {
+  margin: 12px 0 0;
+  color: var(--landing-muted);
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.framework code {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(52, 230, 196, 0.08);
+  color: #cfe9e5;
+  font-family: var(--font-mono-stack);
+  font-size: 0.86em;
+}
+
+.framework p a,
+.frameworkLinks li a,
+.card a.storyLink {
+  color: var(--landing-teal);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.framework p a:hover,
+.frameworkLinks li a:hover,
+.card a.storyLink:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.frameworkLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 28px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.listings {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px 28px 72px;
+}
+
+.listingsTitle {
+  margin: 0 0 32px;
+  color: var(--landing-ink);
+  font-family: var(--font-body-stack);
+  font-size: clamp(2.2rem, 4vw, 3.4rem);
+  font-weight: 100;
+  letter-spacing: -0.03em;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 18px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px;
+  border: 1px solid rgba(52, 230, 196, 0.14);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(15, 34, 31, 0.7), rgba(10, 22, 20, 0.5));
+  scroll-margin-top: 96px;
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.cardHead h3 {
+  margin: 0;
+  color: var(--landing-ink);
+  font-family: var(--font-display-stack);
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(52, 230, 196, 0.3);
+  border-radius: 50%;
+  background: rgba(52, 230, 196, 0.08);
+  color: var(--landing-teal);
+}
+
+.role {
+  margin: 2px 0 0;
+  color: var(--landing-muted);
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.abstract {
+  margin: 0;
+  color: #cfe9e5;
+  font-size: 0.96rem;
+  line-height: 1.65;
+}
+
+.meta {
+  align-self: flex-start;
+  margin: 0;
+  padding: 3px 10px;
+  border: 1px solid rgba(52, 230, 196, 0.18);
+  border-radius: 999px;
+  color: #8fa9a6;
+  font-family: var(--font-mono-stack);
+  font-size: 0.75rem;
+}
+
+.storyLink {
+  margin-top: auto;
+  padding-top: 4px;
+  font-size: 0.94rem;
+}
+
+@media (max-width: 639px) {
+  .intro {
+    padding-top: 112px;
+  }
+
+  .framework {
+    padding: 22px;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

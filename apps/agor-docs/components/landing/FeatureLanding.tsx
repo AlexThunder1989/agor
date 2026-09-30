@@ -12,7 +12,6 @@ import { LandingLink } from './LandingLink';
 import { LandingShell } from './LandingShell';
 import { MultiplayerSection } from './MultiplayerSection';
 import { LANDING_PAGES, type LandingPageId, landingPage } from './pages';
-import { RosterSection } from './RosterSection';
 import { TeammatesSection } from './TeammatesSection';
 
 // Each landing page's hero is its home-page section, promoted: h1 heading,
@@ -29,10 +28,9 @@ const PAGE_HEROES: Record<LandingPageId, ReactNode> = {
 // trust list), so the separate "On this page" row would only repeat them.
 const HERO_LINKS_DETAILS = new Set<LandingPageId>(['governance']);
 
-// Proof that closes the story, after the detail blocks.
-const PAGE_PROOF: Partial<Record<LandingPageId, ReactNode>> = {
-  teammates: <RosterSection />,
-};
+// Proof that closes the story, after the detail blocks. (The teammates
+// roster moved to its own page, /agent-roster.)
+const PAGE_PROOF: Partial<Record<LandingPageId, ReactNode>> = {};
 
 /**
  * Spoke page: its section as the hero, jump links, the detail blocks

@@ -159,6 +159,12 @@ export const NAV_MENUS: NavMenu[] = [
         title: 'Stories',
         items: [
           {
+            label: 'Agent roster',
+            desc: 'The AI teammates Preset runs on Agor.',
+            href: '/agent-roster',
+            icon: Bot,
+          },
+          {
             label: 'Meet Wendy',
             desc: 'Our competitive intelligence agent.',
             href: '/blog/meet-wendy-preset-ai-competitive-intelligence-analyst',
