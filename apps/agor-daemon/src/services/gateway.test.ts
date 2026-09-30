@@ -2196,100 +2196,96 @@ describe('GatewayService durable listener delivery fences', () => {
     );
   });
 
-  it.each([false, true])(
-    'deduplicates provider occurrence without replay (suppressed=%s)',
-    async (suppressed) => {
-      if (suppressed)
-        vi.spyOn(tenantAccess, 'isCurrentTenantEventAdmitted').mockResolvedValue(false);
-      const service = new GatewayService(
-        { run: vi.fn() } as never,
-        { service: vi.fn(), get: vi.fn() } as never
-      );
-      const eventId = '01927f9d-0000-7000-8000-000000000099';
-      const claim = vi
-        .fn()
-        .mockResolvedValueOnce({
-          outcome: 'claimed',
-          event: { id: eventId },
-        })
-        .mockResolvedValueOnce({
-          outcome: 'completed_duplicate',
-          event: { id: eventId },
-        });
-      const complete = vi.fn(async () => true);
-      const recordDeliveryMetadata = vi.fn(async () => true);
-      const listenerClaimIsCurrent = vi.fn(async () => true);
-      Object.assign(service as unknown as Record<string, unknown>, {
-        durableListenerOwnership: true,
-        inboundEventRepo: { claim, complete, recordDeliveryMetadata },
-        channelRepo: { listenerClaimIsCurrent },
+  it.each([false, true])('dedupes one provider occurrence (suppressed=%s)', async (suppressed) => {
+    if (suppressed) vi.spyOn(tenantAccess, 'isCurrentTenantEventAdmitted').mockResolvedValue(false);
+    const service = new GatewayService(
+      { run: vi.fn() } as never,
+      { service: vi.fn(), get: vi.fn() } as never
+    );
+    const eventId = '01927f9d-0000-7000-8000-000000000099';
+    const claim = vi
+      .fn()
+      .mockResolvedValueOnce({
+        outcome: 'claimed',
+        event: { id: eventId },
+      })
+      .mockResolvedValueOnce({
+        outcome: 'completed_duplicate',
+        event: { id: eventId },
       });
-      const create = vi.spyOn(service, 'create').mockResolvedValue({
-        success: true,
-        sessionId: '01927f9d-0000-7000-8000-000000000001',
-        created: true,
-        taskId: '01927f9d-0000-7000-8000-000000000002' as never,
-      });
-      const prepareDelivery = vi.fn(async () => ({ processing_comment_id: 42 }));
-      const channel = attachHiddenTenant(
-        { ...slackChannel, id: 'durable-channel' as never },
-        { tenant_id: 'tenant-durable' }
+    const complete = vi.fn(async () => true);
+    const recordDeliveryMetadata = vi.fn(async () => true);
+    const listenerClaimIsCurrent = vi.fn(async () => true);
+    Object.assign(service as unknown as Record<string, unknown>, {
+      durableListenerOwnership: true,
+      inboundEventRepo: { claim, complete, recordDeliveryMetadata },
+      channelRepo: { listenerClaimIsCurrent },
+    });
+    const create = vi.spyOn(service, 'create').mockResolvedValue({
+      success: true,
+      sessionId: '01927f9d-0000-7000-8000-000000000001',
+      created: true,
+      taskId: '01927f9d-0000-7000-8000-000000000002' as never,
+    });
+    const prepareDelivery = vi.fn(async () => ({ processing_comment_id: 42 }));
+    const channel = attachHiddenTenant(
+      { ...slackChannel, id: 'durable-channel' as never },
+      { tenant_id: 'tenant-durable' }
+    );
+    const lease = {
+      channel_id: channel.id,
+      claim_token: 'opaque-owner',
+      generation: 1,
+      claimed_at: '2026-01-01T00:00:00.000Z',
+      lease_expires_at: '2026-01-01T00:00:30.000Z',
+      instance_id: 'daemon-a',
+      boot_id: 'boot-a',
+      checkpoint: null,
+    };
+    const invoke = () =>
+      (
+        service as unknown as {
+          handleListenerInboundMessage: (
+            channel: GatewayChannel,
+            tenantId: string,
+            msg: Record<string, unknown>,
+            lease: typeof lease
+          ) => Promise<void>;
+        }
+      ).handleListenerInboundMessage(
+        channel,
+        'tenant-durable',
+        {
+          providerEventId: 'slack:event:Ev-1',
+          threadId: 'C1-1.0',
+          text: 'hello',
+          userId: 'U1',
+          prepareDelivery,
+        },
+        lease
       );
-      const lease = {
-        channel_id: channel.id,
-        claim_token: 'opaque-owner',
-        generation: 1,
-        claimed_at: '2026-01-01T00:00:00.000Z',
-        lease_expires_at: '2026-01-01T00:00:30.000Z',
-        instance_id: 'daemon-a',
-        boot_id: 'boot-a',
-        checkpoint: null,
-      };
-      const invoke = () =>
-        (
-          service as unknown as {
-            handleListenerInboundMessage: (
-              channel: GatewayChannel,
-              tenantId: string,
-              msg: Record<string, unknown>,
-              lease: typeof lease
-            ) => Promise<void>;
-          }
-        ).handleListenerInboundMessage(
-          channel,
-          'tenant-durable',
-          {
-            providerEventId: 'slack:event:Ev-1',
-            threadId: 'C1-1.0',
-            text: 'hello',
-            userId: 'U1',
-            prepareDelivery,
-          },
-          lease
-        );
 
-      await invoke();
-      await invoke();
+    await invoke();
+    await invoke();
 
-      if (suppressed) {
-        expect(create).not.toHaveBeenCalled();
-        expect(prepareDelivery).not.toHaveBeenCalled();
-        expect(recordDeliveryMetadata).not.toHaveBeenCalled();
-        expect(complete).toHaveBeenCalledOnce();
-        return;
-      }
-      expect(create).toHaveBeenCalledOnce();
-      expect(prepareDelivery).toHaveBeenCalledOnce();
-      expect(recordDeliveryMetadata).toHaveBeenCalledWith(
-        expect.objectContaining({ eventId, metadata: { processing_comment_id: 42 } })
-      );
-      expect(create.mock.calls[0][0]).toMatchObject({
-        gateway_inbound_event_id: eventId,
-        metadata: { processing_comment_id: 42 },
-      });
+    if (suppressed) {
+      expect(create).not.toHaveBeenCalled();
+      expect(prepareDelivery).not.toHaveBeenCalled();
+      expect(recordDeliveryMetadata).not.toHaveBeenCalled();
       expect(complete).toHaveBeenCalledOnce();
+      return;
     }
-  );
+    expect(create).toHaveBeenCalledOnce();
+    expect(prepareDelivery).toHaveBeenCalledOnce();
+    expect(recordDeliveryMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({ eventId, metadata: { processing_comment_id: 42 } })
+    );
+    expect(create.mock.calls[0][0]).toMatchObject({
+      gateway_inbound_event_id: eventId,
+      metadata: { processing_comment_id: 42 },
+    });
+    expect(complete).toHaveBeenCalledOnce();
+  });
 
   it('does not acknowledge an occurrence still processing under a previous owner', async () => {
     const service = new GatewayService(

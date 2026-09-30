@@ -270,57 +270,54 @@ describe('scheduler HA occurrence recovery', () => {
     });
   }
 
-  dbTest(
-    'recovers a fresh same-minute manual run after activation without using rounded cron time',
-    async ({ db }) => {
-      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(NOW + 30_000);
-      const admission = vi
-        .spyOn(tenantAccess, 'isCurrentTenantEventAdmitted')
-        .mockImplementation(async (_db, at) => at > NOW + 10_000);
-      try {
-        const { creator, schedule } = await seedRunnableSchedule(
-          db,
-          {
-            email: `scheduler-late-recovery-${Math.random()}@example.com`,
-            name: 'Schedule creator',
+  dbTest('recovers a same-minute manual run after activation', async ({ db }) => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(NOW + 30_000);
+    const admission = vi
+      .spyOn(tenantAccess, 'isCurrentTenantEventAdmitted')
+      .mockImplementation(async (_db, at) => at > NOW + 10_000);
+    try {
+      const { creator, schedule } = await seedRunnableSchedule(
+        db,
+        {
+          email: `scheduler-late-recovery-${Math.random()}@example.com`,
+          name: 'Schedule creator',
+        },
+        { agentic_tool: 'claude-code' }
+      );
+      const { app, prompt } = createSchedulerApp(db);
+      const killed = new SchedulerService(db, app, {
+        tenantId: 'default',
+        testHooks: {
+          afterSessionAdmission: () => {
+            throw new Error('simulated process death');
           },
-          { agentic_tool: 'claude-code' }
-        );
-        const { app, prompt } = createSchedulerApp(db);
-        const killed = new SchedulerService(db, app, {
-          tenantId: 'default',
-          testHooks: {
-            afterSessionAdmission: () => {
-              throw new Error('simulated process death');
-            },
-          },
-        });
-        await expect(
-          killed.executeScheduleNow({
-            scheduleId: schedule.schedule_id,
-            triggeredBy: creator.user_id,
-          })
-        ).rejects.toThrow('simulated process death');
+        },
+      });
+      await expect(
+        killed.executeScheduleNow({
+          scheduleId: schedule.schedule_id,
+          triggeredBy: creator.user_id,
+        })
+      ).rejects.toThrow('simulated process death');
 
-        nowSpy.mockReturnValue(NOW + 10 * 60_000);
-        const replacement = new SchedulerService(db, app, { tenantId: 'default' });
-        await (
-          replacement as unknown as {
-            tick(): Promise<unknown>;
-          }
-        ).tick();
+      nowSpy.mockReturnValue(NOW + 10 * 60_000);
+      const replacement = new SchedulerService(db, app, { tenantId: 'default' });
+      await (
+        replacement as unknown as {
+          tick(): Promise<unknown>;
+        }
+      ).tick();
 
-        expect(prompt).toHaveBeenCalledOnce();
-        const [session] = await new SessionRepository(db).findByScheduleId(schedule.schedule_id);
-        expect(
-          await new SessionRepository(db).isScheduledInitializationComplete(session.session_id)
-        ).toBe(true);
-      } finally {
-        admission.mockRestore();
-        nowSpy.mockRestore();
-      }
+      expect(prompt).toHaveBeenCalledOnce();
+      const [session] = await new SessionRepository(db).findByScheduleId(schedule.schedule_id);
+      expect(
+        await new SessionRepository(db).isScheduledInitializationComplete(session.session_id)
+      ).toBe(true);
+    } finally {
+      admission.mockRestore();
+      nowSpy.mockRestore();
     }
-  );
+  });
 
   dbTest(
     'already-dispatched recovery does not reload mutable creator launch state',
