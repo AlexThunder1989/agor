@@ -99,6 +99,25 @@ describe('initial load debug timer', () => {
 });
 
 describe('startup lifecycle', () => {
+  it.each(['success', 'error', 'discarded'] as const)(
+    'notifies observer cleanup once on %s, including late subscribers',
+    (status) => {
+      const timer = createInitialLoadDebugTimer([]);
+      const removed = vi.fn();
+      timer.onSettled(removed)();
+      const cleanup = vi.fn();
+      timer.onSettled(cleanup);
+      if (status === 'discarded') timer.discard();
+      else timer.finish(status);
+      timer.discard();
+      expect(cleanup).toHaveBeenCalledTimes(1);
+      expect(removed).not.toHaveBeenCalled();
+      const late = vi.fn();
+      timer.onSettled(late);
+      expect(late).toHaveBeenCalledTimes(1);
+    }
+  );
+
   it('distinguishes queued, pending, skipped and failed work; redacts errors', async () => {
     const timer = createInitialLoadDebugTimer([
       { key: 'light', label: 'Light' },

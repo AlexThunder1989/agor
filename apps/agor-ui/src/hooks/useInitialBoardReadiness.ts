@@ -15,6 +15,7 @@ export function useInitialBoardReadiness(
   const expected = useRef(expectedNodes);
   expected.current = expectedNodes;
   const positioning = useRef<{ boardId: string; notBefore: number } | null>(null);
+  const observer = useRef<{ boardId: string; failed: () => void } | null>(null);
 
   useEffect(() => {
     const timer = getInitialLoadDebugTimer();
@@ -24,6 +25,25 @@ export function useInitialBoardReadiness(
     let cancelPaint: (() => void) | undefined;
     let previousViewport = '';
     let stableFrames = 0;
+    // Missing measurements/positioning must not leave a diagnostic polling for
+    // the lifetime of the canvas. This deadline never retries or moves the view.
+    const timeout = setTimeout(() => {
+      stop();
+      timer.surfaceFailed('board', 'board-readiness-timeout');
+    }, 30_000);
+    const stop = () => {
+      cancelAnimationFrame(frame);
+      cancelPaint?.();
+      clearTimeout(timeout);
+    };
+    const unsubscribe = timer.onSettled(stop);
+    observer.current = {
+      boardId,
+      failed: () => {
+        stop();
+        timer.surfaceFailed('board', 'board-initial-position-failed');
+      },
+    };
     const observe = () => {
       if (getInitialLoadDebugTimer() !== timer) return;
       const flow = instance.current;
@@ -47,20 +67,29 @@ export function useInitialBoardReadiness(
       ) {
         timer.markStage('board-initial-position-settled');
         timer.markStage('board-ready-commit');
-        cancelPaint = afterInitialLoadPaintOpportunity(() => timer.surfaceReady('board'));
+        cancelPaint = afterInitialLoadPaintOpportunity(() => {
+          stop();
+          timer.surfaceReady('board');
+        });
         return;
       }
       frame = requestAnimationFrame(observe);
     };
     frame = requestAnimationFrame(observe);
     return () => {
-      cancelAnimationFrame(frame);
-      cancelPaint?.();
+      stop();
+      unsubscribe();
+      observer.current = null;
+      positioning.current = null;
     };
   }, [initialized, boardId, instance]);
 
-  return (duration: number) => {
+  return (duration: number, positioned = true) => {
     if (!boardId || !getInitialLoadDebugTimer()) return;
+    if (!positioned) {
+      if (observer.current?.boardId === boardId) observer.current.failed();
+      return;
+    }
     // React Flow 11 fitView returns a boolean, not a completion promise. Wait
     // out the EXISTING animation, then observe a stable viewport for two frames.
     // This also handles no-motion fits (which emit no onMoveEnd event).

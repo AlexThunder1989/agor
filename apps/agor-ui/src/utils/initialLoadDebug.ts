@@ -135,6 +135,7 @@ export function createInitialLoadDebugTimer(
     stageTransitions: [],
   };
   let closed = false;
+  const settlementListeners = new Set<() => void>();
   let configReady = false;
   let surfaceReady = false;
   let fetchStart: number | null = null;
@@ -186,11 +187,20 @@ export function createInitialLoadDebugTimer(
     publish();
     closed = true;
     if (activeTimer === timer) activeTimer = null;
+    for (const listener of settlementListeners) listener();
+    settlementListeners.clear();
     return timings;
   };
   const timer = {
     queue,
     markStage,
+    onSettled(listener: () => void) {
+      if (closed) listener();
+      else settlementListeners.add(listener);
+      return () => {
+        settlementListeners.delete(listener);
+      };
+    },
     surfaceReady(surface: 'home' | 'board' | 'conversation') {
       markStage(`${surface}-paint-opportunity`);
       if (surface === target) surfaceReady = true;

@@ -1772,27 +1772,32 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
         // lives on this (newly-loaded) board, honor it instead of fitView.
         // Falls back to fitView when the pending target isn't on this board
         // either (stale/unknown id).
-        const pending = consumePendingRecenter();
-        if (
-          pending &&
-          recenterOnNode(pending.nodeId, {
-            sessionId: pending.sessionId,
-            ensureVisible: pending.ensureVisible,
-          })
-        ) {
-          observeInitialPositionRef.current(400);
+        try {
+          const pending = consumePendingRecenter();
+          if (
+            pending &&
+            recenterOnNode(pending.nodeId, {
+              sessionId: pending.sessionId,
+              ensureVisible: pending.ensureVisible,
+            })
+          ) {
+            observeInitialPositionRef.current(400);
+            lastFitBoardIdRef.current = board?.board_id ?? null;
+            return;
+          }
+          const fitted = reactFlowInstanceRef.current?.fitView({
+            padding: 0.2, // 20% padding around nodes
+            minZoom: 0.1, // Allow zooming out far enough to see widely-spaced nodes
+            maxZoom: 1.0, // Don't zoom in beyond 100% to keep nodes readable
+            duration: 200, // Smooth animation
+          });
+          observeInitialPositionRef.current(200, !!fitted);
+          // Mark this board as fitted
           lastFitBoardIdRef.current = board?.board_id ?? null;
-          return;
+        } catch (error) {
+          observeInitialPositionRef.current(0, false);
+          throw error; // Diagnostics must preserve the existing positioning error.
         }
-        const fitted = reactFlowInstanceRef.current?.fitView({
-          padding: 0.2, // 20% padding around nodes
-          minZoom: 0.1, // Allow zooming out far enough to see widely-spaced nodes
-          maxZoom: 1.0, // Don't zoom in beyond 100% to keep nodes readable
-          duration: 200, // Smooth animation
-        });
-        if (fitted) observeInitialPositionRef.current(200);
-        // Mark this board as fitted
-        lastFitBoardIdRef.current = board?.board_id ?? null;
       }, 100);
 
       return () => clearTimeout(timer);
