@@ -420,6 +420,100 @@ describe('Sandpack React asynchronous instance ownership', () => {
     expect(loads[1].client!.destroy).not.toHaveBeenCalled();
   });
 
+  it('a failed concurrent registration keeps the survivor operational', async () => {
+    autoHash = true;
+    render(tree());
+    await flush();
+    await finish(0);
+    const current = loads[0].client!;
+    const dispatch = vi.spyOn(current, 'dispatch');
+    const update = vi.spyOn(current, 'updateSandbox');
+    current.status = 'done';
+    const iframe = document.createElement('iframe');
+    document.body.appendChild(iframe);
+    let registration!: Promise<void>;
+    act(() => {
+      registration = apis.get('a')!.sandpack.registerBundler(iframe, 'other-id');
+    });
+    await flush();
+    await act(async () => {
+      loads[1].start.reject(new Error('second import failed'));
+      await registration;
+    });
+    expect(apis.get('a')!.sandpack.error?.message).toBe('second import failed');
+    expect(apis.get('a')!.sandpack.status).toBe('running');
+    apis.get('a')!.dispatch({ type: 'refresh' }, 'same-id');
+    expect(dispatch).toHaveBeenCalledWith({ type: 'refresh' });
+    act(() => apis.get('a')!.sandpack.updateFile('/index.html', '<h1>updated</h1>'));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        files: expect.objectContaining({
+          '/index.html': expect.objectContaining({ code: '<h1>updated</h1>' }),
+        }),
+      })
+    );
+    expect(apis.get('a')!.sandpack.clients['same-id']).toBe(current);
+    expect(current.destroy).not.toHaveBeenCalled();
+    iframe.remove();
+  });
+
+  it('an immediate zero-client run initializes a preview mounted later', async () => {
+    autoHash = true;
+    const lateTree = (show: boolean) => (
+      <pkg.SandpackProvider template="static" options={{ initMode: 'immediate' }}>
+        {show ? <pkg.SandpackPreview /> : null}
+      </pkg.SandpackProvider>
+    );
+    const view = render(lateTree(false));
+    await flush();
+    expect(loads).toHaveLength(0);
+    view.rerender(lateTree(true));
+    await flush();
+    expect(loads).toHaveLength(1);
+    await finish(0);
+    expect(relays()).toHaveLength(1);
+    const iframe = loads[0].client!.iframe;
+    Object.defineProperty(iframe, 'contentWindow', { value: null, configurable: true });
+    view.unmount();
+    expect(loads[0].client!.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('pre-init visibility teardown preserves initial status and registration', async () => {
+    autoHash = true;
+    let notify!: IntersectionObserverCallback;
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        constructor(callback: IntersectionObserverCallback) {
+          notify = callback;
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    );
+    render(tree('a', 'a', 'user-visible'));
+    const visible = (isIntersecting: boolean) =>
+      act(() => {
+        notify([{ isIntersecting } as IntersectionObserverEntry], {} as IntersectionObserver);
+      });
+    expect(apis.get('a')!.sandpack.status).toBe('initial');
+    visible(false);
+    expect(apis.get('a')!.sandpack.status).toBe('initial');
+    expect(hashes).toHaveLength(0);
+    expect(loads).toHaveLength(0);
+    visible(true);
+    await flush();
+    await finish(0);
+    expect(apis.get('a')!.sandpack.status).toBe('running');
+    visible(false);
+    expect(apis.get('a')!.sandpack.status).toBe('idle');
+    expect(relays()).toHaveLength(0);
+  });
+
   it('live loader rejection is reported and a new attempt can succeed', async () => {
     autoHash = true;
     render(tree());
@@ -427,6 +521,8 @@ describe('Sandpack React asynchronous instance ownership', () => {
     loads[0].start.reject(new Error('import failed'));
     await flush();
     expect(apis.get('a')!.sandpack.error?.message).toBe('import failed');
+    expect(apis.get('a')!.sandpack.status).toBe('idle');
+    expect(Object.keys(apis.get('a')!.sandpack.clients)).toHaveLength(0);
     let run!: Promise<void>;
     act(() => {
       run = apis.get('a')!.sandpack.runSandpack();

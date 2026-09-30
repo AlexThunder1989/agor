@@ -119,33 +119,34 @@
 +        if (Object.keys(clients.current).length === 0 && Object.keys(clientCreations.current).length === 0) {
 +            clearTimeout(timeoutHook.current);
 +        }
-+        setState(function (prev) { return (__assign(__assign({}, prev), { status: "idle", error: { message: error instanceof Error ? error.message : String(error) } })); });
++        setState(function (prev) { return (__assign(__assign({}, prev), { status: Object.keys(clients.current).length > 0 ? "running" : "idle", error: { message: error instanceof Error ? error.message : String(error) } })); });
      }); }, [filesState.environment, filesState.files, state.reactDevTools]);
      var unregisterAllClients = React.useCallback(function () {
 -        Object.keys(clients.current).map(unregisterBundler);
 +        clientEpoch.current++;
 +        Object.keys(clientCreations.current).forEach(function (clientId) { releaseClient(clientId, true); });
 +        clearTimeout(timeoutHook.current);
-+        setState(function (prev) { return (__assign(__assign({}, prev), { status: "idle" })); });
++        setState(function (prev) { return (__assign(__assign({}, prev), { status: prev.status === "initial" ? "initial" : "idle" })); });
          if (typeof unsubscribe.current === "function") {
              unsubscribe.current();
              unsubscribe.current = undefined;
          }
      }, []);
 -    var runSandpack = React.useCallback(function () { return __awaiter(void 0, void 0, void 0, function () {
-+    var runSandpack = React.useCallback(function () { var epoch = clientEpoch.current; return __awaiter(void 0, void 0, void 0, function () {
++    var runSandpack = React.useCallback(function () { var epoch = clientEpoch.current; var hadRegisteredIframes = Object.keys(registeredIframes.current).length > 0; return __awaiter(void 0, void 0, void 0, function () {
          return __generator(this, function (_a) {
              switch (_a.label) {
                  case 0: return [4 /*yield*/, Promise.all(Object.entries(registeredIframes.current).map(function (_a) {
-@@ -1793,6 +1844,7 @@
+@@ -1793,6 +1844,8 @@
                      }))];
                  case 1:
                      _a.sent();
-+                    if (epoch !== clientEpoch.current || Object.keys(clients.current).length === 0) return [2 /*return*/];
++                    // An empty run arms future registrations; a run whose clients all failed does not.
++                    if (epoch !== clientEpoch.current || (hadRegisteredIframes && Object.keys(clients.current).length === 0)) return [2 /*return*/];
                      setState(function (prev) { return (__assign(__assign({}, prev), { error: null, status: "running" })); });
                      return [2 /*return*/];
              }
-@@ -1854,6 +1906,7 @@
+@@ -1854,6 +1907,7 @@
          return __generator(this, function (_a) {
              switch (_a.label) {
                  case 0:
@@ -153,7 +154,7 @@
                      // Store the iframe info so it can be
                      // used later to manually run sandpack
                      registeredIframes.current[clientId] = {
-@@ -1870,26 +1923,10 @@
+@@ -1870,26 +1924,10 @@
          });
      }); }, [createClient, state.status]);
      var unregisterBundler = function (clientId) {
@@ -184,7 +185,7 @@
          // Keep running if it still have clients
          var status = Object.keys(clients.current).length > 0 ? "running" : "idle";
          setState(function (prev) { return (__assign(__assign({}, prev), { status: status })); });
-@@ -2070,6 +2107,8 @@
+@@ -2070,6 +2108,8 @@
      }, [initModeFromProps, initializeSandpackIframe, state.initMode]);
      React.useEffect(function () {
          return function unmountClient() {
@@ -314,33 +315,34 @@
 +        if (Object.keys(clients.current).length === 0 && Object.keys(clientCreations.current).length === 0) {
 +            clearTimeout(timeoutHook.current);
 +        }
-+        setState(function (prev) { return (__assign(__assign({}, prev), { status: "idle", error: { message: error instanceof Error ? error.message : String(error) } })); });
++        setState(function (prev) { return (__assign(__assign({}, prev), { status: Object.keys(clients.current).length > 0 ? "running" : "idle", error: { message: error instanceof Error ? error.message : String(error) } })); });
      }); }, [filesState.environment, filesState.files, state.reactDevTools]);
      var unregisterAllClients = useCallback(function () {
 -        Object.keys(clients.current).map(unregisterBundler);
 +        clientEpoch.current++;
 +        Object.keys(clientCreations.current).forEach(function (clientId) { releaseClient(clientId, true); });
 +        clearTimeout(timeoutHook.current);
-+        setState(function (prev) { return (__assign(__assign({}, prev), { status: "idle" })); });
++        setState(function (prev) { return (__assign(__assign({}, prev), { status: prev.status === "initial" ? "initial" : "idle" })); });
          if (typeof unsubscribe.current === "function") {
              unsubscribe.current();
              unsubscribe.current = undefined;
          }
      }, []);
 -    var runSandpack = useCallback(function () { return __awaiter(void 0, void 0, void 0, function () {
-+    var runSandpack = useCallback(function () { var epoch = clientEpoch.current; return __awaiter(void 0, void 0, void 0, function () {
++    var runSandpack = useCallback(function () { var epoch = clientEpoch.current; var hadRegisteredIframes = Object.keys(registeredIframes.current).length > 0; return __awaiter(void 0, void 0, void 0, function () {
          return __generator(this, function (_a) {
              switch (_a.label) {
                  case 0: return [4 /*yield*/, Promise.all(Object.entries(registeredIframes.current).map(function (_a) {
-@@ -1766,6 +1817,7 @@
+@@ -1766,6 +1817,8 @@
                      }))];
                  case 1:
                      _a.sent();
-+                    if (epoch !== clientEpoch.current || Object.keys(clients.current).length === 0) return [2 /*return*/];
++                    // An empty run arms future registrations; a run whose clients all failed does not.
++                    if (epoch !== clientEpoch.current || (hadRegisteredIframes && Object.keys(clients.current).length === 0)) return [2 /*return*/];
                      setState(function (prev) { return (__assign(__assign({}, prev), { error: null, status: "running" })); });
                      return [2 /*return*/];
              }
-@@ -1827,6 +1879,7 @@
+@@ -1827,6 +1880,7 @@
          return __generator(this, function (_a) {
              switch (_a.label) {
                  case 0:
@@ -348,7 +350,7 @@
                      // Store the iframe info so it can be
                      // used later to manually run sandpack
                      registeredIframes.current[clientId] = {
-@@ -1843,26 +1896,10 @@
+@@ -1843,26 +1897,10 @@
          });
      }); }, [createClient, state.status]);
      var unregisterBundler = function (clientId) {
@@ -379,7 +381,7 @@
          // Keep running if it still have clients
          var status = Object.keys(clients.current).length > 0 ? "running" : "idle";
          setState(function (prev) { return (__assign(__assign({}, prev), { status: status })); });
-@@ -2043,6 +2080,8 @@
+@@ -2043,6 +2081,8 @@
      }, [initModeFromProps, initializeSandpackIframe, state.initMode]);
      useEffect(function () {
          return function unmountClient() {
