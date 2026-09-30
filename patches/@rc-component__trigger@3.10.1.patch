@@ -1,0 +1,219 @@
+diff --git a/es/hooks/useTarget.js b/es/hooks/useTarget.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..a0467b084b20f217c79f032d02ef337666b5765a
+--- /dev/null
++++ b/es/hooks/useTarget.js
+@@ -0,0 +1,61 @@
++import * as React from 'react';
++import { getDOM, useLayoutEffect } from '@rc-component/util';
++// This callback may outlive its owner through a deleted host Fiber.ref.
++// Give it only an owner-cleared cell, never Trigger's render context or a
++// state dispatch (whose queue can retain lastRenderedState after unmount).
++function createTargetRef(cell, targetRef) {
++  return node => {
++    const nextTarget = getDOM(node);
++    if (targetRef.current !== nextTarget) {
++      targetRef.current = nextTarget;
++      cell.current.update?.(nextTarget);
++    }
++  };
++}
++function useTarget() {
++  const [targetEle, setTargetEle] = React.useState(null);
++  const cell = React.useRef({ update: setTargetEle });
++  const externalForwardRef = React.useRef(null);
++  const setTargetRef = React.useMemo(() => createTargetRef(cell, externalForwardRef), []);
++  useLayoutEffect(() => {
++    cell.current.update = setTargetEle;
++    setTargetEle(externalForwardRef.current);
++    return () => {
++      cell.current.update = null;
++      externalForwardRef.current = null;
++    };
++  }, []);
++  return [targetEle, externalForwardRef, setTargetRef];
++}
++
++// Use React's dependency comparison (the util hook misses single-ref changes)
++// and preserve cleanup-return refs without retaining Trigger's render context.
++const supportsRefCleanup = Number(React.version.split('.')[0]) >= 19;
++function assignChildRef(ref, node) {
++  if (typeof ref === 'function') return ref(node);
++  if (ref) ref.current = node;
++}
++function composeTargetRef(targetRef, childRef) {
++  if (!childRef) return targetRef;
++  return node => {
++    targetRef(node);
++    try {
++      const cleanup = assignChildRef(childRef, node);
++      if (node !== null && supportsRefCleanup) {
++        return () => {
++          targetRef(null);
++          if (typeof cleanup === 'function') cleanup();
++          else assignChildRef(childRef, null);
++        };
++      }
++    } catch (error) {
++      targetRef(null);
++      throw error;
++    }
++  };
++}
++function useTargetRef(targetRef, childRef) {
++  return React.useMemo(() => composeTargetRef(targetRef, childRef), [targetRef, childRef]);
++}
++export { useTargetRef };
++export default useTarget;
+diff --git a/es/index.js b/es/index.js
+index b14e0c30992cf97c8471b8a53e7004bfea67ee77..0c4875632566edc8fe3735f844ce6881ac2a2590 100644
+--- a/es/index.js
++++ b/es/index.js
+@@ -1,8 +1,9 @@
+ import Portal from '@rc-component/portal';
+ import { clsx } from 'clsx';
+ import { useResizeObserver } from '@rc-component/resize-observer';
+-import { getDOM, getNodeRef, getShadowRoot, isDOM, useComposeRef, useEvent, useId, useLayoutEffect } from '@rc-component/util';
++import { getNodeRef, getShadowRoot, isDOM, useEvent, useId, useLayoutEffect } from '@rc-component/util';
+ import * as React from 'react';
++import useTarget, { useTargetRef } from './hooks/useTarget';
+ import Popup from "./Popup";
+ import TriggerContext, { UniqueContext } from "./context";
+ import useAction from "./hooks/useAction";
+@@ -114,17 +115,7 @@ export function generateTrigger(PortalComponent = Portal) {
+ 
+     // =========================== Target ===========================
+     // Use state to control here since `useRef` update not trigger render
+-    const [targetEle, setTargetEle] = React.useState(null);
+-
+-    // Used for forwardRef target. Not use internal
+-    const externalForwardRef = React.useRef(null);
+-    const setTargetRef = useEvent(node => {
+-      const domNode = getDOM(node);
+-      if (isDOM(domNode) && targetEle !== domNode) {
+-        setTargetEle(domNode);
+-        externalForwardRef.current = domNode;
+-      }
+-    });
++    const [targetEle, externalForwardRef, setTargetRef] = useTarget();
+     const cloneProps = {};
+     const inPopupOrChild = useEvent(ele => {
+       const childDOM = targetEle;
+@@ -478,7 +469,7 @@ export function generateTrigger(PortalComponent = Portal) {
+     useResizeObserver(mergedOpen, targetEle, onTargetResize);
+ 
+     // Compose refs
+-    const mergedRef = useComposeRef(setTargetRef, getNodeRef(child));
++    const mergedRef = useTargetRef(setTargetRef, getNodeRef(child));
+ 
+     // Child Node
+     const triggerNode = /*#__PURE__*/React.cloneElement(child, {
+diff --git a/lib/hooks/useTarget.js b/lib/hooks/useTarget.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..567085c5e3a0b4e1be61f28666ab3d32e9e80222
+--- /dev/null
++++ b/lib/hooks/useTarget.js
+@@ -0,0 +1,63 @@
++"use strict";
++Object.defineProperty(exports, "__esModule", { value: true });
++const React = require("react");
++const { getDOM, useLayoutEffect } = require("@rc-component/util");
++// This callback may outlive its owner through a deleted host Fiber.ref.
++// Give it only an owner-cleared cell, never Trigger's render context or a
++// state dispatch (whose queue can retain lastRenderedState after unmount).
++function createTargetRef(cell, targetRef) {
++  return node => {
++    const nextTarget = getDOM(node);
++    if (targetRef.current !== nextTarget) {
++      targetRef.current = nextTarget;
++      cell.current.update?.(nextTarget);
++    }
++  };
++}
++function useTarget() {
++  const [targetEle, setTargetEle] = React.useState(null);
++  const cell = React.useRef({ update: setTargetEle });
++  const externalForwardRef = React.useRef(null);
++  const setTargetRef = React.useMemo(() => createTargetRef(cell, externalForwardRef), []);
++  useLayoutEffect(() => {
++    cell.current.update = setTargetEle;
++    setTargetEle(externalForwardRef.current);
++    return () => {
++      cell.current.update = null;
++      externalForwardRef.current = null;
++    };
++  }, []);
++  return [targetEle, externalForwardRef, setTargetRef];
++}
++
++// Use React's dependency comparison (the util hook misses single-ref changes)
++// and preserve cleanup-return refs without retaining Trigger's render context.
++const supportsRefCleanup = Number(React.version.split('.')[0]) >= 19;
++function assignChildRef(ref, node) {
++  if (typeof ref === 'function') return ref(node);
++  if (ref) ref.current = node;
++}
++function composeTargetRef(targetRef, childRef) {
++  if (!childRef) return targetRef;
++  return node => {
++    targetRef(node);
++    try {
++      const cleanup = assignChildRef(childRef, node);
++      if (node !== null && supportsRefCleanup) {
++        return () => {
++          targetRef(null);
++          if (typeof cleanup === 'function') cleanup();
++          else assignChildRef(childRef, null);
++        };
++      }
++    } catch (error) {
++      targetRef(null);
++      throw error;
++    }
++  };
++}
++function useTargetRef(targetRef, childRef) {
++  return React.useMemo(() => composeTargetRef(targetRef, childRef), [targetRef, childRef]);
++}
++exports.useTargetRef = useTargetRef;
++exports.default = useTarget;
+diff --git a/lib/index.js b/lib/index.js
+index 1727a7fbfb68de729d5937aebbdc96ae809dbb95..29cf6c6b36974341c48d1632a37bea26e56e76c0 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -18,6 +18,7 @@ var _util = require("@rc-component/util");
+ var React = _interopRequireWildcard(require("react"));
+ var _Popup = _interopRequireDefault(require("./Popup"));
+ var _context = _interopRequireWildcard(require("./context"));
++var _useTarget = _interopRequireDefault(require("./hooks/useTarget"));
+ var _useAction = _interopRequireDefault(require("./hooks/useAction"));
+ var _useAlign = _interopRequireDefault(require("./hooks/useAlign"));
+ var _useDelay = _interopRequireDefault(require("./hooks/useDelay"));
+@@ -127,17 +128,7 @@ function generateTrigger(PortalComponent = _portal.default) {
+ 
+     // =========================== Target ===========================
+     // Use state to control here since `useRef` update not trigger render
+-    const [targetEle, setTargetEle] = React.useState(null);
+-
+-    // Used for forwardRef target. Not use internal
+-    const externalForwardRef = React.useRef(null);
+-    const setTargetRef = (0, _util.useEvent)(node => {
+-      const domNode = (0, _util.getDOM)(node);
+-      if ((0, _util.isDOM)(domNode) && targetEle !== domNode) {
+-        setTargetEle(domNode);
+-        externalForwardRef.current = domNode;
+-      }
+-    });
++    const [targetEle, externalForwardRef, setTargetRef] = (0, _useTarget.default)();
+     const cloneProps = {};
+     const inPopupOrChild = (0, _util.useEvent)(ele => {
+       const childDOM = targetEle;
+@@ -491,7 +482,7 @@ function generateTrigger(PortalComponent = _portal.default) {
+     (0, _resizeObserver.useResizeObserver)(mergedOpen, targetEle, onTargetResize);
+ 
+     // Compose refs
+-    const mergedRef = (0, _util.useComposeRef)(setTargetRef, (0, _util.getNodeRef)(child));
++    const mergedRef = (0, _useTarget.useTargetRef)(setTargetRef, (0, _util.getNodeRef)(child));
+ 
+     // Child Node
+     const triggerNode = /*#__PURE__*/React.cloneElement(child, {

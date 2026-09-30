@@ -105,6 +105,11 @@ allowBuilds:
   # Agor's exporter deliberately uses UDP to the local Agent.
   'unix-dgram@2.0.7': false
 patchedDependencies:
+  # Release Trigger's DOM/dispatch cells when its owner unmounts; keep target
+  # refs outside render closures, including composed child refs. Remove once
+  # upstream provides equivalent cleanup and ref lifecycle correctness.
+  # Regression: apps/agor-ui/src/test/tooltipTargetLifecycle.test.tsx.
+  '@rc-component/trigger@3.10.1': patches/@rc-component__trigger@3.10.1.patch
   # AntD Form's delayed-state hook must cancel timers/frames on unmount.
   # Remove once upstream useDelayState includes effect cleanup; regression:
   # apps/agor-ui/src/test/antdDelayState.test.tsx.
