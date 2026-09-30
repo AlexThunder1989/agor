@@ -1,5 +1,6 @@
 // Restriction INTENT, not enforcement proof; the only writer is the in-Cell `agor tenant restriction apply` Job.
 // The writer authenticates nobody: never call it from tenant-controlled request parameters.
+import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import {
   isTenantRestrictionClosed,
@@ -200,6 +201,38 @@ export async function readTenantRestrictionIntents(
       )
     ).map(parseRow);
   });
+}
+
+/** Durable restriction epoch for fenced work; `null` means no restriction was ever recorded. */
+export async function readTenantRestrictionGeneration(
+  db: Database,
+  tenantId: string
+): Promise<string | null> {
+  const records = await readTenantRestrictionIntents(db, tenantId);
+  if (records.length === 0) return null;
+  return createHash('sha256')
+    .update(
+      JSON.stringify(
+        records.map((record) => [
+          record.version,
+          record.controllerId,
+          record.placementId,
+          record.operationId,
+          record.revision,
+          record.phase,
+        ])
+      )
+    )
+    .digest('hex');
+}
+
+/** An unstamped legacy widget is admissible only before any restriction history. */
+export function tenantRestrictionGenerationMatches(
+  widgetGeneration: string | null | undefined,
+  currentGeneration: string | null
+): boolean {
+  if (widgetGeneration === undefined) return currentGeneration === null;
+  return widgetGeneration === currentGeneration;
 }
 
 /** Uncached admission read for serving adapters; DB errors and invalid rows reject the caller. */
