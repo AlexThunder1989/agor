@@ -1,11 +1,5 @@
-/**
- * PostgreSQL persistence for tenant restriction INTENT, not enforcement proof.
- * The only mutation surface is `agor tenant restriction apply`, an in-Cell
- * operator/Job command that already holds the runtime database credential.
- * There is still no HTTP/MCP/daemon mutation route, and the writer authenticates
- * nobody: the application database role is a trusted process boundary, not an
- * operator credential. Do not call it from tenant-controlled request parameters.
- */
+// Restriction INTENT, not enforcement proof; the only writer is the in-Cell `agor tenant restriction apply` Job.
+// The writer authenticates nobody: never call it from tenant-controlled request parameters.
 import { sql } from 'drizzle-orm';
 import {
   isTenantRestrictionClosed,
@@ -99,8 +93,7 @@ async function assertRestrictionScope(db: Database, tenantId: string): Promise<v
 }
 
 function parseRow(row: Record<string, unknown>): TenantRestrictionRecord {
-  // Revision is bigint on PostgreSQL. Reject unsafe/corrupt stored data instead
-  // of interpreting a malformed row as absent/unrestricted.
+  // Revision is bigint; corrupt stored data must never read as absent/unrestricted.
   const parsed = TenantRestrictionRecordSchema.safeParse({
     version: row.protocol_version,
     controllerId: row.controller_id,
@@ -114,11 +107,7 @@ function parseRow(row: Record<string, unknown>): TenantRestrictionRecord {
 }
 
 export interface TenantRestrictionIntentOptions {
-  /**
-   * Destination for the single bounded transition line. Defaults to
-   * `console.info`; a CLI caller whose stdout is a machine-readable contract
-   * passes a stderr writer so the operational line never lands in its payload.
-   */
+  /** Transition line sink (default `console.info`); the CLI passes stderr to keep stdout parseable. */
   log?: (line: string) => void;
 }
 
@@ -127,10 +116,7 @@ function loggable(value: string): string {
   return value.length > 100 ? `${value.slice(0, 100)}…` : value;
 }
 
-/**
- * Serialize even first insertion (FOR UPDATE cannot lock an absent row).
- * Short transaction only; never waits for sockets/processes/network under lock.
- */
+/** Advisory lock serializes first insertion; never wait on sockets/processes/network under it. */
 export async function applyTenantRestrictionIntent(
   db: Database,
   tenantId: string,
@@ -173,8 +159,7 @@ export async function applyTenantRestrictionIntent(
     `
     );
     if (isTenantRestrictionClosed(record)) {
-      // Hold pending prompts atomically with intent. Reactivation never clears
-      // this server-owned marker; the user may explicitly resubmit the prompt.
+      // Hold pending prompts atomically; reactivation never clears the hold, only explicit resubmission.
       await executeRaw(
         scoped,
         sql`
@@ -187,9 +172,7 @@ export async function applyTenantRestrictionIntent(
     }
     return result;
   });
-  // After commit only: an aborted transaction must never leave a line claiming
-  // a transition. The line reports recorded intent, not enforcement or
-  // containment, and stays one bounded line per accepted command.
+  // After commit only: an aborted transaction must never log a transition.
   (options.log ?? console.info)(
     `[tenant.restriction] tenant_id=${loggable(tenantId)} controller_id=${command.controllerId} ` +
       `operation_id=${command.operationId} revision=${command.revision} ` +
@@ -219,11 +202,7 @@ export async function readTenantRestrictionIntents(
   });
 }
 
-/**
- * Admission primitive for future serving adapters. This is not yet wired to
- * product entry points and cannot establish a complete suspension by itself.
- * No permissive cache: DB errors and invalid rows reject the caller.
- */
+/** Uncached admission read for serving adapters; DB errors and invalid rows reject the caller. */
 export async function assertTenantUnrestricted(db: Database, tenantId: string): Promise<void> {
   const records = await readTenantRestrictionIntents(db, tenantId);
   if (records.some(isTenantRestrictionClosed)) throw new TenantRestrictedError();

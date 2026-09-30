@@ -1,18 +1,12 @@
 # Tenant restriction intent protocol
 
-**Status: partial runtime enforcement, not a complete suspension feature.**
-The only writer surface is the in-Cell operator command `agor tenant restriction
-apply` (see [CLI](#cli)), which holds the runtime database credential and
-authenticates nobody. No HTTP service, MCP tool, or daemon observer exposes the
-writer, and no authenticated Cloud-to-runtime transport carries Team suspension
-state into `tenant_restrictions` yet. Shared authenticated service admission, MCP requests,
-bearer upload routes, and selected task automation boundaries consume
-restriction state. Ordinary access is denied while exact termination reads and
-scoped lifecycle acknowledgements remain possible. Prompt holds and event
-cutoffs are implemented but still need integrated certification. These guards
-do not establish full socket/process containment or controller freshness. Do
-not advertise suspension support until transport and reactivation are
-integrated and certified.
+**Status: runtime enforcement of controller-owned restriction intent; not a
+complete suspension feature by itself.** The only writer is the in-Cell
+operator command `agor tenant restriction apply` (see [CLI](#cli)), which holds
+the runtime database credential and authenticates nobody. No HTTP service, MCP
+tool, or daemon route exposes the writer. Ordinary access is denied while exact
+termination reads and scoped lifecycle acknowledgements remain possible. These
+guards do not prove socket/process containment or controller freshness.
 
 ## Ownership and state
 
@@ -49,17 +43,11 @@ reads as a missing watermark (see Persistence and portability). The orchestrator
 that moved the tenant restates the revision it already carries — it cannot
 repair, override or reopen a runtime that recorded anything.
 
-An exact replay of a seed this runtime already accepted — same placement,
-operation and revision, still `active` — is a no-op returning `changed: false`,
-like every other same-command retry. The transport is at-least-once, so a
-delivery whose reply was lost has to be able to ask again; answering it with a
-conflict made a correct runtime look like a failed one. It writes nothing, so
-"empty history only" still holds. Every other recorded state — a different
-operation or revision, a different placement, or any closed phase, including a
-closed row at the seed's own revision — is rejected with `revision_conflict`.
-The comparison is against this controller's own record: the composite key is
-`(tenant_id, controller_id)`, so another controller's row is never what a seed is
-compared with, and composition across controllers keeps its usual OR meaning.
+An exact replay of an accepted seed (same placement, operation and revision,
+still `active`) is a no-op returning `changed: false`, because the transport is
+at-least-once. Every other recorded state, including a closed row at the seed's
+own revision, is rejected with `revision_conflict`. The comparison is against
+this controller's own `(tenant_id, controller_id)` record only.
 
 A seeded row is an ordinary active record afterwards — a later restrict at a
 higher revision closes it like any other.
@@ -89,33 +77,15 @@ revision watermark. Erasure is the separate irreversible tenant lifecycle.
 Older binaries do not enforce this state; once serving adapters are installed,
 rollback to an ignoring binary cannot be treated as safe.
 
-## Required integration before activation
+## Limits
 
-The persistence writer records intent; it does not accept/validate containment
-proof or authenticate its caller. No authenticated application seam invokes it
-yet: the CLI below is a trusted in-Cell process holding the database credential,
-not an authenticated Cloud-to-runtime transport, which remains the open
-integration. `activate` is a low-level state transition for that trusted caller,
-not a customer-reachable endpoint; whoever runs it must establish the release
-barrier first.
-`assertTenantUnrestricted` is an uncached database admission primitive, not a
-complete guard for already-admitted work, stale auth tokens, sockets, or agents.
-
-Complete support requires implementation and integrated proof at every boundary below;
-the partial enforcement already installed is described in the later sections:
-
-- an authenticated Cloud-to-runtime transport that binds tenant, controller,
-  operation and revision before calling the writer;
-- admission fencing at HTTP, realtime, MCP, artifact/file, queue, scheduler,
-  gateway and executor boundaries, including old credential epochs;
-- trusted safety-operation paths for termination and acknowledgement that do
-  not reopen ordinary tenant access;
-- connection draining, task/process containment and current-replica evidence;
-- queue/event cutoffs, prepared-release/activation coordination, and bootstrap
-  synchronization before replacement replicas begin serving;
-- restart/retry and offline-target reconciliation with honest incomplete states.
-
-A database row or an intent write response proves none of those behaviors.
+The writer records intent; it does not validate containment proof or
+authenticate its caller. `activate` is a low-level transition for that trusted
+caller, not a customer-reachable endpoint; whoever runs it must establish the
+release barrier first. `assertTenantUnrestricted` is an uncached admission
+primitive, not a guard for already-admitted work, stale tokens, sockets, or
+agents. A database row or an intent write response does not prove connection
+draining, process containment, or current-replica freshness.
 
 ## CLI
 
@@ -174,24 +144,6 @@ A zero exit means a row was recorded. It is not evidence that the controller
 was authenticated, that connections drained, that processes exited, or that the
 tenant is suspended. An empty `inspect` result only means this database holds no
 recorded intent — never that a new or restored runtime may serve the tenant.
-
-## Tests
-
-- `src/types/tenant-restriction.test.ts`: transition, binding, validation, and
-  replay behavior; no database or runtime claim.
-- `src/db/tenant-restriction.test.ts`: unsupported SQLite boundary.
-- `src/db/tenant-restriction.postgres.test.ts`: real persistence/reconnect,
-  concurrent first-writer and release races, rollback, tenant-negative RLS,
-  corrupt-state rejection and independent restriction composition.
-- Existing schema/deletion/portability tests cover migration classification.
-- `apps/agor-cli/src/commands/tenant/restriction/apply.test.ts`: flag/schema
-  validation and exit-code mapping, plus daemon-free argument refusals through
-  the real command.
-- `apps/agor-cli/src/commands/tenant/restriction/cli.postgres.test.ts`: the
-  three-step happy path, retry no-ops, stale-revision and identity conflicts,
-  and empty reads, spawned as a child process with only `DATABASE_URL` set. The
-  PostgreSQL runner discovers `apps/agor-cli` alongside `packages/core` and
-  `apps/agor-daemon`.
 
 ## Runtime admission and safety traffic
 
@@ -270,9 +222,6 @@ existing Stop coordinator. It does not infer process absence or complete suspens
 from a scan, a task status or an empty page. Existing coordinator recovery still owns
 late connection, acknowledgement, containment and unverified outcomes.
 
-Use the repository PostgreSQL integration runner and its disposable non-superuser
-application role. Module integration proof is not end-to-end suspension QA.
-
 ## Credential generations
 
 `auth/tenant-credential-epoch.ts` hashes the complete sorted controller/placement/
@@ -286,17 +235,14 @@ revocation. Standalone SQLite remains outside hosted restriction support.
 A read that finds any record in a non-`active` phase rejects with
 `NotAuthenticated` carrying `data` of exactly
 `{ code: TENANT_RESTRICTED_ERROR_CODE }`; a failed, unavailable or corrupt read,
-and a stale supplied generation against an open tenant, stay codeless. Nothing is
-relaxed — the credential is refused on every path either way — but this check
-runs ahead of tenant admission on each JWT path, so without the code a suspended
-workspace was indistinguishable from an expired session in the browser and the
-admission 403 was unreachable there. Disclosure is bounded by who can reach the
-check: a holder of a signed runtime credential, or of valid primary credentials,
-for that exact tenant — and the code is the whole of it. The refresh service
-preserves that one code through its otherwise generic rejection for the same
-reason; every other refresh failure stays "invalid or expired". After activation
-the watermark moves, so a parked credential is rejected codelessly and the
-browser correctly fails over to sign-in.
+and a stale supplied generation against an open tenant, stay codeless. The
+credential is refused on every path either way; the code exists because this
+check runs ahead of tenant admission on each JWT path, so the browser could
+otherwise not tell a suspended workspace from an expired session. Only a holder
+of a signed runtime credential or valid primary credentials for that tenant can
+reach it. The refresh service preserves that one code; every other refresh
+failure stays "invalid or expired". After activation the watermark moves, so a
+parked credential is rejected codelessly and the browser falls back to sign-in.
 
 Ordinary service admission, bearer authentication, socket packets/publications,
 and egress dispatch compare the watermark. The bounded socket monitor also retires
