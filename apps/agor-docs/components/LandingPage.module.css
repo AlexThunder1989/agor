@@ -3236,3 +3236,18 @@ a.radarBlip {
     justify-content: center;
   }
 }
+
+/* /governance hero: trust-list titles are the page's jump links. */
+.busJump {
+  margin-left: 6px;
+  vertical-align: -2px;
+  opacity: 0.55;
+  transition:
+    opacity 0.2s,
+    transform 0.2s;
+}
+
+.titleLink:hover .busJump {
+  opacity: 1;
+  transform: translateY(2px);
+}
