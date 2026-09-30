@@ -2916,6 +2916,10 @@ a.radarBlip {
   inset: 0;
   background: url("/videos/agor-hero-poster.jpg") center top / cover no-repeat;
   pointer-events: none;
+  /* Soft-focus the product loop so it reads as atmosphere behind the pitch.
+   * The slight scale pushes blur's feathered edges past the clipped hero. */
+  filter: blur(5px);
+  transform: scale(1.03);
 }
 
 .homeHeroVideo video {
