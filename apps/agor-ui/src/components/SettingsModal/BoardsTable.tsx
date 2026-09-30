@@ -61,7 +61,12 @@ export const BoardsTable: React.FC<BoardsTableProps> = ({
   // Create board is a drill-in (no stacked modal on top of Settings).
   const { drill, openDrill, closeDrill } = useSettingsDrill();
   const [createDirty, setCreateDirty] = useState(false);
-  const [editingBoard, setEditingBoard] = useState<Board | null>(null);
+  // Edit board also drills in place of the list (no stacked modal), driven by
+  // the shell drill state so the breadcrumb + leave-guards apply.
+  const editingBoard =
+    drill?.kind === 'boards' && drill.mode === 'edit' && drill.recordId
+      ? (boardById.get(drill.recordId) ?? null)
+      : null;
   const [archiveFilter, setArchiveFilter] = useState<'active' | 'archived' | 'all'>('active');
   const [searchTerm, setSearchTerm] = useState('');
   const [form] = Form.useForm();
@@ -113,7 +118,8 @@ export const BoardsTable: React.FC<BoardsTableProps> = ({
       });
   };
 
-  const handleEdit = (board: Board) => setEditingBoard(board);
+  const handleEdit = (board: Board) =>
+    openDrill({ kind: 'boards', mode: 'edit', recordId: board.board_id });
 
   const handleDelete = (boardId: string) => {
     onDelete?.(boardId);
@@ -365,6 +371,21 @@ export const BoardsTable: React.FC<BoardsTableProps> = ({
     );
   }
 
+  // Edit board drills in place of the list (BoardEditModal in embedded mode).
+  if (editingBoard) {
+    return (
+      <BoardEditModal
+        embedded
+        board={editingBoard}
+        client={client}
+        open
+        onClose={closeDrill}
+        onUpdate={onUpdate}
+        currentUser={currentUser}
+      />
+    );
+  }
+
   return (
     <div>
       <ResponsiveSettingsHeader
@@ -417,15 +438,6 @@ export const BoardsTable: React.FC<BoardsTableProps> = ({
         onRow={(record) => ({
           style: record.archived ? { opacity: 0.5 } : undefined,
         })}
-      />
-
-      <BoardEditModal
-        board={editingBoard}
-        client={client}
-        open={Boolean(editingBoard)}
-        onClose={() => setEditingBoard(null)}
-        onUpdate={onUpdate}
-        currentUser={currentUser}
       />
     </div>
   );

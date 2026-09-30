@@ -181,6 +181,13 @@ export interface DrillInFrameProps {
   onBack?: () => void;
   /** Right-aligned node in the header row (e.g. a Reset action). */
   extra?: ReactNode;
+  /**
+   * Set when the editor renders its own footer (e.g. UserSettingsModal's
+   * panel-aware Save/Done bar or Gateway's create wizard) and only needs the
+   * frame for the breadcrumb + to publish `dirty` for the shell's leave guard.
+   * The shell then suppresses its own Save/Cancel footer so the two don't stack.
+   */
+  ownsFooter?: boolean;
   children: ReactNode;
 }
 
@@ -199,6 +206,7 @@ export const DrillInFrame: React.FC<DrillInFrameProps> = ({
   saveDisabled = false,
   onBack,
   extra,
+  ownsFooter = false,
   children,
 }) => {
   const { token } = theme.useToken();
@@ -243,6 +251,7 @@ export const DrillInFrame: React.FC<DrillInFrameProps> = ({
       saveDisabled,
       onSave: hasOnSave ? stableOnSave : undefined,
       onBack: stableBack,
+      ownsFooter,
     });
     return () => registerController(null);
   }, [
@@ -254,6 +263,7 @@ export const DrillInFrame: React.FC<DrillInFrameProps> = ({
     hasOnSave,
     stableOnSave,
     stableBack,
+    ownsFooter,
   ]);
 
   return (

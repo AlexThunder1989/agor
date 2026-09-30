@@ -82,7 +82,6 @@ export const UsersTable: React.FC<UsersTableProps> = ({
   // Save/Cancel and the nav-switch / modal-close guards key on `drill`.
   const { drill, openDrill, closeDrill } = useSettingsDrill();
   const [createDirty, setCreateDirty] = useState(false);
-  const [editingUser, setEditingUser] = useState<User | null>(null);
   const [groups, setGroups] = useState<Group[]>([]);
   const [memberships, setMemberships] = useState<GroupMembership[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -98,7 +97,6 @@ export const UsersTable: React.FC<UsersTableProps> = ({
   useLayoutEffect(() => {
     form.resetFields();
     closeDrill();
-    setEditingUser(null);
   }, [currentUser?.role, currentUser?.user_id, form, closeDrill]);
   const externallyManaged =
     authConfig?.identity?.userLifecycle === AgorUserLifecycleAuthority.EXTERNAL;
@@ -107,6 +105,12 @@ export const UsersTable: React.FC<UsersTableProps> = ({
   // Create drill-in is active when the shell's drill targets this section in
   // create mode (and the caller is allowed to create).
   const isCreating = canCreateUsers && drill?.kind === 'users' && drill.mode === 'create';
+  // Edit user also drills in place of the list (embedded UserSettingsModal),
+  // driven by the shell drill state so the breadcrumb + leave-guards apply.
+  const editingUser =
+    drill?.kind === 'users' && drill.mode === 'edit' && drill.recordId
+      ? (userById.get(drill.recordId) ?? null)
+      : null;
   // Reset the form to create defaults each time the drill-in opens.
   useEffect(() => {
     if (isCreating) {
@@ -323,7 +327,7 @@ export const UsersTable: React.FC<UsersTableProps> = ({
                 size="small"
                 icon={<EditOutlined />}
                 aria-label={`Edit ${user.email}`}
-                onClick={() => setEditingUser(user)}
+                onClick={() => openDrill({ kind: 'users', mode: 'edit', recordId: user.user_id })}
               />
             )}
             {showDelete && (
@@ -437,6 +441,24 @@ export const UsersTable: React.FC<UsersTableProps> = ({
     );
   }
 
+  // Edit user drills in place of the list (embedded UserSettingsModal).
+  if (editingUser) {
+    return (
+      <UserSettingsModal
+        embedded
+        open
+        onClose={() => {
+          closeDrill();
+          void loadGroups();
+        }}
+        user={editingUser}
+        client={client}
+        currentUser={currentUser}
+        onUpdate={onUpdate}
+      />
+    );
+  }
+
   const usersTable = (
     <div>
       <ResponsiveSettingsHeader
@@ -475,19 +497,6 @@ export const UsersTable: React.FC<UsersTableProps> = ({
         pagination={false}
         size="small"
         scroll={{ x: 900 }}
-      />
-
-      {/* Edit User Modal - reuses UserSettingsModal */}
-      <UserSettingsModal
-        open={!!editingUser}
-        onClose={() => {
-          setEditingUser(null);
-          void loadGroups();
-        }}
-        user={editingUser}
-        client={client}
-        currentUser={currentUser}
-        onUpdate={onUpdate}
       />
     </div>
   );
