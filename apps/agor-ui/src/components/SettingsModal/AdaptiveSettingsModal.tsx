@@ -64,10 +64,22 @@ export function AdaptiveSettingsModal({
   if (embedded) {
     if (!open) return null;
     const handleBack = () => {
+      // Clean form → close synchronously (matches a plain onCancel and keeps
+      // fireEvent-driven flows deterministic). Dirty → run the async discard
+      // guard first, closing only if the user confirms.
+      if (!dirty) {
+        onCancel?.(undefined as unknown as ModalCancelEvent);
+        return;
+      }
       void confirmLeaveIfDirty().then((ok) => {
         if (ok) onCancel?.(undefined as unknown as ModalCancelEvent);
       });
     };
+    // A caller that passes its own `footer` (e.g. Gateway's multi-step create
+    // wizard) owns it: render it in-frame and tell the shell to suppress its own
+    // Save/Cancel footer so the two don't stack. Otherwise the shell footer
+    // drives Save (onOk) / Cancel (guarded back).
+    const ownsFooter = footer !== undefined && footer !== null;
     return (
       <DrillInFrame
         title={title}
@@ -76,11 +88,15 @@ export function AdaptiveSettingsModal({
         saveLabel={typeof okText === 'string' ? okText : undefined}
         saveDisabled={okButtonProps?.disabled}
         onSave={
-          onOk ? () => onOk(undefined as unknown as MouseEvent<HTMLButtonElement>) : undefined
+          ownsFooter || !onOk
+            ? undefined
+            : () => onOk(undefined as unknown as MouseEvent<HTMLButtonElement>)
         }
         onBack={handleBack}
+        ownsFooter={ownsFooter}
       >
         {children}
+        {ownsFooter ? <div style={{ marginTop: 16 }}>{footer}</div> : null}
       </DrillInFrame>
     );
   }

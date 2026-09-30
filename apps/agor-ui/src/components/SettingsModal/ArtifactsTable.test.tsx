@@ -1,8 +1,9 @@
 import type { Artifact, Board, User } from '@agor-live/client';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import { ArtifactsTable } from './ArtifactsTable';
+import { renderWithSettingsShell } from './settingsDrillTestUtils';
 
 const artifact = {
   artifact_id: 'artifact-1',
@@ -22,7 +23,7 @@ function setup(
 ) {
   const onUpdate = vi.fn();
   const onDelete = vi.fn();
-  render(
+  renderWithSettingsShell(
     <MemoryRouter>
       <ArtifactsTable
         artifactById={new Map(rows.map((row) => [row.artifact_id, row]))}
@@ -65,10 +66,12 @@ describe('ArtifactsTable', () => {
   it('keeps provenance in the editor and avoids no-op updates', async () => {
     const { onUpdate } = setup();
     fireEvent.click(screen.getByRole('button', { name: 'Edit artifact' }));
-    const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByText(/Source branch: Not recorded/)).toBeVisible();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    // Drill-in (no stacked dialog): the editor renders in place.
+    expect(await screen.findByText(/Source branch: Not recorded/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(screen.queryByText(/Source branch: Not recorded/)).not.toBeInTheDocument()
+    );
     expect(onUpdate).not.toHaveBeenCalled();
   });
 

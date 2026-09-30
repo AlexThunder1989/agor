@@ -14,7 +14,7 @@ import {
   Typography,
 } from 'antd';
 import type { CSSProperties } from 'react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { mapToArray, mapToSortedArray } from '@/utils/mapHelpers';
 import { filterBySettingsSearch } from '@/utils/settingsSearch';
 import { uiRouteHref } from '@/utils/uiRoutes';
@@ -25,6 +25,7 @@ import { AdaptiveSettingsModal } from './AdaptiveSettingsModal';
 import { ResponsiveSettingsHeader } from './ResponsiveSettingsHeader';
 import { ResponsiveTable } from './ResponsiveTable';
 import { SettingsActionGroup } from './SettingsActionGroup';
+import { useSettingsDrill } from './SettingsDrill';
 import { SettingsIdentity } from './SettingsIdentity';
 
 interface ArtifactsTableProps {
@@ -61,10 +62,15 @@ export const ArtifactsTable: React.FC<ArtifactsTableProps> = ({
   onDelete,
   onClose,
 }) => {
-  const [editModalOpen, setEditModalOpen] = useState(false);
-  const [editingArtifact, setEditingArtifact] = useState<Artifact | null>(null);
+  // Edit artifact is a drill-in (no stacked modal on top of Settings).
+  const { drill, openDrill, closeDrill } = useSettingsDrill();
+  const [editDirty, setEditDirty] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [form] = Form.useForm();
+  const editingArtifact =
+    drill?.kind === 'artifacts' && drill.mode === 'edit' && drill.recordId
+      ? (artifactById.get(drill.recordId) ?? null)
+      : null;
 
   // Reuses the `artifactById` prop so we don't read the same data via
   // both props and context. Only goToArtifact is used from this table.
@@ -81,15 +87,20 @@ export const ArtifactsTable: React.FC<ArtifactsTableProps> = ({
     [onClose, navigation]
   );
 
-  const handleEdit = (artifact: Artifact) => {
-    setEditingArtifact(artifact);
-    form.setFieldsValue({
-      name: artifact.name,
-      description: artifact.description || '',
-      board_id: artifact.board_id,
-    });
-    setEditModalOpen(true);
-  };
+  const handleEdit = (artifact: Artifact) =>
+    openDrill({ kind: 'artifacts', mode: 'edit', recordId: artifact.artifact_id });
+
+  // Seed the form whenever the drill-in targets an artifact.
+  useEffect(() => {
+    if (editingArtifact) {
+      form.setFieldsValue({
+        name: editingArtifact.name,
+        description: editingArtifact.description || '',
+        board_id: editingArtifact.board_id,
+      });
+      setEditDirty(false);
+    }
+  }, [editingArtifact, form]);
 
   const handleUpdate = () => {
     if (!editingArtifact) return;
@@ -109,7 +120,8 @@ export const ArtifactsTable: React.FC<ArtifactsTableProps> = ({
       if (Object.keys(updates).length > 0) {
         onUpdate?.(editingArtifact.artifact_id, updates);
       }
-      setEditModalOpen(false);
+      setEditDirty(false);
+      closeDrill();
     });
   };
 
@@ -276,6 +288,66 @@ export const ArtifactsTable: React.FC<ArtifactsTableProps> = ({
     ]);
   }, [artifactById, searchTerm, branchById, boardById, userById]);
 
+  // Edit artifact drills in place of the list (no stacked modal). Early-returned
+  // so the Content pane swaps list↔editor; the shell footer renders Save/Cancel
+  // and the breadcrumb ("Artifacts ›") backs out via closeDrill.
+  if (editingArtifact) {
+    return (
+      <AdaptiveSettingsModal
+        embedded
+        open
+        title="Edit Artifact"
+        okText="Save"
+        dirty={editDirty}
+        onOk={handleUpdate}
+        onCancel={() => {
+          form.resetFields();
+          setEditDirty(false);
+          closeDrill();
+        }}
+      >
+        <Typography.Paragraph type="secondary">
+          Created {new Date(editingArtifact.created_at).toLocaleString()}
+          <br />
+          Source branch:{' '}
+          {editingArtifact.branch_id
+            ? branchById.get(editingArtifact.branch_id)?.name || 'Unavailable branch'
+            : 'Not recorded'}
+        </Typography.Paragraph>
+        <Form
+          form={form}
+          layout="vertical"
+          style={{ maxWidth: 520 }}
+          onValuesChange={() => setEditDirty(true)}
+        >
+          <Form.Item
+            label="Name"
+            name="name"
+            rules={[{ required: true, message: 'Please enter a name' }]}
+          >
+            <Input placeholder="My Artifact" />
+          </Form.Item>
+          <Form.Item label="Description" name="description">
+            <Input.TextArea rows={3} placeholder="Optional description" />
+          </Form.Item>
+          <Form.Item
+            label="Board"
+            name="board_id"
+            tooltip="Move this artifact to a different board. Its position on the board is preserved."
+            rules={[{ required: true, message: 'Please select a board' }]}
+          >
+            <Select
+              showSearch
+              placeholder="Select board..."
+              options={boardOptions}
+              filterOption={boardSelectFilter}
+            />
+          </Form.Item>
+        </Form>
+      </AdaptiveSettingsModal>
+    );
+  }
+
   return (
     <div>
       <ResponsiveSettingsHeader
@@ -320,56 +392,6 @@ export const ArtifactsTable: React.FC<ArtifactsTableProps> = ({
           tableLayout="fixed"
           scroll={{ x: 700 }}
         />
-      )}
-
-      {editingArtifact && (
-        <AdaptiveSettingsModal
-          title="Edit Artifact"
-          open={editModalOpen}
-          onOk={handleUpdate}
-          onCancel={() => {
-            setEditModalOpen(false);
-          }}
-          afterClose={() => {
-            form.resetFields();
-            setEditingArtifact(null);
-          }}
-          okText="Save"
-        >
-          <Typography.Paragraph type="secondary">
-            Created {new Date(editingArtifact.created_at).toLocaleString()}
-            <br />
-            Source branch:{' '}
-            {editingArtifact.branch_id
-              ? branchById.get(editingArtifact.branch_id)?.name || 'Unavailable branch'
-              : 'Not recorded'}
-          </Typography.Paragraph>
-          <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-            <Form.Item
-              label="Name"
-              name="name"
-              rules={[{ required: true, message: 'Please enter a name' }]}
-            >
-              <Input placeholder="My Artifact" />
-            </Form.Item>
-            <Form.Item label="Description" name="description">
-              <Input.TextArea rows={3} placeholder="Optional description" />
-            </Form.Item>
-            <Form.Item
-              label="Board"
-              name="board_id"
-              tooltip="Move this artifact to a different board. Its position on the board is preserved."
-              rules={[{ required: true, message: 'Please select a board' }]}
-            >
-              <Select
-                showSearch
-                placeholder="Select board..."
-                options={boardOptions}
-                filterOption={boardSelectFilter}
-              />
-            </Form.Item>
-          </Form>
-        </AdaptiveSettingsModal>
       )}
     </div>
   );

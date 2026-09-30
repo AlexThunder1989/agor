@@ -425,14 +425,16 @@ describe('GatewayChannelsTable Slack create wizard', () => {
     const table = (currentUser: User) => (
       <MemoryRouter>
         <AntdApp>
-          <GatewayChannelsTable
-            client={client}
-            gatewayChannelById={new Map()}
-            branchById={new Map([[branch.branch_id, branch]])}
-            userById={users}
-            mcpServerById={new Map()}
-            currentUser={currentUser}
-          />
+          <StandaloneSettingsDrillProvider>
+            <GatewayChannelsTable
+              client={client}
+              gatewayChannelById={new Map()}
+              branchById={new Map([[branch.branch_id, branch]])}
+              userById={users}
+              mcpServerById={new Map()}
+              currentUser={currentUser}
+            />
+          </StandaloneSettingsDrillProvider>
         </AntdApp>
       </MemoryRouter>
     );
@@ -582,15 +584,17 @@ describe('GatewayChannelsTable Slack edit mode', () => {
     const table = (currentUser: User) => (
       <MemoryRouter>
         <AntdApp>
-          <GatewayChannelsTable
-            client={null}
-            gatewayChannelById={new Map([[channel.id, channel]])}
-            branchById={new Map([[branch.branch_id, branch]])}
-            userById={new Map([[currentUser.user_id, currentUser]])}
-            mcpServerById={new Map()}
-            currentUser={currentUser}
-            onUpdate={onUpdate}
-          />
+          <StandaloneSettingsDrillProvider>
+            <GatewayChannelsTable
+              client={null}
+              gatewayChannelById={new Map([[channel.id, channel]])}
+              branchById={new Map([[branch.branch_id, branch]])}
+              userById={new Map([[currentUser.user_id, currentUser]])}
+              mcpServerById={new Map()}
+              currentUser={currentUser}
+              onUpdate={onUpdate}
+            />
+          </StandaloneSettingsDrillProvider>
         </AntdApp>
       </MemoryRouter>
     );
@@ -1031,18 +1035,20 @@ describe('GatewayChannelsTable socket authority generations', () => {
     const view = (generation: number) => (
       <MemoryRouter>
         <AntdApp>
-          <ConnectionProvider
-            value={{
-              connected: true,
-              connecting: false,
-              authGeneration: generation,
-              outOfSync: false,
-              capturedSha: null,
-              currentSha: null,
-            }}
-          >
-            {table}
-          </ConnectionProvider>
+          <StandaloneSettingsDrillProvider>
+            <ConnectionProvider
+              value={{
+                connected: true,
+                connecting: false,
+                authGeneration: generation,
+                outOfSync: false,
+                capturedSha: null,
+                currentSha: null,
+              }}
+            >
+              {table}
+            </ConnectionProvider>
+          </StandaloneSettingsDrillProvider>
         </AntdApp>
       </MemoryRouter>
     );

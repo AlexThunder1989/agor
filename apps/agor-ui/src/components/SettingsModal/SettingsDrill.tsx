@@ -1,4 +1,4 @@
-import { App as AntApp, Breadcrumb, Flex, Typography, theme } from 'antd';
+import { App as AntApp, Breadcrumb, Button, Flex, Typography, theme } from 'antd';
 import {
   createContext,
   type ReactNode,
@@ -164,9 +164,36 @@ export const StandaloneSettingsDrillProvider: React.FC<{ children: ReactNode }> 
       setController={setController}
     >
       {children}
+      {/* Mirror the real shell's controller-driven footer so a standalone drill-in
+          editor's Save/Cancel are actually rendered (the shell owns the footer,
+          not DrillInFrame). Editors that own their footer suppress this. */}
+      {controller && !controller.ownsFooter ? (
+        <SettingsDrillStandaloneFooter controller={controller} />
+      ) : null}
     </SettingsDrillProvider>
   );
 };
+
+/** The controller-driven Save/Cancel footer, matching the shell's footer. */
+const SettingsDrillStandaloneFooter: React.FC<{ controller: DrillController }> = ({
+  controller,
+}) => (
+  <Flex justify="flex-end" gap={8}>
+    <Button onClick={controller.onBack} disabled={controller.saving}>
+      Cancel
+    </Button>
+    {controller.onSave ? (
+      <Button
+        type="primary"
+        loading={controller.saving}
+        disabled={controller.saveDisabled}
+        onClick={() => void controller.onSave?.()}
+      >
+        {controller.saveLabel ?? 'Save'}
+      </Button>
+    ) : null}
+  </Flex>
+);
 
 export interface DrillInFrameProps {
   title: ReactNode;
