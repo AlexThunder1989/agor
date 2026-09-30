@@ -1,0 +1,21 @@
+{
+  "verified": true,
+  "measured": 40,
+  "warmups": 16,
+  "routeFailures": 0,
+  "pageErrors": 0,
+  "feathersErrors": 0,
+  "fixtureSnapshots": 8,
+  "fixtureTables": [
+    "boards",
+    "branches",
+    "board_objects",
+    "sessions",
+    "tasks",
+    "messages"
+  ],
+  "sourceAndServedAssetsVerified": true,
+  "branchAndSessionEnrichmentEquivalent": true,
+  "transcriptEquivalent": true,
+  "driverSha256": "5a10a56d192ab0ccadc7702d6e64ec4a1654003afaeeb6c07104895b1e3085b8"
+}

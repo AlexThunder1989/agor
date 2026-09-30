@@ -1,0 +1,882 @@
+vite.config.ts (2:49) [UNRESOLVED_IMPORT] Could not resolve '@agor-live/client/config' in vite.config.ts
+   ╭─[ vite.config.ts:2:50 ]
+   │
+ 2 │ import { getDefaultConfig, loadConfigSync } from '@agor-live/client/config';
+   │                                                  ─────────────┬────────────  
+   │                                                               ╰────────────── Module not found, treating it as an external dependency
+───╯
+
+vite v8.3.0 building client environment for production...
+transforming...
+✓ 8040 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                            3.36 kB │ gzip:   0.98 kB
+dist/assets/cursor-QEb7m-rN.png                           11.16 kB
+dist/assets/cc-CYmbalCD.png                               11.87 kB
+dist/assets/copilot-CI1k0esO.png                          29.39 kB
+dist/assets/codex-4sLD1mVS.png                            81.66 kB
+dist/assets/gemini-ajOb7iAl.png                          253.15 kB
+dist/assets/MarketingScreenshotPage-9Qd7eZsm.css           0.71 kB │ gzip:   0.29 kB
+dist/assets/MarketingVideoPage-D3jYFtWX.css                1.83 kB │ gzip:   0.71 kB
+dist/assets/SessionCanvas-DiMjFNq5.css                     2.63 kB │ gzip:   0.72 kB
+dist/assets/xterm-BrP-ENHg.css                             3.93 kB │ gzip:   1.01 kB
+dist/assets/reactflow-8hax8RNO.css                         6.99 kB │ gzip:   1.52 kB
+dist/assets/index-DQgykwuc.css                             7.36 kB │ gzip:   1.92 kB
+dist/assets/MarkdownRenderer-CKqj2X3q.css                 27.78 kB │ gzip:   5.24 kB
+dist/assets/channel-BSlKbv6c.js                            0.11 kB │ gzip:   0.11 kB
+dist/assets/streamdownControls-C1bc5rLM.js                 0.12 kB │ gzip:   0.11 kB
+dist/assets/pie-RZYD4A2V-Dbk8hCkQ.js                       0.12 kB │ gzip:   0.13 kB
+dist/assets/info-DKCQHKI2-4zc1D9e1.js                      0.12 kB │ gzip:   0.13 kB
+dist/assets/radar-I7S5WNFK-C-LDqTl3.js                     0.12 kB │ gzip:   0.13 kB
+dist/assets/packet-7NZHBO7P-BMQ_RGIe.js                    0.12 kB │ gzip:   0.13 kB
+dist/assets/cynefin-VYW2F7L2-CICh68Vj.js                   0.12 kB │ gzip:   0.13 kB
+dist/assets/treemap-6X3UGDF4-Dp2__I9F.js                   0.12 kB │ gzip:   0.13 kB
+dist/assets/wardley-OPB4EBWU-DmAAGzIi.js                   0.12 kB │ gzip:   0.13 kB
+dist/assets/gitGraph-TEB2WS4Q-Bi3RSeB3.js                  0.12 kB │ gzip:   0.13 kB
+dist/assets/railroad-3IZDKUUU-BSXzQ03X.js                  0.12 kB │ gzip:   0.13 kB
+dist/assets/treeView-QDETBFTQ-Cm5B_Dyg.js                  0.12 kB │ gzip:   0.13 kB
+dist/assets/railroad-peg-LSFZ7HO6-BI3KNVbQ.js              0.13 kB │ gzip:   0.13 kB
+dist/assets/architecture-TIHT7OUA-Dblj2yRe.js              0.13 kB │ gzip:   0.13 kB
+dist/assets/railroad-abnf-AHOZXSZD-T56_x872.js             0.13 kB │ gzip:   0.13 kB
+dist/assets/railroad-ebnf-EBAXGLYW-XMd3U7WH.js             0.13 kB │ gzip:   0.13 kB
+dist/assets/eventmodeling-45OFAUF4-D-l3oMRm.js             0.13 kB │ gzip:   0.13 kB
+dist/assets/accessibility-DS0Sv1Mz.js                      0.17 kB │ gzip:   0.15 kB
+dist/assets/chunk-2Q5K7J3B-BtZ6X-LC.js                     0.18 kB │ gzip:   0.15 kB
+dist/assets/flowDiagram-UKHOOZJN-D19UxVpP.js               0.21 kB │ gzip:   0.16 kB
+dist/assets/chunk-JWPE2WC7-D4CFKl31.js                     0.22 kB │ gzip:   0.16 kB
+dist/assets/AgorEmojiPickerInner-CTEmiZK4.js               0.22 kB │ gzip:   0.19 kB
+dist/assets/chunk-XXDRQBXY-BFlRoBUD.js                     0.26 kB │ gzip:   0.22 kB
+dist/assets/chunk-5VM5RSS4-DeC8s2L6.js                     0.35 kB │ gzip:   0.26 kB
+dist/assets/classDiagram-JCYQIIEL-DqZ71Jn_.js              0.38 kB │ gzip:   0.28 kB
+dist/assets/classDiagram-v2-OCEON4UE-DqZ71Jn_.js           0.38 kB │ gzip:   0.28 kB
+dist/assets/rng-CG_Fxu_Z.js                                0.38 kB │ gzip:   0.23 kB
+dist/assets/stateDiagram-v2-UEYNNEHI-VDBWp5z1.js           0.38 kB │ gzip:   0.28 kB
+dist/assets/swimlanesDiagram-ULZ7WXOC-BoUeyk61.js          0.43 kB │ gzip:   0.31 kB
+dist/assets/chunk-KBJHAD2P-BCEWywKF.js                     0.50 kB │ gzip:   0.35 kB
+dist/assets/ThemedSyntaxHighlighter.inner-DAzCSnqI.js      0.50 kB │ gzip:   0.33 kB
+dist/assets/codeowners-C8r90Shi.js                         0.54 kB │ gzip:   0.31 kB
+dist/assets/infoDiagram-6WML65LV-BJahwjx9.js               0.54 kB │ gzip:   0.36 kB
+dist/assets/theme-D7KI3o_p.js                              0.70 kB │ gzip:   0.41 kB
+dist/assets/shellsession-DnjHxDMP.js                       0.71 kB │ gzip:   0.42 kB
+dist/assets/tsv-sltzmVWM.js                                0.73 kB │ gzip:   0.33 kB
+dist/assets/ConnectionContext-B3oZn7v9.js                  0.79 kB │ gzip:   0.43 kB
+dist/assets/html-derivative-C_nRlqME.js                    0.84 kB │ gzip:   0.46 kB
+dist/assets/MCPCatalogModal-DAsix5iA.js                    0.84 kB │ gzip:   0.49 kB
+dist/assets/sizeCapture-X5ZJPWSS-BMjV8FsS.js               0.87 kB │ gzip:   0.50 kB
+dist/assets/rolldown-runtime-B0Z9INg1.js                   0.90 kB │ gzip:   0.51 kB
+dist/assets/git-rebase-BnAFTyQc.js                         0.98 kB │ gzip:   0.43 kB
+dist/assets/ThemeSwitcher-BE19fVxi.js                      0.98 kB │ gzip:   0.55 kB
+dist/assets/qmldir-DCQb3MpD.js                             0.99 kB │ gzip:   0.44 kB
+dist/assets/url-BWl5Fg0d.js                                1.03 kB │ gzip:   0.52 kB
+dist/assets/UserIdentityAvatar-C8xazum5.js                 1.13 kB │ gzip:   0.71 kB
+dist/assets/csv-Dx-8-gkx.js                                1.13 kB │ gzip:   0.36 kB
+dist/assets/git-commit-BSykSTBG.js                         1.22 kB │ gzip:   0.52 kB
+dist/assets/ActionPageShell-Bz12xg_j.js                    1.24 kB │ gzip:   0.67 kB
+dist/assets/sandpackDefaults-CPJOZwYP.js                   1.26 kB │ gzip:   0.65 kB
+dist/assets/CodeEditor.inner-DNdRpi0u.js                   1.33 kB │ gzip:   0.74 kB
+dist/assets/xsl-zsHjPACe.js                                1.36 kB │ gzip:   0.50 kB
+dist/assets/sanitizeSecret-CZRcAwK1.js                     1.38 kB │ gzip:   0.62 kB
+dist/assets/dotenv-_5a1GRtc.js                             1.41 kB │ gzip:   0.52 kB
+dist/assets/useAuthorityOperationGuard-Dm6jLpWn.js         1.45 kB │ gzip:   0.69 kB
+dist/assets/sparql-D_iOobhT.js                             1.47 kB │ gzip:   0.81 kB
+dist/assets/GlobalUserMenu-EJmEZz5D.js                     1.48 kB │ gzip:   0.73 kB
+dist/assets/ini-B5eOa1yu.js                                1.51 kB │ gzip:   0.49 kB
+dist/assets/authHeaders-DT_LLEgs.js                        1.54 kB │ gzip:   0.74 kB
+dist/assets/railroadDiagram-AXF67PYL-nOSDl4Ty.js           1.56 kB │ gzip:   0.72 kB
+dist/assets/fortran-fixed-form-DEKoE2YW.js                 1.66 kB │ gzip:   0.68 kB
+dist/assets/docker-IyjqRm3v.js                             1.73 kB │ gzip:   0.59 kB
+dist/assets/hxml-B0Qn7Nwc.js                               1.74 kB │ gzip:   0.87 kB
+dist/assets/abnfDiagram-N423BO3Z-D30B2-F_.js               1.75 kB │ gzip:   0.85 kB
+dist/assets/desktop-Dlh5hvp9.js                            1.82 kB │ gzip:   0.75 kB
+dist/assets/MarketingScreenshotPage-2MZhRH3a.js            1.87 kB │ gzip:   0.94 kB
+dist/assets/chunk-2GRJ4B5K-CC_zddjm.js                     1.90 kB │ gzip:   0.85 kB
+dist/assets/pegDiagram-VL7TDLO6-BHTef0f1.js                1.91 kB │ gzip:   0.89 kB
+dist/assets/ebnfDiagram-BXEA7PRR-Bucv_xhy.js               1.96 kB │ gzip:   0.84 kB
+dist/assets/erb-Cs0Iy0dO.js                                2.13 kB │ gzip:   0.62 kB
+dist/assets/wenyan-C8pVoKbM.js                             2.15 kB │ gzip:   1.08 kB
+dist/assets/jssm-DXw9l8Rf.js                               2.23 kB │ gzip:   0.61 kB
+dist/assets/edge-CCRlTIbg.js                               2.30 kB │ gzip:   0.68 kB
+dist/assets/reg-CRGYupPL.js                                2.33 kB │ gzip:   0.69 kB
+dist/assets/mcpOAuthAttempt-B4GdTRdF.js                    2.40 kB │ gzip:   1.18 kB
+dist/assets/MCPSlackRecoveryPage-CxXbXzfS.js               2.51 kB │ gzip:   1.15 kB
+dist/assets/slackOAuthActionPage-BF4hbcw-.js               2.55 kB │ gzip:   1.16 kB
+dist/assets/diff-woXpYk--.js                               2.56 kB │ gzip:   0.68 kB
+dist/assets/gleam-CSRkHgEL.js                              2.57 kB │ gzip:   0.81 kB
+dist/assets/AppNode-BpnjW6BU.js                            2.62 kB │ gzip:   1.28 kB
+dist/assets/hy-CZbG8q4J.js                                 2.64 kB │ gzip:   1.17 kB
+dist/assets/openscad-BUDT5pXO.js                           2.81 kB │ gzip:   1.00 kB
+dist/assets/log-BNLmms1o.js                                2.84 kB │ gzip:   0.89 kB
+dist/assets/json-Br_ORbR4.js                               2.89 kB │ gzip:   0.82 kB
+dist/assets/cairo-DLTphjLi.js                              2.93 kB │ gzip:   0.80 kB
+dist/assets/CLILoginPage-ByyibDEK.js                       2.97 kB │ gzip:   1.51 kB
+dist/assets/berry-DKpUyyne.js                              2.99 kB │ gzip:   0.80 kB
+dist/assets/jsonl-CmCQp5Yx.js                              3.00 kB │ gzip:   0.78 kB
+dist/assets/jsonc-CYpm1nAK.js                              3.10 kB │ gzip:   0.78 kB
+dist/assets/logo-Cluzi2Zq.js                               3.12 kB │ gzip:   1.46 kB
+dist/assets/po-BiJDBrnU.js                                 3.23 kB │ gzip:   0.90 kB
+dist/assets/json5-BR5RXkoi.js                              3.24 kB │ gzip:   0.82 kB
+dist/assets/mipsasm-BMqwQI7S.js                            3.25 kB │ gzip:   1.17 kB
+dist/assets/tasl-DMoTqEGO.js                               3.28 kB │ gzip:   0.84 kB
+dist/assets/genie-CV2tkWYe.js                              3.34 kB │ gzip:   1.20 kB
+dist/assets/rel-BtDbiS_P.js                                3.36 kB │ gzip:   1.10 kB
+dist/assets/vala-zf12oZj6.js                               3.36 kB │ gzip:   1.18 kB
+dist/assets/splunk-BC2Px7Mm.js                             3.42 kB │ gzip:   1.51 kB
+dist/assets/hurl-DKXSMFRR.js                               3.51 kB │ gzip:   1.09 kB
+dist/assets/fluent-C03EYrpw.js                             3.60 kB │ gzip:   0.89 kB
+dist/assets/ssh-config-BgfXC-Er.js                         3.61 kB │ gzip:   1.59 kB
+dist/assets/jsonnet-CJTPZ8u_.js                            3.61 kB │ gzip:   1.03 kB
+dist/assets/kdl-CsD5j6eV.js                                3.62 kB │ gzip:   1.03 kB
+dist/assets/narrat-_X_XdTYD.js                             3.66 kB │ gzip:   1.09 kB
+dist/assets/turtle-ByJddavk.js                             3.69 kB │ gzip:   0.96 kB
+dist/assets/glsl-TOBAB6bO.js                               3.69 kB │ gzip:   1.46 kB
+dist/assets/zenscript-BnlCZFoB.js                          3.90 kB │ gzip:   1.28 kB
+dist/assets/ron-VUp2lXgN.js                                3.90 kB │ gzip:   0.97 kB
+dist/assets/gn-ilITqXS6.js                                 3.99 kB │ gzip:   1.47 kB
+dist/assets/diagram-LBJQPF4R-BwSyxrj6.js                   4.13 kB │ gzip:   1.78 kB
+dist/assets/pascal-4ZHwLPI5.js                             4.14 kB │ gzip:   1.67 kB
+dist/assets/http-Da_kjz5m.js                               4.41 kB │ gzip:   1.06 kB
+dist/assets/tcl-CZd0xW_V.js                                4.42 kB │ gzip:   1.50 kB
+dist/assets/MCPOAuthConnectPage-Dql_woQc.js                4.44 kB │ gzip:   1.77 kB
+dist/assets/nextflow-Bbiyy34d.js                           4.50 kB │ gzip:   1.16 kB
+dist/assets/rosmsg-CAekHB0j.js                             4.51 kB │ gzip:   1.05 kB
+dist/assets/message-DXSGW1Vf.js                            4.62 kB │ gzip:   1.94 kB
+dist/assets/polar-C7UOKdEL.js                              4.66 kB │ gzip:   1.12 kB
+dist/assets/sdbl-bTVj8UrX.js                               4.69 kB │ gzip:   2.00 kB
+dist/assets/fennel-DQxkIbk2.js                             4.76 kB │ gzip:   1.53 kB
+dist/assets/bibtex-Ci_nEsc7.js                             4.78 kB │ gzip:   0.83 kB
+dist/assets/map-DDn5FSyL.js                                5.03 kB │ gzip:   2.05 kB
+dist/assets/llvm-Cm23YOpf.js                               5.04 kB │ gzip:   2.01 kB
+dist/assets/wgsl-BsKzXJz4.js                               5.13 kB │ gzip:   1.38 kB
+dist/assets/urlResolution-Cp6gRAuZ.js                      5.23 kB │ gzip:   2.23 kB
+dist/assets/gdresource-C0sCabJj.js                         5.28 kB │ gzip:   1.33 kB
+dist/assets/zig-CMLA9XwU.js                                5.33 kB │ gzip:   1.55 kB
+dist/assets/qml-DWs4ParD.js                                5.33 kB │ gzip:   1.38 kB
+dist/assets/dax-BkyTk9wS.js                                5.35 kB │ gzip:   2.21 kB
+dist/assets/bicep-CUHmPFLl.js                              5.37 kB │ gzip:   1.14 kB
+dist/assets/xml-CNfvW5JP.js                                5.44 kB │ gzip:   1.25 kB
+dist/assets/awk-BWXHIvNe.js                                5.45 kB │ gzip:   1.37 kB
+dist/assets/coq-BrsZFFmf.js                                5.54 kB │ gzip:   1.91 kB
+dist/assets/jinja-DuNSryF7.js                              5.62 kB │ gzip:   1.36 kB
+dist/assets/lean-CewbzKMR.js                               5.77 kB │ gzip:   1.91 kB
+dist/assets/moonbit-CaWjb8XO.js                            5.89 kB │ gzip:   1.67 kB
+dist/assets/powerquery-DNMTfnFr.js                         5.89 kB │ gzip:   1.51 kB
+dist/assets/shaderlab-TOUzSsQk.js                          5.91 kB │ gzip:   2.08 kB
+dist/assets/verilog-CiiDBU1e.js                            5.92 kB │ gzip:   1.89 kB
+dist/assets/diagram-UB23O5K3-xYiafD6A.js                   5.92 kB │ gzip:   2.49 kB
+dist/assets/cypher-ClKdZ_lG.js                             5.94 kB │ gzip:   1.71 kB
+dist/assets/pieDiagram-7S7Q4E2Y-DbV9X3C8.js                5.95 kB │ gzip:   2.46 kB
+dist/assets/vb-Djn5o6TS.js                                 6.08 kB │ gzip:   2.33 kB
+dist/assets/red-CJ3rzSJv.js                                6.25 kB │ gzip:   1.59 kB
+dist/assets/StreamdownDemoPage-CqBrlGuv.js                 6.28 kB │ gzip:   2.94 kB
+dist/assets/min-dark-BSWPekZh.js                           6.28 kB │ gzip:   1.70 kB
+dist/assets/gdshader-CBce3t8t.js                           6.31 kB │ gzip:   1.72 kB
+dist/assets/prisma-BsRQq5mF.js                             6.32 kB │ gzip:   1.38 kB
+dist/assets/ara-4CJ0cIlV.js                                6.35 kB │ gzip:   1.80 kB
+dist/assets/clojure-DqKBuwfJ.js                            6.40 kB │ gzip:   1.41 kB
+dist/assets/postcss-BXeXVLqQ.js                            6.41 kB │ gzip:   1.90 kB
+dist/assets/toml-CcmNWLt0.js                               6.41 kB │ gzip:   1.28 kB
+dist/assets/solarized-light-DSh2HLQt.js                    6.47 kB │ gzip:   1.71 kB
+dist/assets/proto-DB4EqR-F.js                              6.54 kB │ gzip:   1.41 kB
+dist/assets/ArtifactFullscreenPage-DgCYX86W.js             6.57 kB │ gzip:   2.66 kB
+dist/assets/smalltalk-B16xEiuN.js                          6.58 kB │ gzip:   1.61 kB
+dist/assets/r-B_2zvz1A.js                                  6.60 kB │ gzip:   1.83 kB
+dist/assets/talonscript-CohzipZa.js                        6.75 kB │ gzip:   1.48 kB
+dist/assets/solarized-dark-DV17i1UV.js                     6.84 kB │ gzip:   1.78 kB
+dist/assets/riscv-Ckw8ddFX.js                              6.90 kB │ gzip:   1.97 kB
+dist/assets/soy-DmAO5KqQ.js                                6.92 kB │ gzip:   1.62 kB
+dist/assets/min-light-DDpmG2fV.js                          6.96 kB │ gzip:   1.88 kB
+dist/assets/chunk-RYQCIY6F-1HmMKH88.js                     6.98 kB │ gzip:   2.66 kB
+dist/assets/TerminalModal-Cl_VRsu4.js                      7.12 kB │ gzip:   3.05 kB
+dist/assets/scheme-DQCgrYNe.js                             7.16 kB │ gzip:   2.04 kB
+dist/assets/hlsl-Cvrh5tZx.js                               7.25 kB │ gzip:   2.18 kB
+dist/assets/qss-Fe1Jh2GI.js                                7.46 kB │ gzip:   2.57 kB
+dist/assets/dart-DkHntEIa.js                               7.80 kB │ gzip:   1.91 kB
+dist/assets/systemd-BxMlprV5.js                            7.86 kB │ gzip:   2.54 kB
+dist/assets/monokai-CdkpiU2Y.js                            7.88 kB │ gzip:   1.90 kB
+dist/assets/regexp--aR2_iz7.js                             8.05 kB │ gzip:   1.47 kB
+dist/assets/diagram-7IWD3JNH-CIk1Xoyd.js                   8.13 kB │ gzip:   3.61 kB
+dist/assets/haml-BUBfnAPo.js                               8.33 kB │ gzip:   1.85 kB
+dist/assets/typst-DI99ib-x.js                              8.38 kB │ gzip:   1.66 kB
+dist/assets/dagre-VZM6K2ZE-BUWHKjrg.js                     8.43 kB │ gzip:   3.24 kB
+dist/assets/vue-html-DZGW9MGR.js                           8.47 kB │ gzip:   1.68 kB
+dist/assets/plsql-DGHpHOYJ.js                              8.50 kB │ gzip:   2.99 kB
+dist/assets/horizon-CE9ld1lL.js                            8.77 kB │ gzip:   1.94 kB
+dist/assets/kotlin-DhhofPvG.js                             8.77 kB │ gzip:   2.12 kB
+dist/assets/horizon-bright-Br1oVSNq.js                     8.78 kB │ gzip:   1.96 kB
+dist/assets/ts-tags-CSxB5Eny.js                            8.92 kB │ gzip:   1.21 kB
+dist/assets/make-Dixweg8N.js                               8.95 kB │ gzip:   1.76 kB
+dist/assets/ArtifactConsentModal-BpPDe3bh.js               8.97 kB │ gzip:   3.66 kB
+dist/assets/andromeeda-vGVdxbeo.js                         9.01 kB │ gzip:   2.35 kB
+dist/assets/sas-BaCscvql.js                                9.06 kB │ gzip:   3.82 kB
+dist/assets/dark-plus-Cs2F2srj.js                          9.09 kB │ gzip:   2.10 kB
+dist/assets/slack-dark-DnToyrRv.js                         9.11 kB │ gzip:   1.96 kB
+dist/assets/VegaLiteRenderer-UIdCnMVG.js                   9.13 kB │ gzip:   3.74 kB
+dist/assets/sass-DXrisJhu.js                               9.28 kB │ gzip:   2.48 kB
+dist/assets/plastic-DQwYfKfQ.js                            9.29 kB │ gzip:   1.96 kB
+dist/assets/slack-ochin-B2OO5cIa.js                        9.42 kB │ gzip:   2.08 kB
+dist/assets/tex-Bjo-GMiN.js                                9.67 kB │ gzip:   3.06 kB
+dist/assets/jison-CHwnC1Pv.js                              9.69 kB │ gzip:   1.87 kB
+dist/assets/cynefinDiagram-MW4NZA55-DS-vFDPV.js            9.79 kB │ gzip:   3.43 kB
+dist/assets/cmake-Bj61d0ZC.js                              9.84 kB │ gzip:   3.37 kB
+dist/assets/light-plus-DVQuIRkW.js                         9.93 kB │ gzip:   2.27 kB
+dist/assets/hcl-Dh228itO.js                               10.04 kB │ gzip:   1.93 kB
+dist/assets/stateDiagram-OKZ733FA-BSW98wiW.js             10.24 kB │ gzip:   3.54 kB
+dist/assets/rst-CqRkteH8.js                               10.31 kB │ gzip:   2.24 kB
+dist/assets/pkl-ot-7Btpt.js                               10.36 kB │ gzip:   1.37 kB
+dist/assets/beancount-D-usSTwE.js                         10.36 kB │ gzip:   1.43 kB
+dist/assets/nextflow-groovy-Dc_ddanL.js                   10.39 kB │ gzip:   2.12 kB
+dist/assets/ArtifactNode-DYXJGbxQ.js                      10.42 kB │ gzip:   3.89 kB
+dist/assets/dream-maker-DW3nJb8Q.js                       10.46 kB │ gzip:   2.25 kB
+dist/assets/raku-B3gFvitq.js                              10.46 kB │ gzip:   2.94 kB
+dist/assets/yaml-B9zsrP9R.js                              10.57 kB │ gzip:   2.32 kB
+dist/assets/diagram-B4RE2ZJO-C4zG8WYo.js                  10.59 kB │ gzip:   4.07 kB
+dist/assets/just-DZo2o5E2.js                              10.76 kB │ gzip:   2.60 kB
+dist/assets/diagram-Q27KOJAE-Dr1Sy2qD.js                  10.83 kB │ gzip:   3.75 kB
+dist/assets/elm-C-6n8iva.js                               10.94 kB │ gzip:   2.09 kB
+dist/assets/github-light-EUqPIrTm.js                      11.18 kB │ gzip:   2.49 kB
+dist/assets/prolog-iXnhIJG7.js                            11.34 kB │ gzip:   3.84 kB
+dist/assets/terraform-DswuEJGm.js                         11.38 kB │ gzip:   2.51 kB
+dist/assets/github-dark-C-LZuMrd.js                       11.40 kB │ gzip:   2.53 kB
+dist/assets/puppet-CDv2pdJW.js                            11.43 kB │ gzip:   2.10 kB
+dist/assets/laserwave-C_8bwKvT.js                         11.49 kB │ gzip:   2.57 kB
+dist/assets/MarkdownRenderer-DXwdMbvz.js                  11.81 kB │ gzip:   5.46 kB
+dist/assets/gherkin-DExj1W_8.js                           11.93 kB │ gzip:   5.04 kB
+dist/assets/wasm-ByWQv1Qj.js                              12.00 kB │ gzip:   2.17 kB
+dist/assets/hjson-CxZEssPk.js                             12.04 kB │ gzip:   1.64 kB
+dist/assets/handlebars-qVnY7qVv.js                        12.16 kB │ gzip:   2.38 kB
+dist/assets/apache-U0d_L8uA.js                            12.44 kB │ gzip:   3.71 kB
+dist/assets/vesper-D5bVUKB1.js                            12.68 kB │ gzip:   1.98 kB
+dist/assets/bat-Bo4NYOV-.js                               12.88 kB │ gzip:   3.22 kB
+dist/assets/fish-BJitypiv.js                              13.03 kB │ gzip:   1.73 kB
+dist/assets/v-DETTlOr0.js                                 13.20 kB │ gzip:   2.73 kB
+dist/assets/vitesse-light-VbXTXTou.js                     13.61 kB │ gzip:   3.03 kB
+dist/assets/aurora-x-CDeNXAV0.js                          13.65 kB │ gzip:   2.28 kB
+dist/assets/vitesse-black-fwtXNY1n.js                     13.67 kB │ gzip:   3.05 kB
+dist/assets/vitesse-dark-BZCL-v6S.js                      13.75 kB │ gzip:   3.06 kB
+dist/assets/pug-Ce37auPQ.js                               13.84 kB │ gzip:   2.58 kB
+dist/assets/luau-CNKltnaQ.js                              13.95 kB │ gzip:   3.16 kB
+dist/assets/synthwave-84-nFMaYfgc.js                      14.03 kB │ gzip:   2.85 kB
+dist/assets/github-light-default-BXViO-2h.js              14.15 kB │ gzip:   3.02 kB
+dist/assets/clarity-SemFz856.js                           14.26 kB │ gzip:   2.46 kB
+dist/assets/github-light-high-contrast-B68TUdTA.js        14.27 kB │ gzip:   3.00 kB
+dist/assets/github-dark-dimmed-Bx1FflLF.js                14.43 kB │ gzip:   3.11 kB
+dist/assets/github-dark-default-DXG-b-1a.js               14.43 kB │ gzip:   3.12 kB
+dist/assets/github-dark-high-contrast-B_tTalzw.js         14.59 kB │ gzip:   3.07 kB
+dist/assets/gnuplot-7GGW24-e.js                           14.77 kB │ gzip:   3.27 kB
+dist/assets/rust-Cfkwpbl8.js                              15.06 kB │ gzip:   2.71 kB
+dist/assets/kusto-BUv0MjJC.js                             15.16 kB │ gzip:   3.93 kB
+dist/assets/actionscript-3--17pq3dv.js                    15.19 kB │ gzip:   2.67 kB
+dist/assets/nix-IvuFDN5E.js                               15.50 kB │ gzip:   2.47 kB
+dist/assets/chunk-6Q2QTUOP-B8HZy8k0.js                    15.53 kB │ gzip:   4.28 kB
+dist/assets/lua-BIP2dQgW.js                               15.60 kB │ gzip:   3.19 kB
+dist/assets/abap-CLvhMVsD.js                              15.84 kB │ gzip:   5.93 kB
+dist/assets/solidity-CKzVLygQ.js                          16.06 kB │ gzip:   3.09 kB
+dist/assets/matlab-D7qyCx1q.js                            16.07 kB │ gzip:   3.06 kB
+dist/assets/cue-CE9AQfxI.js                               16.19 kB │ gzip:   2.04 kB
+dist/assets/elixir-DkgEFlh9.js                            16.26 kB │ gzip:   2.76 kB
+dist/assets/odin-B1RWQWA5.js                              16.50 kB │ gzip:   2.92 kB
+dist/assets/mermaid-parser.core-DbZTDh_t.js               16.59 kB │ gzip:   3.92 kB
+dist/assets/bird2-C2hNVINV.js                             16.96 kB │ gzip:   3.84 kB
+dist/assets/kanagawa-wave-CTweb8Dz.js                     17.12 kB │ gzip:   2.90 kB
+dist/assets/kanagawa-lotus-BN08jTvb.js                    17.12 kB │ gzip:   2.90 kB
+dist/assets/kanagawa-dragon-CXtmUGW6.js                   17.12 kB │ gzip:   2.92 kB
+dist/assets/ishikawaDiagram-WSZJBQD7-Bt_LAsuV.js          17.13 kB │ gzip:   6.42 kB
+dist/assets/move-B1IS1UjX.js                              17.49 kB │ gzip:   3.06 kB
+dist/assets/graphql-ns1EoQQG.js                           18.08 kB │ gzip:   2.54 kB
+dist/assets/liquid-XCoXGo1k.js                            18.10 kB │ gzip:   3.14 kB
+dist/assets/svelte-B3woShZ2.js                            18.24 kB │ gzip:   3.14 kB
+dist/assets/AutocompleteTextarea-Dvq8XYnB.js              18.39 kB │ gzip:   7.00 kB
+dist/assets/material-theme-Bm3Qr25_.js                    18.61 kB │ gzip:   3.10 kB
+dist/assets/material-theme-darker-2IIEA8gg.js             18.62 kB │ gzip:   3.10 kB
+dist/assets/material-theme-ocean-CHQ94UKr.js              18.62 kB │ gzip:   3.12 kB
+dist/assets/material-theme-lighter-uhdI0v04.js            18.63 kB │ gzip:   3.10 kB
+dist/assets/material-theme-palenight-B5W6OYN7.js          18.63 kB │ gzip:   3.11 kB
+dist/assets/gdscript-Cp2uCuqX.js                          18.98 kB │ gzip:   3.75 kB
+dist/assets/groovy-CacY0gHj.js                            19.17 kB │ gzip:   3.59 kB
+dist/assets/fixtureData-Cwe97Fxs.js                       19.24 kB │ gzip:   6.58 kB
+dist/assets/mdc-C7Lb5uay.js                               19.54 kB │ gzip:   6.66 kB
+dist/assets/kanban-definition-27J2QSJJ-BqzwHm0W.js        19.88 kB │ gzip:   6.95 kB
+dist/assets/ayu-dark-DluEY0Gj.js                          20.07 kB │ gzip:   3.93 kB
+dist/assets/ayu-mirage-Bqwy1Gya.js                        20.08 kB │ gzip:   3.91 kB
+dist/assets/glimmer-js-CFyErDLZ.js                        20.08 kB │ gzip:   2.94 kB
+dist/assets/glimmer-ts-Ct4QKAg6.js                        20.08 kB │ gzip:   2.93 kB
+dist/assets/powershell-DshXNtvi.js                        20.14 kB │ gzip:   4.05 kB
+dist/assets/ayu-light-C3h-C4tm.js                         20.14 kB │ gzip:   3.89 kB
+dist/assets/viml-DvXPmvsu.js                              20.35 kB │ gzip:   6.73 kB
+dist/assets/nushell-DcLAeLz5.js                           20.40 kB │ gzip:   5.21 kB
+dist/assets/snazzy-light-4G7pJPwS.js                      20.77 kB │ gzip:   3.80 kB
+dist/assets/twig-DCsq_S7z.js                              20.90 kB │ gzip:   3.66 kB
+dist/assets/dracula-BHWKrbxM.js                           21.06 kB │ gzip:   3.99 kB
+dist/assets/dracula-soft-5eyTD99u.js                      21.07 kB │ gzip:   4.02 kB
+dist/assets/wit-DdvCle-K.js                               21.46 kB │ gzip:   2.87 kB
+dist/assets/rose-pine-BthvhNj6.js                         21.74 kB │ gzip:   3.86 kB
+dist/assets/rose-pine-moon-hon4tzzS.js                    21.75 kB │ gzip:   3.87 kB
+dist/assets/rose-pine-dawn-Dg85fqjY.js                    21.75 kB │ gzip:   3.88 kB
+dist/assets/nim-CUz-jMgf.js                               22.45 kB │ gzip:   3.15 kB
+dist/assets/common-lisp-Cv5bFMCO.js                       22.57 kB │ gzip:   6.07 kB
+dist/assets/surrealql-D9bH0Csw.js                         22.58 kB │ gzip:   4.31 kB
+dist/assets/agorStore-DQB09XzN.js                         22.59 kB │ gzip:   7.68 kB
+dist/assets/gruvbox-dark-hard-C820rvS2.js                 22.63 kB │ gzip:   4.15 kB
+dist/assets/gruvbox-dark-soft-MrdJrrXF.js                 22.63 kB │ gzip:   4.15 kB
+dist/assets/gruvbox-light-hard-BC_s9l72.js                22.63 kB │ gzip:   4.16 kB
+dist/assets/gruvbox-light-soft-BSMLrYjP.js                22.63 kB │ gzip:   4.16 kB
+dist/assets/gruvbox-dark-medium-BPjhmG05.js               22.63 kB │ gzip:   4.15 kB
+dist/assets/gruvbox-light-medium-BAWPOn9u.js              22.63 kB │ gzip:   4.16 kB
+dist/assets/sankeyDiagram-W5VNT64P-D1nDv38c.js            22.67 kB │ gzip:   8.19 kB
+dist/assets/mindmap-definition-FAOFIHXS-CJy_-vfZ.js       22.71 kB │ gzip:   7.64 kB
+dist/assets/journeyDiagram-NVQOT4AX-vzV42jBO.js           23.13 kB │ gzip:   8.13 kB
+dist/assets/sql-CLgiMrxJ.js                               23.47 kB │ gzip:   7.49 kB
+dist/assets/cadence-CQ2zXKGN.js                           23.66 kB │ gzip:   3.65 kB
+dist/assets/graphlib-DoDw2DoG.js                          23.92 kB │ gzip:   8.32 kB
+dist/assets/typespec-B88KGewJ.js                          24.01 kB │ gzip:   2.58 kB
+dist/assets/astro-Dt1mSA-e.js                             24.02 kB │ gzip:   7.60 kB
+dist/assets/apl-BqqYD0H4.js                               24.02 kB │ gzip:   4.16 kB
+dist/assets/templ-B7gtJFlV.js                             24.06 kB │ gzip:   5.41 kB
+dist/assets/angular-html-i2ZEVJq0.js                      24.24 kB │ gzip:   3.99 kB
+dist/assets/vhdl-BroJfC0k.js                              24.25 kB │ gzip:   3.86 kB
+dist/assets/vue-BR4XqTj9.js                               24.48 kB │ gzip:   2.96 kB
+dist/assets/purescript-9MfHhQsQ.js                        24.67 kB │ gzip:   3.24 kB
+dist/assets/wardleyDiagram-T6FBY63Y-DJahiX9z.js           25.06 kB │ gzip:   6.48 kB
+dist/assets/one-light-D7Lr4KcI.js                         25.29 kB │ gzip:   3.63 kB
+dist/assets/fsharp-D13ZGOAj.js                            25.30 kB │ gzip:   4.12 kB
+dist/assets/marko-CiosSmec.js                             25.48 kB │ gzip:   3.59 kB
+dist/assets/c3-CnJL0r0V.js                                25.62 kB │ gzip:   3.85 kB
+dist/assets/react-resizable-panels-gjLEOHB0.js            25.75 kB │ gzip:   8.83 kB
+dist/assets/night-owl-light-eJ-hLW7d.js                   25.89 kB │ gzip:   4.23 kB
+dist/assets/system-verilog-DJ5XKQeo.js                    26.19 kB │ gzip:   4.82 kB
+dist/assets/nord-Cb4Vim4T.js                              26.72 kB │ gzip:   4.35 kB
+dist/assets/erDiagram-JOGREHBK-AIUcRHFl.js                26.73 kB │ gzip:   9.24 kB
+dist/assets/codeql-oeQT6MSM.js                            26.87 kB │ gzip:   3.79 kB
+dist/assets/scss-DngyzxVC.js                              27.26 kB │ gzip:   4.23 kB
+dist/assets/java-duG_UTKe.js                              27.28 kB │ gzip:   4.31 kB
+dist/assets/__vite-browser-external-CXqyfWGL.js           27.30 kB │ gzip:   8.06 kB
+dist/assets/coffee-ouOQ86EC.js                            27.42 kB │ gzip:   6.35 kB
+dist/assets/razor-Ctpaw8Xr.js                             27.45 kB │ gzip:   3.54 kB
+dist/assets/EmojiPickerInput-BMfgV91y.js                  27.73 kB │ gzip:  10.12 kB
+dist/assets/scala-DKOlJaKm.js                             28.87 kB │ gzip:   3.92 kB
+dist/assets/night-owl-DhmEMT88.js                         28.91 kB │ gzip:   5.14 kB
+dist/assets/gitGraphDiagram-DS77QQ5N-CTrplwTe.js          28.94 kB │ gzip:   8.50 kB
+dist/assets/crystal-Dj_CYA08.js                           29.41 kB │ gzip:   4.44 kB
+dist/assets/mermaid-Bk4SNUv9.js                           29.50 kB │ gzip:   3.64 kB
+dist/assets/applescript-CCn79oCD.js                       29.56 kB │ gzip:   5.94 kB
+dist/assets/timeline-definition-Z64GVDOM-DqxT5a4z.js      30.27 kB │ gzip:   9.87 kB
+dist/assets/requirementDiagram-LRYGKXZP-DaWIzFht.js       30.59 kB │ gzip:   9.57 kB
+dist/assets/julia-mj6xfn4X.js                             30.99 kB │ gzip:   4.30 kB
+dist/assets/stylus-B6D30XZt.js                            31.06 kB │ gzip:   8.01 kB
+dist/assets/dagre-_G2tdH2S.js                             32.06 kB │ gzip:  11.58 kB
+dist/assets/MCPCatalogContent-Du736oNG.js                 32.44 kB │ gzip:   9.83 kB
+dist/assets/poimandres-DRFjx7u4.js                        33.49 kB │ gzip:   5.49 kB
+dist/assets/quadrantDiagram-CIZ2JOQS-Y-YNAGdQ.js          33.49 kB │ gzip:   9.71 kB
+dist/assets/one-dark-pro-CLwyXe_n.js                      33.78 kB │ gzip:   5.50 kB
+dist/assets/bsl-BkkzgIyY.js                               33.86 kB │ gzip:   8.34 kB
+dist/assets/haxe-OTjmBuCE.js                              35.15 kB │ gzip:   5.90 kB
+dist/assets/nginx-BgDTOYqs.js                             35.35 kB │ gzip:   4.45 kB
+dist/assets/houston-CsvMBhTu.js                           35.41 kB │ gzip:   5.76 kB
+dist/assets/tokyo-night-oM2G3aXe.js                       35.66 kB │ gzip:   6.22 kB
+dist/assets/erlang-Cphh6RMH.js                            37.47 kB │ gzip:   4.36 kB
+dist/assets/chunk-5RXB4S5H-DcEomupS.js                    37.57 kB │ gzip:  12.22 kB
+dist/assets/MarketingVideoPage-DK5bF9zJ.js                37.64 kB │ gzip:  12.07 kB
+dist/assets/agorRealtimeActions-DkReFSNH.js               37.94 kB │ gzip:  11.76 kB
+dist/assets/chunk-OB3PAWPO-Dgd8NgDd.js                    38.98 kB │ gzip:  13.98 kB
+dist/assets/cobol-BgCIwGZu.js                             39.09 kB │ gzip:  10.89 kB
+dist/assets/MobileApp-C25bTgjf.js                         39.47 kB │ gzip:  12.03 kB
+dist/assets/asm-Cmm7eHzH.js                               40.71 kB │ gzip:   8.16 kB
+dist/assets/vennDiagram-T6HMQDX7-DSa_GZg4.js              41.01 kB │ gzip:  15.03 kB
+dist/assets/xychartDiagram-ELKLHX3M-BSX8k7SZ.js           41.12 kB │ gzip:  11.45 kB
+dist/assets/haskell-D8IpX4py.js                           41.48 kB │ gzip:   6.41 kB
+dist/assets/shellscript-DnoJEH0-.js                       41.54 kB │ gzip:   6.13 kB
+dist/assets/perl-C1dZQPV5.js                              43.14 kB │ gzip:   4.64 kB
+dist/assets/d-qD-0Kul2.js                                 43.78 kB │ gzip:   8.43 kB
+dist/assets/MCPServerEditModal-vu3qXKp9.js                44.34 kB │ gzip:  13.53 kB
+dist/assets/lib-CczgDGxi.js                               45.76 kB │ gzip:  14.25 kB
+dist/assets/ruby-D3BGyoLR.js                              45.83 kB │ gzip:   5.56 kB
+dist/assets/go-BJwz_mda.js                                46.80 kB │ gzip:   5.15 kB
+dist/assets/apex-CGTLDQj6.js                              46.97 kB │ gzip:   6.72 kB
+dist/assets/catppuccin-mocha-DYhrFGRu.js                  47.25 kB │ gzip:   7.98 kB
+dist/assets/catppuccin-latte-DwIHMF0Q.js                  47.25 kB │ gzip:   7.98 kB
+dist/assets/catppuccin-frappe-3VR1Za6u.js                 47.25 kB │ gzip:   7.99 kB
+dist/assets/catppuccin-macchiato-DYnBP6_5.js              47.26 kB │ gzip:   7.99 kB
+dist/assets/ada-C5qYipkI.js                               48.07 kB │ gzip:   5.96 kB
+dist/assets/chunk-GF5L2VYU-Nf5kZ6J4.js                    48.67 kB │ gzip:  15.69 kB
+dist/assets/css-DeEW2upM.js                               49.08 kB │ gzip:  11.95 kB
+dist/assets/imba-DsUTQ-LC.js                              49.92 kB │ gzip:   9.47 kB
+dist/assets/SessionSettingsModal-BYYxalRO.js              50.96 kB │ gzip:  13.80 kB
+dist/assets/ganttDiagram-PKOTCBZU-Burm5DyE.js             52.23 kB │ gzip:  17.30 kB
+dist/assets/everforest-dark-sB-x3p7T.js                   53.74 kB │ gzip:   8.37 kB
+dist/assets/everforest-light-Df2xbC6M.js                  53.74 kB │ gzip:   8.36 kB
+dist/assets/wikitext-ClFFjSW2.js                          55.87 kB │ gzip:   4.81 kB
+dist/assets/stata-BiJ8hoIJ.js                             56.99 kB │ gzip:  12.39 kB
+dist/assets/html-DhBYQyK4.js                              57.32 kB │ gzip:  11.79 kB
+dist/assets/ballerina-B7ZEbQpA.js                         58.68 kB │ gzip:   8.10 kB
+dist/assets/markdown-BYOwaDjH.js                          59.32 kB │ gzip:   5.66 kB
+dist/assets/chunk-JQJVKLGR-CGilR-_v.js                    59.96 kB │ gzip:  19.44 kB
+dist/assets/ocaml-O90oeIOV.js                             62.44 kB │ gzip:   5.04 kB
+dist/assets/SessionPanel-TYZocDNW.js                      68.71 kB │ gzip:  22.33 kB
+dist/assets/c4Diagram-5PPSVZJV-4VoYYzQz.js                69.06 kB │ gzip:  19.28 kB
+dist/assets/mojo-BgCJLMeH.js                              69.79 kB │ gzip:   9.21 kB
+dist/assets/python-gzcpVVnB.js                            69.94 kB │ gzip:   9.09 kB
+dist/assets/c-aGSZMVdM.js                                 72.17 kB │ gzip:  10.55 kB
+dist/assets/blockDiagram-VBNYF7ZC-DlNVzwcK.js             72.47 kB │ gzip:  20.51 kB
+dist/assets/latex-CSkjTfPS.js                             72.61 kB │ gzip:   6.68 kB
+dist/assets/vyper-CgoNMtux.js                             74.64 kB │ gzip:  10.69 kB
+dist/assets/KnowledgePage-BFf4p7RB.js                     79.31 kB │ gzip:  23.97 kB
+dist/assets/hack-DB7M32Gm.js                              80.18 kB │ gzip:  26.27 kB
+dist/assets/cose-bilkent-JH36ORCC-CXypzhW7.js             81.26 kB │ gzip:  21.54 kB
+dist/assets/swift-DonLKvLd.js                             86.68 kB │ gzip:  14.69 kB
+dist/assets/fortran-free-form-CYNrtFtB.js                 88.96 kB │ gzip:  11.18 kB
+dist/assets/csharp-Ct8U2NOr.js                            89.68 kB │ gzip:  10.64 kB
+dist/assets/racket-DcIDlBhZ.js                            92.38 kB │ gzip:  15.07 kB
+dist/assets/less-DVTAwKKz.js                              97.62 kB │ gzip:  14.84 kB
+dist/assets/types-B479jog1.js                            100.93 kB │ gzip:  29.73 kB
+dist/assets/App-BifeNAkL.js                              101.62 kB │ gzip:  30.92 kB
+dist/assets/blade-D83jhYA_.js                            104.97 kB │ gzip:  28.29 kB
+dist/assets/objective-c-D1A_Heim.js                      105.40 kB │ gzip:  23.63 kB
+dist/assets/SessionCanvas-BbEkByto.js                    106.83 kB │ gzip:  33.22 kB
+dist/assets/php-Cv1yln_y.js                              111.05 kB │ gzip:  28.65 kB
+dist/assets/swimlanes-SLNWSIFB-DYuXN13o.js               113.86 kB │ gzip:  39.03 kB
+dist/assets/sequenceDiagram-SI44F4Z6-CoRPVpOz.js         115.61 kB │ gzip:  30.52 kB
+dist/assets/asciidoc-DE70LPWp.js                         131.52 kB │ gzip:   9.31 kB
+dist/assets/mdx-DQZ5AkYe.js                              136.10 kB │ gzip:  23.54 kB
+dist/assets/architectureDiagram-T3A2C74G-ChDfoRPm.js     148.72 kB │ gzip:  41.05 kB
+dist/assets/reactflow-BA_wWxXt.js                        153.77 kB │ gzip:  50.40 kB
+dist/assets/objective-cpp-BsSzOQcm.js                    171.96 kB │ gzip:  30.98 kB
+dist/assets/javascript-DWVbOe4X.js                       174.89 kB │ gzip:  16.68 kB
+dist/assets/tsx-JMDX3aQ7.js                              175.60 kB │ gzip:  16.68 kB
+dist/assets/jsx-fcCEM_-L.js                              177.85 kB │ gzip:  16.77 kB
+dist/assets/typescript-BAz-bF8J.js                       181.14 kB │ gzip:  16.29 kB
+dist/assets/angular-ts-CEQYB7nm.js                       183.73 kB │ gzip:  16.78 kB
+dist/assets/vue-vine-B157dWFT.js                         190.05 kB │ gzip:  18.07 kB
+dist/assets/BoardObjectNodes-DWq6vFBW.js                 201.59 kB │ gzip:  59.15 kB
+dist/assets/hooks-D0ZdRh2N.js                            213.37 kB │ gzip:  66.67 kB
+dist/assets/wolfram-DLL8P-h_.js                          262.38 kB │ gzip:  77.63 kB
+dist/assets/src-B_sq6t4S.js                              277.93 kB │ gzip:  81.63 kB
+dist/assets/cytoscape.esm-B6RGcXce.js                    434.70 kB │ gzip: 137.73 kB
+dist/assets/xterm-epp1quq9.js                            453.56 kB │ gzip: 116.87 kB
+dist/assets/sandpack-CGuUWrBt.js                         501.42 kB │ gzip: 109.22 kB
+dist/assets/wasm-BnjxR4X6.js                             622.32 kB │ gzip: 232.09 kB
+dist/assets/cpp-D7oTDj03.js                              626.13 kB │ gzip:  48.09 kB
+dist/assets/editor-BOztVGMy.js                           626.77 kB │ gzip: 216.53 kB
+dist/assets/syntax-Cq_fOtJi.js                           633.68 kB │ gzip: 224.26 kB
+dist/assets/index-Cq79sMeS.js                            642.87 kB │ gzip: 187.09 kB
+dist/assets/chunk-KEIR6QF5-CScyq2N3.js                   662.11 kB │ gzip: 143.16 kB
+dist/assets/emacs-lisp-C9PiwqqW.js                       779.84 kB │ gzip: 197.53 kB
+dist/assets/vega-TzVu7q_t.js                             815.45 kB │ gzip: 281.54 kB
+dist/assets/emoji-CReixr9x.js                          1,074.53 kB │ gzip: 201.39 kB
+dist/assets/antd-N89oyW1X.js                           1,416.90 kB │ gzip: 441.57 kB
+dist/assets/streamdown-D34NlD5f.js                     1,593.19 kB │ gzip: 443.65 kB
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 1000 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 2.50s
+
+✨ [vite-plugin-compression]:algorithm=gzip - compressed file successfully: 
+dist//app/apps/agor-ui/assets/ActionPageShell-Bz12xg_j.js.gz                1.22kb / gzip: 0.66kb
+dist//app/apps/agor-ui/assets/ArtifactConsentModal-BpPDe3bh.js.gz           8.77kb / gzip: 3.57kb
+dist//app/apps/agor-ui/assets/ArtifactFullscreenPage-DgCYX86W.js.gz         6.42kb / gzip: 2.60kb
+dist//app/apps/agor-ui/assets/AutocompleteTextarea-Dvq8XYnB.js.gz           17.96kb / gzip: 6.82kb
+dist//app/apps/agor-ui/assets/ArtifactNode-DYXJGbxQ.js.gz                   10.18kb / gzip: 3.78kb
+dist//app/apps/agor-ui/assets/AppNode-BpnjW6BU.js.gz                        2.57kb / gzip: 1.25kb
+dist//app/apps/agor-ui/assets/CLILoginPage-ByyibDEK.js.gz                   2.91kb / gzip: 1.47kb
+dist//app/apps/agor-ui/assets/CodeEditor.inner-DNdRpi0u.js.gz               1.31kb / gzip: 0.73kb
+dist//app/apps/agor-ui/assets/GlobalUserMenu-EJmEZz5D.js.gz                 1.45kb / gzip: 0.72kb
+dist//app/apps/agor-ui/assets/EmojiPickerInput-BMfgV91y.js.gz               27.09kb / gzip: 9.83kb
+dist//app/apps/agor-ui/assets/MCPCatalogContent-Du736oNG.js.gz              31.69kb / gzip: 9.54kb
+dist//app/apps/agor-ui/assets/MCPSlackRecoveryPage-CxXbXzfS.js.gz           2.46kb / gzip: 1.13kb
+dist//app/apps/agor-ui/assets/MCPOAuthConnectPage-Dql_woQc.js.gz            4.34kb / gzip: 1.73kb
+dist//app/apps/agor-ui/assets/MarkdownRenderer-CKqj2X3q.css.gz              27.13kb / gzip: 5.10kb
+dist//app/apps/agor-ui/assets/MarketingScreenshotPage-2MZhRH3a.js.gz        1.83kb / gzip: 0.92kb
+dist//app/apps/agor-ui/assets/MarkdownRenderer-DXwdMbvz.js.gz               11.54kb / gzip: 5.32kb
+dist//app/apps/agor-ui/assets/MCPServerEditModal-vu3qXKp9.js.gz             43.31kb / gzip: 13.12kb
+dist//app/apps/agor-ui/assets/MarketingVideoPage-D3jYFtWX.css.gz            1.79kb / gzip: 0.70kb
+dist//app/apps/agor-ui/assets/SessionCanvas-DiMjFNq5.css.gz                 2.57kb / gzip: 0.71kb
+dist//app/apps/agor-ui/assets/MarketingVideoPage-DK5bF9zJ.js.gz             36.77kb / gzip: 11.72kb
+dist//app/apps/agor-ui/assets/MobileApp-C25bTgjf.js.gz                      38.55kb / gzip: 11.67kb
+dist//app/apps/agor-ui/assets/TerminalModal-Cl_VRsu4.js.gz                  6.95kb / gzip: 2.98kb
+dist//app/apps/agor-ui/assets/UserIdentityAvatar-C8xazum5.js.gz             1.11kb / gzip: 0.70kb
+dist//app/apps/agor-ui/assets/StreamdownDemoPage-CqBrlGuv.js.gz             6.14kb / gzip: 2.86kb
+dist//app/apps/agor-ui/assets/VegaLiteRenderer-UIdCnMVG.js.gz               8.92kb / gzip: 3.64kb
+dist//app/apps/agor-ui/assets/abap-CLvhMVsD.js.gz                           15.47kb / gzip: 5.75kb
+dist//app/apps/agor-ui/assets/actionscript-3--17pq3dv.js.gz                 14.84kb / gzip: 2.59kb
+dist//app/apps/agor-ui/assets/SessionSettingsModal-BYYxalRO.js.gz           49.77kb / gzip: 13.42kb
+dist//app/apps/agor-ui/assets/abnfDiagram-N423BO3Z-D30B2-F_.js.gz           1.71kb / gzip: 0.83kb
+dist//app/apps/agor-ui/assets/andromeeda-vGVdxbeo.js.gz                     8.80kb / gzip: 2.29kb
+dist//app/apps/agor-ui/assets/__vite-browser-external-CXqyfWGL.js.gz        26.67kb / gzip: 7.81kb
+dist//app/apps/agor-ui/assets/agorStore-DQB09XzN.js.gz                      22.07kb / gzip: 7.44kb
+dist//app/apps/agor-ui/assets/agorRealtimeActions-DkReFSNH.js.gz            37.06kb / gzip: 11.42kb
+dist//app/apps/agor-ui/assets/ara-4CJ0cIlV.js.gz                            6.21kb / gzip: 1.76kb
+dist//app/apps/agor-ui/assets/apache-U0d_L8uA.js.gz                         12.16kb / gzip: 3.61kb
+dist//app/apps/agor-ui/assets/angular-html-i2ZEVJq0.js.gz                   23.68kb / gzip: 3.86kb
+dist//app/apps/agor-ui/assets/ada-C5qYipkI.js.gz                            46.95kb / gzip: 5.78kb
+dist//app/apps/agor-ui/assets/astro-Dt1mSA-e.js.gz                          23.46kb / gzip: 7.37kb
+dist//app/apps/agor-ui/assets/authHeaders-DT_LLEgs.js.gz                    1.51kb / gzip: 0.73kb
+dist//app/apps/agor-ui/assets/aurora-x-CDeNXAV0.js.gz                       13.34kb / gzip: 2.21kb
+dist//app/apps/agor-ui/assets/awk-BWXHIvNe.js.gz                            5.33kb / gzip: 1.34kb
+dist//app/apps/agor-ui/assets/applescript-CCn79oCD.js.gz                    28.87kb / gzip: 5.73kb
+dist//app/apps/agor-ui/assets/apl-BqqYD0H4.js.gz                            23.47kb / gzip: 4.03kb
+dist//app/apps/agor-ui/assets/ayu-dark-DluEY0Gj.js.gz                       19.61kb / gzip: 3.81kb
+dist//app/apps/agor-ui/assets/bat-Bo4NYOV-.js.gz                            12.58kb / gzip: 3.13kb
+dist//app/apps/agor-ui/assets/berry-DKpUyyne.js.gz                          2.93kb / gzip: 0.79kb
+dist//app/apps/agor-ui/assets/ayu-light-C3h-C4tm.js.gz                      19.68kb / gzip: 3.78kb
+dist//app/apps/agor-ui/assets/asm-Cmm7eHzH.js.gz                            39.76kb / gzip: 7.89kb
+dist//app/apps/agor-ui/assets/bibtex-Ci_nEsc7.js.gz                         4.68kb / gzip: 0.81kb
+dist//app/apps/agor-ui/assets/apex-CGTLDQj6.js.gz                           45.88kb / gzip: 6.53kb
+dist//app/apps/agor-ui/assets/asciidoc-DE70LPWp.js.gz                       128.44kb / gzip: 9.05kb
+dist//app/apps/agor-ui/assets/bicep-CUHmPFLl.js.gz                          5.25kb / gzip: 1.12kb
+dist//app/apps/agor-ui/assets/ayu-mirage-Bqwy1Gya.js.gz                     19.61kb / gzip: 3.79kb
+dist//app/apps/agor-ui/assets/angular-ts-CEQYB7nm.js.gz                     179.42kb / gzip: 15.86kb
+dist//app/apps/agor-ui/assets/bird2-C2hNVINV.js.gz                          16.56kb / gzip: 3.74kb
+dist//app/apps/agor-ui/assets/beancount-D-usSTwE.js.gz                      10.12kb / gzip: 1.38kb
+dist//app/apps/agor-ui/assets/cairo-DLTphjLi.js.gz                          2.86kb / gzip: 0.78kb
+dist//app/apps/agor-ui/assets/ballerina-B7ZEbQpA.js.gz                      57.31kb / gzip: 7.81kb
+dist//app/apps/agor-ui/assets/c3-CnJL0r0V.js.gz                             25.02kb / gzip: 3.75kb
+dist//app/apps/agor-ui/assets/bsl-BkkzgIyY.js.gz                            33.07kb / gzip: 8.14kb
+dist//app/apps/agor-ui/assets/cadence-CQ2zXKGN.js.gz                        23.11kb / gzip: 3.54kb
+dist//app/apps/agor-ui/assets/chunk-2GRJ4B5K-CC_zddjm.js.gz                 1.86kb / gzip: 0.83kb
+dist//app/apps/agor-ui/assets/c-aGSZMVdM.js.gz                              70.49kb / gzip: 10.22kb
+dist//app/apps/agor-ui/assets/chunk-6Q2QTUOP-B8HZy8k0.js.gz                 15.17kb / gzip: 4.17kb
+dist//app/apps/agor-ui/assets/catppuccin-frappe-3VR1Za6u.js.gz              46.15kb / gzip: 7.75kb
+dist//app/apps/agor-ui/assets/catppuccin-latte-DwIHMF0Q.js.gz               46.15kb / gzip: 7.74kb
+dist//app/apps/agor-ui/assets/chunk-5RXB4S5H-DcEomupS.js.gz                 36.69kb / gzip: 11.87kb
+dist//app/apps/agor-ui/assets/catppuccin-macchiato-DYnBP6_5.js.gz           46.15kb / gzip: 7.75kb
+dist//app/apps/agor-ui/assets/clarity-SemFz856.js.gz                        13.93kb / gzip: 2.39kb
+dist//app/apps/agor-ui/assets/chunk-RYQCIY6F-1HmMKH88.js.gz                 6.82kb / gzip: 2.58kb
+dist//app/apps/agor-ui/assets/clojure-DqKBuwfJ.js.gz                        6.26kb / gzip: 1.38kb
+dist//app/apps/agor-ui/assets/cmake-Bj61d0ZC.js.gz                          9.62kb / gzip: 3.29kb
+dist//app/apps/agor-ui/assets/chunk-GF5L2VYU-Nf5kZ6J4.js.gz                 47.54kb / gzip: 15.06kb
+dist//app/apps/agor-ui/assets/codeql-oeQT6MSM.js.gz                         26.25kb / gzip: 3.66kb
+dist//app/apps/agor-ui/assets/chunk-OB3PAWPO-Dgd8NgDd.js.gz                 38.07kb / gzip: 13.54kb
+dist//app/apps/agor-ui/assets/coffee-ouOQ86EC.js.gz                         26.78kb / gzip: 6.17kb
+dist//app/apps/agor-ui/assets/common-lisp-Cv5bFMCO.js.gz                    22.04kb / gzip: 5.90kb
+dist//app/apps/agor-ui/assets/cobol-BgCIwGZu.js.gz                          38.17kb / gzip: 10.56kb
+dist//app/apps/agor-ui/assets/csv-Dx-8-gkx.js.gz                            1.11kb / gzip: 0.35kb
+dist//app/apps/agor-ui/assets/crystal-Dj_CYA08.js.gz                        28.72kb / gzip: 4.30kb
+dist//app/apps/agor-ui/assets/coq-BrsZFFmf.js.gz                            5.42kb / gzip: 1.86kb
+dist//app/apps/agor-ui/assets/catppuccin-mocha-DYhrFGRu.js.gz               46.14kb / gzip: 7.74kb
+dist//app/apps/agor-ui/assets/cue-CE9AQfxI.js.gz                            15.82kb / gzip: 1.99kb
+dist//app/apps/agor-ui/assets/dagre-VZM6K2ZE-BUWHKjrg.js.gz                 8.23kb / gzip: 3.15kb
+dist//app/apps/agor-ui/assets/dagre-_G2tdH2S.js.gz                          31.31kb / gzip: 11.18kb
+dist//app/apps/agor-ui/assets/css-DeEW2upM.js.gz                            47.94kb / gzip: 11.59kb
+dist//app/apps/agor-ui/assets/cypher-ClKdZ_lG.js.gz                         5.81kb / gzip: 1.67kb
+dist//app/apps/agor-ui/assets/csharp-Ct8U2NOr.js.gz                         87.58kb / gzip: 10.27kb
+dist//app/apps/agor-ui/assets/cynefinDiagram-MW4NZA55-DS-vFDPV.js.gz        9.57kb / gzip: 3.34kb
+dist//app/apps/agor-ui/assets/dark-plus-Cs2F2srj.js.gz                      8.88kb / gzip: 2.04kb
+dist//app/apps/agor-ui/assets/dax-BkyTk9wS.js.gz                            5.23kb / gzip: 2.17kb
+dist//app/apps/agor-ui/assets/diagram-B4RE2ZJO-C4zG8WYo.js.gz               10.35kb / gzip: 3.97kb
+dist//app/apps/agor-ui/assets/diagram-Q27KOJAE-Dr1Sy2qD.js.gz               10.58kb / gzip: 3.65kb
+dist//app/apps/agor-ui/assets/docker-IyjqRm3v.js.gz                         1.69kb / gzip: 0.58kb
+dist//app/apps/agor-ui/assets/diagram-LBJQPF4R-BwSyxrj6.js.gz               4.04kb / gzip: 1.73kb
+dist//app/apps/agor-ui/assets/dotenv-_5a1GRtc.js.gz                         1.38kb / gzip: 0.52kb
+dist//app/apps/agor-ui/assets/diagram-7IWD3JNH-CIk1Xoyd.js.gz               7.94kb / gzip: 3.52kb
+dist//app/apps/agor-ui/assets/desktop-Dlh5hvp9.js.gz                        1.78kb / gzip: 0.74kb
+dist//app/apps/agor-ui/assets/d-qD-0Kul2.js.gz                              42.76kb / gzip: 8.18kb
+dist//app/apps/agor-ui/assets/ebnfDiagram-BXEA7PRR-Bucv_xhy.js.gz           1.92kb / gzip: 0.83kb
+dist//app/apps/agor-ui/assets/diagram-UB23O5K3-xYiafD6A.js.gz               5.79kb / gzip: 2.43kb
+dist//app/apps/agor-ui/assets/edge-CCRlTIbg.js.gz                           2.25kb / gzip: 0.66kb
+dist//app/apps/agor-ui/assets/dream-maker-DW3nJb8Q.js.gz                    10.22kb / gzip: 2.19kb
+dist//app/apps/agor-ui/assets/dracula-BHWKrbxM.js.gz                        20.57kb / gzip: 3.88kb
+dist//app/apps/agor-ui/assets/diff-woXpYk--.js.gz                           2.50kb / gzip: 0.66kb
+dist//app/apps/agor-ui/assets/dracula-soft-5eyTD99u.js.gz                   20.58kb / gzip: 3.91kb
+dist//app/apps/agor-ui/assets/erb-Cs0Iy0dO.js.gz                            2.09kb / gzip: 0.61kb
+dist//app/apps/agor-ui/assets/fennel-DQxkIbk2.js.gz                         4.65kb / gzip: 1.49kb
+dist//app/apps/agor-ui/assets/elm-C-6n8iva.js.gz                            10.69kb / gzip: 2.05kb
+dist//app/apps/agor-ui/assets/elixir-DkgEFlh9.js.gz                         15.88kb / gzip: 2.67kb
+dist//app/apps/agor-ui/assets/dart-DkHntEIa.js.gz                           7.62kb / gzip: 1.85kb
+dist//app/apps/agor-ui/assets/erDiagram-JOGREHBK-AIUcRHFl.js.gz             26.11kb / gzip: 8.97kb
+dist//app/apps/agor-ui/assets/erlang-Cphh6RMH.js.gz                         36.60kb / gzip: 4.23kb
+dist//app/apps/agor-ui/assets/fish-BJitypiv.js.gz                           12.73kb / gzip: 1.68kb
+dist//app/apps/agor-ui/assets/everforest-light-Df2xbC6M.js.gz               52.49kb / gzip: 8.14kb
+dist//app/apps/agor-ui/assets/everforest-dark-sB-x3p7T.js.gz                52.48kb / gzip: 8.14kb
+dist//app/apps/agor-ui/assets/fluent-C03EYrpw.js.gz                         3.52kb / gzip: 0.87kb
+dist//app/apps/agor-ui/assets/fortran-fixed-form-DEKoE2YW.js.gz             1.62kb / gzip: 0.67kb
+dist//app/apps/agor-ui/assets/fixtureData-Cwe97Fxs.js.gz                    18.80kb / gzip: 6.41kb
+dist//app/apps/agor-ui/assets/gdresource-C0sCabJj.js.gz                     5.16kb / gzip: 1.30kb
+dist//app/apps/agor-ui/assets/gdshader-CBce3t8t.js.gz                       6.17kb / gzip: 1.68kb
+dist//app/apps/agor-ui/assets/genie-CV2tkWYe.js.gz                          3.27kb / gzip: 1.17kb
+dist//app/apps/agor-ui/assets/git-commit-BSykSTBG.js.gz                     1.20kb / gzip: 0.51kb
+dist//app/apps/agor-ui/assets/fsharp-D13ZGOAj.js.gz                         24.71kb / gzip: 4.00kb
+dist//app/apps/agor-ui/assets/gherkin-DExj1W_8.js.gz                        11.66kb / gzip: 4.93kb
+dist//app/apps/agor-ui/assets/github-dark-C-LZuMrd.js.gz                    11.13kb / gzip: 2.46kb
+dist//app/apps/agor-ui/assets/github-light-EUqPIrTm.js.gz                   10.92kb / gzip: 2.42kb
+dist//app/apps/agor-ui/assets/github-dark-dimmed-Bx1FflLF.js.gz             14.09kb / gzip: 3.01kb
+dist//app/apps/agor-ui/assets/gdscript-Cp2uCuqX.js.gz                       18.54kb / gzip: 3.64kb
+dist//app/apps/agor-ui/assets/github-dark-high-contrast-B_tTalzw.js.gz      14.25kb / gzip: 2.97kb
+dist//app/apps/agor-ui/assets/gleam-CSRkHgEL.js.gz                          2.51kb / gzip: 0.79kb
+dist//app/apps/agor-ui/assets/github-light-default-BXViO-2h.js.gz           13.82kb / gzip: 2.93kb
+dist//app/apps/agor-ui/assets/github-dark-default-DXG-b-1a.js.gz            14.09kb / gzip: 3.02kb
+dist//app/apps/agor-ui/assets/github-light-high-contrast-B68TUdTA.js.gz     13.94kb / gzip: 2.91kb
+dist//app/apps/agor-ui/assets/gnuplot-7GGW24-e.js.gz                        14.43kb / gzip: 3.17kb
+dist//app/apps/agor-ui/assets/glimmer-js-CFyErDLZ.js.gz                     19.61kb / gzip: 2.86kb
+dist//app/apps/agor-ui/assets/glsl-TOBAB6bO.js.gz                           3.61kb / gzip: 1.41kb
+dist//app/apps/agor-ui/assets/glimmer-ts-Ct4QKAg6.js.gz                     19.61kb / gzip: 2.86kb
+dist//app/apps/agor-ui/assets/graphql-ns1EoQQG.js.gz                        17.66kb / gzip: 2.46kb
+dist//app/apps/agor-ui/assets/gn-ilITqXS6.js.gz                             3.90kb / gzip: 1.45kb
+dist//app/apps/agor-ui/assets/groovy-CacY0gHj.js.gz                         18.72kb / gzip: 3.49kb
+dist//app/apps/agor-ui/assets/graphlib-DoDw2DoG.js.gz                       23.36kb / gzip: 8.06kb
+dist//app/apps/agor-ui/assets/gitGraphDiagram-DS77QQ5N-CTrplwTe.js.gz       28.27kb / gzip: 8.26kb
+dist//app/apps/agor-ui/assets/gruvbox-light-medium-BAWPOn9u.js.gz           22.11kb / gzip: 4.06kb
+dist//app/apps/agor-ui/assets/gruvbox-light-soft-BSMLrYjP.js.gz             22.10kb / gzip: 4.05kb
+dist//app/apps/agor-ui/assets/handlebars-qVnY7qVv.js.gz                     11.88kb / gzip: 2.32kb
+dist//app/apps/agor-ui/assets/fortran-free-form-CYNrtFtB.js.gz              86.88kb / gzip: 10.81kb
+dist//app/apps/agor-ui/assets/gruvbox-light-hard-BC_s9l72.js.gz             22.10kb / gzip: 4.05kb
+dist//app/apps/agor-ui/assets/haml-BUBfnAPo.js.gz                           8.14kb / gzip: 1.81kb
+dist//app/apps/agor-ui/assets/hjson-CxZEssPk.js.gz                          11.76kb / gzip: 1.59kb
+dist//app/apps/agor-ui/assets/go-BJwz_mda.js.gz                             45.70kb / gzip: 4.92kb
+dist//app/apps/agor-ui/assets/hlsl-Cvrh5tZx.js.gz                           7.09kb / gzip: 2.13kb
+dist//app/apps/agor-ui/assets/gruvbox-dark-hard-C820rvS2.js.gz              22.10kb / gzip: 4.05kb
+dist//app/apps/agor-ui/assets/hcl-Dh228itO.js.gz                            9.81kb / gzip: 1.87kb
+dist//app/apps/agor-ui/assets/gruvbox-dark-soft-MrdJrrXF.js.gz              22.10kb / gzip: 4.05kb
+dist//app/apps/agor-ui/assets/haskell-D8IpX4py.js.gz                        40.51kb / gzip: 6.20kb
+dist//app/apps/agor-ui/assets/horizon-CE9ld1lL.js.gz                        8.57kb / gzip: 1.89kb
+dist//app/apps/agor-ui/assets/horizon-bright-Br1oVSNq.js.gz                 8.58kb / gzip: 1.90kb
+dist//app/apps/agor-ui/assets/http-Da_kjz5m.js.gz                           4.31kb / gzip: 1.03kb
+dist//app/apps/agor-ui/assets/hxml-B0Qn7Nwc.js.gz                           1.70kb / gzip: 0.85kb
+dist//app/apps/agor-ui/assets/haxe-OTjmBuCE.js.gz                           34.33kb / gzip: 5.72kb
+dist//app/apps/agor-ui/assets/hurl-DKXSMFRR.js.gz                           3.43kb / gzip: 1.07kb
+dist//app/apps/agor-ui/assets/hy-CZbG8q4J.js.gz                             2.58kb / gzip: 1.15kb
+dist//app/apps/agor-ui/assets/gruvbox-dark-medium-BPjhmG05.js.gz            22.10kb / gzip: 4.05kb
+dist//app/apps/agor-ui/assets/index-DQgykwuc.css.gz                         7.19kb / gzip: 1.87kb
+dist//app/apps/agor-ui/assets/houston-CsvMBhTu.js.gz                        34.59kb / gzip: 5.59kb
+dist//app/apps/agor-ui/assets/ini-B5eOa1yu.js.gz                            1.48kb / gzip: 0.48kb
+dist//app/apps/agor-ui/assets/jinja-DuNSryF7.js.gz                          5.50kb / gzip: 1.33kb
+dist//app/apps/agor-ui/assets/java-duG_UTKe.js.gz                           26.65kb / gzip: 4.19kb
+dist//app/apps/agor-ui/assets/html-DhBYQyK4.js.gz                           55.98kb / gzip: 11.40kb
+dist//app/apps/agor-ui/assets/jison-CHwnC1Pv.js.gz                          9.46kb / gzip: 1.81kb
+dist//app/apps/agor-ui/assets/json-Br_ORbR4.js.gz                           2.82kb / gzip: 0.81kb
+dist//app/apps/agor-ui/assets/imba-DsUTQ-LC.js.gz                           48.75kb / gzip: 9.14kb
+dist//app/apps/agor-ui/assets/journeyDiagram-NVQOT4AX-vzV42jBO.js.gz        22.59kb / gzip: 7.91kb
+dist//app/apps/agor-ui/assets/json5-BR5RXkoi.js.gz                          3.17kb / gzip: 0.81kb
+dist//app/apps/agor-ui/assets/jsonnet-CJTPZ8u_.js.gz                        3.53kb / gzip: 1.01kb
+dist//app/apps/agor-ui/assets/ishikawaDiagram-WSZJBQD7-Bt_LAsuV.js.gz       16.73kb / gzip: 6.24kb
+dist//app/apps/agor-ui/assets/jsonc-CYpm1nAK.js.gz                          3.03kb / gzip: 0.77kb
+dist//app/apps/agor-ui/assets/julia-mj6xfn4X.js.gz                          30.27kb / gzip: 4.15kb
+dist//app/apps/agor-ui/assets/just-DZo2o5E2.js.gz                           10.52kb / gzip: 2.54kb
+dist//app/apps/agor-ui/assets/kanagawa-dragon-CXtmUGW6.js.gz                16.72kb / gzip: 2.84kb
+dist//app/apps/agor-ui/assets/kanban-definition-27J2QSJJ-BqzwHm0W.js.gz     19.42kb / gzip: 6.75kb
+dist//app/apps/agor-ui/assets/kanagawa-lotus-BN08jTvb.js.gz                 16.72kb / gzip: 2.82kb
+dist//app/apps/agor-ui/assets/kotlin-DhhofPvG.js.gz                         8.57kb / gzip: 2.07kb
+dist//app/apps/agor-ui/assets/kanagawa-wave-CTweb8Dz.js.gz                  16.72kb / gzip: 2.82kb
+dist//app/apps/agor-ui/assets/kdl-CsD5j6eV.js.gz                            3.54kb / gzip: 1.01kb
+dist//app/apps/agor-ui/assets/kusto-BUv0MjJC.js.gz                          14.81kb / gzip: 3.82kb
+dist//app/apps/agor-ui/assets/jsonl-CmCQp5Yx.js.gz                          2.93kb / gzip: 0.76kb
+dist//app/apps/agor-ui/assets/lean-CewbzKMR.js.gz                           5.64kb / gzip: 1.86kb
+dist//app/apps/agor-ui/assets/jssm-DXw9l8Rf.js.gz                           2.18kb / gzip: 0.59kb
+dist//app/apps/agor-ui/assets/laserwave-C_8bwKvT.js.gz                      11.23kb / gzip: 2.50kb
+dist//app/apps/agor-ui/assets/light-plus-DVQuIRkW.js.gz                     9.71kb / gzip: 2.20kb
+dist//app/apps/agor-ui/assets/llvm-Cm23YOpf.js.gz                           4.92kb / gzip: 1.96kb
+dist//app/apps/agor-ui/assets/latex-CSkjTfPS.js.gz                          70.92kb / gzip: 6.46kb
+dist//app/apps/agor-ui/assets/lib-CczgDGxi.js.gz                            44.69kb / gzip: 13.80kb
+dist//app/apps/agor-ui/assets/liquid-XCoXGo1k.js.gz                         17.68kb / gzip: 3.06kb
+dist//app/apps/agor-ui/assets/log-BNLmms1o.js.gz                            2.78kb / gzip: 0.87kb
+dist//app/apps/agor-ui/assets/javascript-DWVbOe4X.js.gz                     170.79kb / gzip: 15.81kb
+dist//app/apps/agor-ui/assets/logo-Cluzi2Zq.js.gz                           3.05kb / gzip: 1.43kb
+dist//app/apps/agor-ui/assets/make-Dixweg8N.js.gz                           8.74kb / gzip: 1.71kb
+dist//app/apps/agor-ui/assets/lua-BIP2dQgW.js.gz                            15.23kb / gzip: 3.11kb
+dist//app/apps/agor-ui/assets/map-DDn5FSyL.js.gz                            4.91kb / gzip: 1.99kb
+dist//app/apps/agor-ui/assets/material-theme-Bm3Qr25_.js.gz                 18.18kb / gzip: 3.00kb
+dist//app/apps/agor-ui/assets/luau-CNKltnaQ.js.gz                           13.63kb / gzip: 3.08kb
+dist//app/apps/agor-ui/assets/marko-CiosSmec.js.gz                          24.89kb / gzip: 3.49kb
+dist//app/apps/agor-ui/assets/less-DVTAwKKz.js.gz                           95.34kb / gzip: 14.23kb
+dist//app/apps/agor-ui/assets/material-theme-lighter-uhdI0v04.js.gz         18.19kb / gzip: 3.00kb
+dist//app/apps/agor-ui/assets/jsx-fcCEM_-L.js.gz                            173.69kb / gzip: 15.90kb
+dist//app/apps/agor-ui/assets/material-theme-darker-2IIEA8gg.js.gz          18.19kb / gzip: 3.00kb
+dist//app/apps/agor-ui/assets/markdown-BYOwaDjH.js.gz                       57.94kb / gzip: 5.46kb
+dist//app/apps/agor-ui/assets/message-DXSGW1Vf.js.gz                        4.51kb / gzip: 1.90kb
+dist//app/apps/agor-ui/assets/material-theme-ocean-CHQ94UKr.js.gz           18.19kb / gzip: 3.02kb
+dist//app/apps/agor-ui/assets/material-theme-palenight-B5W6OYN7.js.gz       18.20kb / gzip: 3.01kb
+dist//app/apps/agor-ui/assets/mdc-C7Lb5uay.js.gz                            19.08kb / gzip: 6.46kb
+dist//app/apps/agor-ui/assets/mcpOAuthAttempt-B4GdTRdF.js.gz                2.35kb / gzip: 1.16kb
+dist//app/apps/agor-ui/assets/matlab-D7qyCx1q.js.gz                         15.70kb / gzip: 2.97kb
+dist//app/apps/agor-ui/assets/mermaid-parser.core-DbZTDh_t.js.gz            16.20kb / gzip: 3.83kb
+dist//app/apps/agor-ui/assets/min-dark-BSWPekZh.js.gz                       6.14kb / gzip: 1.66kb
+dist//app/apps/agor-ui/assets/min-light-DDpmG2fV.js.gz                      6.80kb / gzip: 1.83kb
+dist//app/apps/agor-ui/assets/mipsasm-BMqwQI7S.js.gz                        3.18kb / gzip: 1.14kb
+dist//app/apps/agor-ui/assets/mermaid-Bk4SNUv9.js.gz                        28.81kb / gzip: 3.52kb
+dist//app/apps/agor-ui/assets/monokai-CdkpiU2Y.js.gz                        7.70kb / gzip: 1.85kb
+dist//app/apps/agor-ui/assets/narrat-_X_XdTYD.js.gz                         3.58kb / gzip: 1.07kb
+dist//app/apps/agor-ui/assets/moonbit-CaWjb8XO.js.gz                        5.75kb / gzip: 1.63kb
+dist//app/apps/agor-ui/assets/nextflow-Bbiyy34d.js.gz                       4.40kb / gzip: 1.13kb
+dist//app/apps/agor-ui/assets/mindmap-definition-FAOFIHXS-CJy_-vfZ.js.gz    22.18kb / gzip: 7.42kb
+dist//app/apps/agor-ui/assets/nextflow-groovy-Dc_ddanL.js.gz                10.16kb / gzip: 2.06kb
+dist//app/apps/agor-ui/assets/move-B1IS1UjX.js.gz                           17.09kb / gzip: 2.96kb
+dist//app/apps/agor-ui/assets/night-owl-light-eJ-hLW7d.js.gz                25.29kb / gzip: 4.13kb
+dist//app/apps/agor-ui/assets/nginx-BgDTOYqs.js.gz                          34.52kb / gzip: 4.30kb
+dist//app/apps/agor-ui/assets/nim-CUz-jMgf.js.gz                            21.93kb / gzip: 3.06kb
+dist//app/apps/agor-ui/assets/night-owl-DhmEMT88.js.gz                      28.23kb / gzip: 4.99kb
+dist//app/apps/agor-ui/assets/nix-IvuFDN5E.js.gz                            15.14kb / gzip: 2.40kb
+dist//app/apps/agor-ui/assets/nord-Cb4Vim4T.js.gz                           26.09kb / gzip: 4.25kb
+dist//app/apps/agor-ui/assets/nushell-DcLAeLz5.js.gz                        19.93kb / gzip: 5.06kb
+dist//app/apps/agor-ui/assets/odin-B1RWQWA5.js.gz                           16.12kb / gzip: 2.85kb
+dist//app/apps/agor-ui/assets/openscad-BUDT5pXO.js.gz                       2.75kb / gzip: 0.98kb
+dist//app/apps/agor-ui/assets/mojo-BgCJLMeH.js.gz                           68.16kb / gzip: 8.94kb
+dist//app/apps/agor-ui/assets/pegDiagram-VL7TDLO6-BHTef0f1.js.gz            1.87kb / gzip: 0.87kb
+dist//app/apps/agor-ui/assets/one-dark-pro-CLwyXe_n.js.gz                   32.99kb / gzip: 5.34kb
+dist//app/apps/agor-ui/assets/ocaml-O90oeIOV.js.gz                          60.98kb / gzip: 4.82kb
+dist//app/apps/agor-ui/assets/pieDiagram-7S7Q4E2Y-DbV9X3C8.js.gz            5.81kb / gzip: 2.40kb
+dist//app/apps/agor-ui/assets/one-light-D7Lr4KcI.js.gz                      24.70kb / gzip: 3.53kb
+dist//app/apps/agor-ui/assets/plsql-DGHpHOYJ.js.gz                          8.31kb / gzip: 2.91kb
+dist//app/apps/agor-ui/assets/perl-C1dZQPV5.js.gz                           42.13kb / gzip: 4.49kb
+dist//app/apps/agor-ui/assets/pkl-ot-7Btpt.js.gz                            10.12kb / gzip: 1.34kb
+dist//app/apps/agor-ui/assets/pascal-4ZHwLPI5.js.gz                         4.05kb / gzip: 1.62kb
+dist//app/apps/agor-ui/assets/po-BiJDBrnU.js.gz                             3.16kb / gzip: 0.88kb
+dist//app/apps/agor-ui/assets/postcss-BXeXVLqQ.js.gz                        6.26kb / gzip: 1.85kb
+dist//app/apps/agor-ui/assets/powershell-DshXNtvi.js.gz                     19.67kb / gzip: 3.94kb
+dist//app/apps/agor-ui/assets/poimandres-DRFjx7u4.js.gz                     32.71kb / gzip: 5.34kb
+dist//app/apps/agor-ui/assets/plastic-DQwYfKfQ.js.gz                        9.07kb / gzip: 1.92kb
+dist//app/apps/agor-ui/assets/powerquery-DNMTfnFr.js.gz                     5.76kb / gzip: 1.47kb
+dist//app/apps/agor-ui/assets/polar-C7UOKdEL.js.gz                          4.55kb / gzip: 1.09kb
+dist//app/apps/agor-ui/assets/prisma-BsRQq5mF.js.gz                         6.17kb / gzip: 1.35kb
+dist//app/apps/agor-ui/assets/prolog-iXnhIJG7.js.gz                         11.08kb / gzip: 3.74kb
+dist//app/apps/agor-ui/assets/proto-DB4EqR-F.js.gz                          6.39kb / gzip: 1.38kb
+dist//app/apps/agor-ui/assets/qml-DWs4ParD.js.gz                            5.21kb / gzip: 1.34kb
+dist//app/apps/agor-ui/assets/puppet-CDv2pdJW.js.gz                         11.16kb / gzip: 2.05kb
+dist//app/apps/agor-ui/assets/pug-Ce37auPQ.js.gz                            13.52kb / gzip: 2.51kb
+dist//app/apps/agor-ui/assets/purescript-9MfHhQsQ.js.gz                     24.10kb / gzip: 3.14kb
+dist//app/apps/agor-ui/assets/qss-Fe1Jh2GI.js.gz                            7.29kb / gzip: 2.51kb
+dist//app/apps/agor-ui/assets/r-B_2zvz1A.js.gz                              6.45kb / gzip: 1.78kb
+dist//app/apps/agor-ui/assets/railroadDiagram-AXF67PYL-nOSDl4Ty.js.gz       1.53kb / gzip: 0.71kb
+dist//app/apps/agor-ui/assets/raku-B3gFvitq.js.gz                           10.22kb / gzip: 2.86kb
+dist//app/apps/agor-ui/assets/razor-Ctpaw8Xr.js.gz                          26.81kb / gzip: 3.43kb
+dist//app/apps/agor-ui/assets/quadrantDiagram-CIZ2JOQS-Y-YNAGdQ.js.gz       32.71kb / gzip: 9.42kb
+dist//app/apps/agor-ui/assets/reactflow-8hax8RNO.css.gz                     6.83kb / gzip: 1.48kb
+dist//app/apps/agor-ui/assets/react-resizable-panels-gjLEOHB0.js.gz         25.16kb / gzip: 8.56kb
+dist//app/apps/agor-ui/assets/red-CJ3rzSJv.js.gz                            6.11kb / gzip: 1.55kb
+dist//app/apps/agor-ui/assets/python-gzcpVVnB.js.gz                         68.31kb / gzip: 8.82kb
+dist//app/apps/agor-ui/assets/rel-BtDbiS_P.js.gz                            3.28kb / gzip: 1.07kb
+dist//app/apps/agor-ui/assets/reg-CRGYupPL.js.gz                            2.28kb / gzip: 0.67kb
+dist//app/apps/agor-ui/assets/regexp--aR2_iz7.js.gz                         7.87kb / gzip: 1.43kb
+dist//app/apps/agor-ui/assets/ron-VUp2lXgN.js.gz                            3.82kb / gzip: 0.95kb
+dist//app/apps/agor-ui/assets/riscv-Ckw8ddFX.js.gz                          6.75kb / gzip: 1.92kb
+dist//app/apps/agor-ui/assets/rosmsg-CAekHB0j.js.gz                         4.41kb / gzip: 1.03kb
+dist//app/apps/agor-ui/assets/rose-pine-dawn-Dg85fqjY.js.gz                 21.24kb / gzip: 3.76kb
+dist//app/apps/agor-ui/assets/rst-CqRkteH8.js.gz                            10.07kb / gzip: 2.18kb
+dist//app/apps/agor-ui/assets/requirementDiagram-LRYGKXZP-DaWIzFht.js.gz    29.88kb / gzip: 9.27kb
+dist//app/apps/agor-ui/assets/rose-pine-moon-hon4tzzS.js.gz                 21.24kb / gzip: 3.76kb
+dist//app/apps/agor-ui/assets/sandpackDefaults-CPJOZwYP.js.gz               1.24kb / gzip: 0.64kb
+dist//app/apps/agor-ui/assets/rose-pine-BthvhNj6.js.gz                      21.23kb / gzip: 3.74kb
+dist//app/apps/agor-ui/assets/rust-Cfkwpbl8.js.gz                           14.71kb / gzip: 2.62kb
+dist//app/apps/agor-ui/assets/racket-DcIDlBhZ.js.gz                         90.22kb / gzip: 14.57kb
+dist//app/apps/agor-ui/assets/sas-BaCscvql.js.gz                            8.85kb / gzip: 3.72kb
+dist//app/apps/agor-ui/assets/sanitizeSecret-CZRcAwK1.js.gz                 1.35kb / gzip: 0.61kb
+dist//app/apps/agor-ui/assets/sankeyDiagram-W5VNT64P-D1nDv38c.js.gz         22.14kb / gzip: 7.95kb
+dist//app/apps/agor-ui/assets/ruby-D3BGyoLR.js.gz                           44.76kb / gzip: 5.40kb
+dist//app/apps/agor-ui/assets/scheme-DQCgrYNe.js.gz                         6.99kb / gzip: 2.00kb
+dist//app/apps/agor-ui/assets/sdbl-bTVj8UrX.js.gz                           4.58kb / gzip: 1.96kb
+dist//app/apps/agor-ui/assets/shaderlab-TOUzSsQk.js.gz                      5.78kb / gzip: 2.02kb
+dist//app/apps/agor-ui/assets/slack-dark-DnToyrRv.js.gz                     8.90kb / gzip: 1.91kb
+dist//app/apps/agor-ui/assets/scala-DKOlJaKm.js.gz                          28.20kb / gzip: 3.79kb
+dist//app/apps/agor-ui/assets/slack-ochin-B2OO5cIa.js.gz                    9.21kb / gzip: 2.03kb
+dist//app/apps/agor-ui/assets/slackOAuthActionPage-BF4hbcw-.js.gz           2.50kb / gzip: 1.14kb
+dist//app/apps/agor-ui/assets/scss-DngyzxVC.js.gz                           26.63kb / gzip: 4.12kb
+dist//app/apps/agor-ui/assets/solarized-dark-DV17i1UV.js.gz                 6.68kb / gzip: 1.74kb
+dist//app/apps/agor-ui/assets/smalltalk-B16xEiuN.js.gz                      6.43kb / gzip: 1.57kb
+dist//app/apps/agor-ui/assets/soy-DmAO5KqQ.js.gz                            6.76kb / gzip: 1.57kb
+dist//app/apps/agor-ui/assets/solarized-light-DSh2HLQt.js.gz                6.33kb / gzip: 1.67kb
+dist//app/apps/agor-ui/assets/snazzy-light-4G7pJPwS.js.gz                   20.28kb / gzip: 3.70kb
+dist//app/apps/agor-ui/assets/sparql-D_iOobhT.js.gz                         1.44kb / gzip: 0.79kb
+dist//app/apps/agor-ui/assets/shellscript-DnoJEH0-.js.gz                    40.57kb / gzip: 5.94kb
+dist//app/apps/agor-ui/assets/splunk-BC2Px7Mm.js.gz                         3.35kb / gzip: 1.48kb
+dist//app/apps/agor-ui/assets/ssh-config-BgfXC-Er.js.gz                     3.53kb / gzip: 1.56kb
+dist//app/apps/agor-ui/assets/solidity-CKzVLygQ.js.gz                       15.69kb / gzip: 3.00kb
+dist//app/apps/agor-ui/assets/sass-DXrisJhu.js.gz                           9.06kb / gzip: 2.41kb
+dist//app/apps/agor-ui/assets/sql-CLgiMrxJ.js.gz                            22.92kb / gzip: 7.27kb
+dist//app/apps/agor-ui/assets/stylus-B6D30XZt.js.gz                         30.34kb / gzip: 7.78kb
+dist//app/apps/agor-ui/assets/stateDiagram-OKZ733FA-BSW98wiW.js.gz          10.00kb / gzip: 3.44kb
+dist//app/apps/agor-ui/assets/stata-BiJ8hoIJ.js.gz                          55.66kb / gzip: 12.00kb
+dist//app/apps/agor-ui/assets/systemd-BxMlprV5.js.gz                        7.68kb / gzip: 2.48kb
+dist//app/apps/agor-ui/assets/svelte-B3woShZ2.js.gz                         17.82kb / gzip: 3.06kb
+dist//app/apps/agor-ui/assets/surrealql-D9bH0Csw.js.gz                      22.06kb / gzip: 4.19kb
+dist//app/apps/agor-ui/assets/synthwave-84-nFMaYfgc.js.gz                   13.70kb / gzip: 2.78kb
+dist//app/apps/agor-ui/assets/talonscript-CohzipZa.js.gz                    6.59kb / gzip: 1.45kb
+dist//app/apps/agor-ui/assets/system-verilog-DJ5XKQeo.js.gz                 25.58kb / gzip: 4.69kb
+dist//app/apps/agor-ui/assets/tasl-DMoTqEGO.js.gz                           3.20kb / gzip: 0.82kb
+dist//app/apps/agor-ui/assets/tcl-CZd0xW_V.js.gz                            4.32kb / gzip: 1.47kb
+dist//app/apps/agor-ui/assets/terraform-DswuEJGm.js.gz                      11.12kb / gzip: 2.43kb
+dist//app/apps/agor-ui/assets/toml-CcmNWLt0.js.gz                           6.27kb / gzip: 1.24kb
+dist//app/apps/agor-ui/assets/tex-Bjo-GMiN.js.gz                            9.44kb / gzip: 2.98kb
+dist//app/apps/agor-ui/assets/timeline-definition-Z64GVDOM-DqxT5a4z.js.gz   29.56kb / gzip: 9.58kb
+dist//app/apps/agor-ui/assets/swift-DonLKvLd.js.gz                          84.65kb / gzip: 14.23kb
+dist//app/apps/agor-ui/assets/ts-tags-CSxB5Eny.js.gz                        8.71kb / gzip: 1.16kb
+dist//app/apps/agor-ui/assets/templ-B7gtJFlV.js.gz                          23.50kb / gzip: 5.26kb
+dist//app/apps/agor-ui/assets/turtle-ByJddavk.js.gz                         3.61kb / gzip: 0.94kb
+dist//app/apps/agor-ui/assets/twig-DCsq_S7z.js.gz                           20.41kb / gzip: 3.56kb
+dist//app/apps/agor-ui/assets/tokyo-night-oM2G3aXe.js.gz                    34.83kb / gzip: 6.03kb
+dist//app/apps/agor-ui/assets/typst-DI99ib-x.js.gz                          8.18kb / gzip: 1.62kb
+dist//app/apps/agor-ui/assets/url-BWl5Fg0d.js.gz                            1.01kb / gzip: 0.51kb
+dist//app/apps/agor-ui/assets/useAuthorityOperationGuard-Dm6jLpWn.js.gz     1.42kb / gzip: 0.68kb
+dist//app/apps/agor-ui/assets/urlResolution-Cp6gRAuZ.js.gz                  5.11kb / gzip: 2.17kb
+dist//app/apps/agor-ui/assets/vala-zf12oZj6.js.gz                           3.28kb / gzip: 1.15kb
+dist//app/apps/agor-ui/assets/vb-Djn5o6TS.js.gz                             5.94kb / gzip: 2.28kb
+dist//app/apps/agor-ui/assets/typespec-B88KGewJ.js.gz                       23.45kb / gzip: 2.51kb
+dist//app/apps/agor-ui/assets/v-DETTlOr0.js.gz                              12.90kb / gzip: 2.65kb
+dist//app/apps/agor-ui/assets/vesper-D5bVUKB1.js.gz                         12.39kb / gzip: 1.91kb
+dist//app/apps/agor-ui/assets/verilog-CiiDBU1e.js.gz                        5.79kb / gzip: 1.84kb
+dist//app/apps/agor-ui/assets/vennDiagram-T6HMQDX7-DSa_GZg4.js.gz           40.05kb / gzip: 14.56kb
+dist//app/apps/agor-ui/assets/vitesse-black-fwtXNY1n.js.gz                  13.35kb / gzip: 2.96kb
+dist//app/apps/agor-ui/assets/vhdl-BroJfC0k.js.gz                           23.69kb / gzip: 3.75kb
+dist//app/apps/agor-ui/assets/vitesse-dark-BZCL-v6S.js.gz                   13.43kb / gzip: 2.97kb
+dist//app/apps/agor-ui/assets/vue-html-DZGW9MGR.js.gz                       8.28kb / gzip: 1.63kb
+dist//app/apps/agor-ui/assets/viml-DvXPmvsu.js.gz                           19.88kb / gzip: 6.55kb
+dist//app/apps/agor-ui/assets/vitesse-light-VbXTXTou.js.gz                  13.29kb / gzip: 2.94kb
+dist//app/apps/agor-ui/assets/vue-BR4XqTj9.js.gz                            23.92kb / gzip: 2.88kb
+dist//app/apps/agor-ui/assets/wardleyDiagram-T6FBY63Y-DJahiX9z.js.gz        24.47kb / gzip: 6.29kb
+dist//app/apps/agor-ui/assets/wasm-ByWQv1Qj.js.gz                           11.72kb / gzip: 2.11kb
+dist//app/apps/agor-ui/assets/wgsl-BsKzXJz4.js.gz                           5.02kb / gzip: 1.35kb
+dist//app/apps/agor-ui/assets/tsx-JMDX3aQ7.js.gz                            171.49kb / gzip: 15.81kb
+dist//app/apps/agor-ui/assets/wenyan-C8pVoKbM.js.gz                         2.10kb / gzip: 1.06kb
+dist//app/apps/agor-ui/assets/xterm-BrP-ENHg.css.gz                         3.85kb / gzip: 0.98kb
+dist//app/apps/agor-ui/assets/wit-DdvCle-K.js.gz                            20.96kb / gzip: 2.79kb
+dist//app/apps/agor-ui/assets/xml-CNfvW5JP.js.gz                            5.32kb / gzip: 1.21kb
+dist//app/apps/agor-ui/assets/wikitext-ClFFjSW2.js.gz                       54.57kb / gzip: 4.60kb
+dist//app/apps/agor-ui/assets/typescript-BAz-bF8J.js.gz                     176.90kb / gzip: 15.38kb
+dist//app/apps/agor-ui/assets/xsl-zsHjPACe.js.gz                            1.33kb / gzip: 0.49kb
+dist//app/apps/agor-ui/assets/zenscript-BnlCZFoB.js.gz                      3.81kb / gzip: 1.24kb
+dist//app/apps/agor-ui/assets/yaml-B9zsrP9R.js.gz                           10.32kb / gzip: 2.25kb
+dist//app/apps/agor-ui/index.html.gz                                        3.28kb / gzip: 0.96kb
+dist//app/apps/agor-ui/assets/zig-CMLA9XwU.js.gz                            5.21kb / gzip: 1.51kb
+dist//app/apps/agor-ui/assets/vyper-CgoNMtux.js.gz                          72.89kb / gzip: 10.38kb
+dist//app/apps/agor-ui/assets/xychartDiagram-ELKLHX3M-BSX8k7SZ.js.gz        40.16kb / gzip: 11.11kb
+dist//app/apps/agor-ui/assets/App-BifeNAkL.js.gz                            99.25kb / gzip: 29.92kb
+dist//app/apps/agor-ui/assets/KnowledgePage-BFf4p7RB.js.gz                  77.45kb / gzip: 23.26kb
+dist//app/apps/agor-ui/assets/SessionPanel-TYZocDNW.js.gz                   67.10kb / gzip: 21.63kb
+dist//app/apps/agor-ui/assets/blockDiagram-VBNYF7ZC-DlNVzwcK.js.gz          70.77kb / gzip: 19.86kb
+dist//app/apps/agor-ui/assets/c4Diagram-5PPSVZJV-4VoYYzQz.js.gz             67.45kb / gzip: 18.66kb
+dist//app/apps/agor-ui/assets/chunk-JQJVKLGR-CGilR-_v.js.gz                 58.56kb / gzip: 18.63kb
+dist//app/apps/agor-ui/assets/blade-D83jhYA_.js.gz                          102.52kb / gzip: 27.43kb
+dist//app/apps/agor-ui/assets/cose-bilkent-JH36ORCC-CXypzhW7.js.gz          79.36kb / gzip: 20.76kb
+dist//app/apps/agor-ui/assets/ganttDiagram-PKOTCBZU-Burm5DyE.js.gz          51.01kb / gzip: 16.77kb
+dist//app/apps/agor-ui/assets/hack-DB7M32Gm.js.gz                           78.30kb / gzip: 25.50kb
+dist//app/apps/agor-ui/assets/objective-c-D1A_Heim.js.gz                    102.94kb / gzip: 22.70kb
+dist//app/apps/agor-ui/assets/mdx-DQZ5AkYe.js.gz                            132.92kb / gzip: 22.73kb
+dist//app/apps/agor-ui/assets/php-Cv1yln_y.js.gz                            108.45kb / gzip: 27.73kb
+dist//app/apps/agor-ui/assets/objective-cpp-BsSzOQcm.js.gz                  167.93kb / gzip: 29.68kb
+dist//app/apps/agor-ui/assets/sequenceDiagram-SI44F4Z6-CoRPVpOz.js.gz       112.91kb / gzip: 29.52kb
+dist//app/apps/agor-ui/assets/types-B479jog1.js.gz                          98.57kb / gzip: 28.79kb
+dist//app/apps/agor-ui/assets/vue-vine-B157dWFT.js.gz                       185.60kb / gzip: 17.20kb
+dist//app/apps/agor-ui/assets/SessionCanvas-BbEkByto.js.gz                  104.33kb / gzip: 32.14kb
+dist//app/apps/agor-ui/assets/architectureDiagram-T3A2C74G-ChDfoRPm.js.gz   145.24kb / gzip: 39.66kb
+dist//app/apps/agor-ui/assets/swimlanes-SLNWSIFB-DYuXN13o.js.gz             111.20kb / gzip: 37.59kb
+dist//app/apps/agor-ui/assets/BoardObjectNodes-DWq6vFBW.js.gz               196.87kb / gzip: 57.26kb
+dist//app/apps/agor-ui/assets/cpp-D7oTDj03.js.gz                            611.46kb / gzip: 42.85kb
+dist//app/apps/agor-ui/assets/reactflow-BA_wWxXt.js.gz                      150.17kb / gzip: 48.68kb
+dist//app/apps/agor-ui/assets/hooks-D0ZdRh2N.js.gz                          208.38kb / gzip: 64.38kb
+dist//app/apps/agor-ui/assets/wolfram-DLL8P-h_.js.gz                        256.23kb / gzip: 75.25kb
+dist//app/apps/agor-ui/assets/src-B_sq6t4S.js.gz                            271.42kb / gzip: 78.84kb
+dist//app/apps/agor-ui/assets/sandpack-CGuUWrBt.js.gz                       489.68kb / gzip: 104.61kb
+dist//app/apps/agor-ui/assets/cytoscape.esm-B6RGcXce.js.gz                  424.52kb / gzip: 133.23kb
+dist//app/apps/agor-ui/assets/xterm-epp1quq9.js.gz                          442.93kb / gzip: 112.85kb
+dist//app/apps/agor-ui/assets/chunk-KEIR6QF5-CScyq2N3.js.gz                 646.60kb / gzip: 138.28kb
+dist//app/apps/agor-ui/assets/index-Cq79sMeS.js.gz                          627.81kb / gzip: 181.23kb
+dist//app/apps/agor-ui/assets/emacs-lisp-C9PiwqqW.js.gz                     761.57kb / gzip: 191.37kb
+dist//app/apps/agor-ui/assets/syntax-Cq_fOtJi.js.gz                         618.83kb / gzip: 217.47kb
+dist//app/apps/agor-ui/assets/editor-BOztVGMy.js.gz                         612.08kb / gzip: 208.83kb
+dist//app/apps/agor-ui/assets/wasm-BnjxR4X6.js.gz                           607.74kb / gzip: 224.74kb
+dist//app/apps/agor-ui/assets/vega-TzVu7q_t.js.gz                           796.34kb / gzip: 271.66kb
+dist//app/apps/agor-ui/assets/antd-N89oyW1X.js.gz                           1383.69kb / gzip: 426.70kb
+dist//app/apps/agor-ui/assets/emoji-CReixr9x.js.gz                          1049.35kb / gzip: 191.36kb
+dist//app/apps/agor-ui/assets/streamdown-D34NlD5f.js.gz                     1555.86kb / gzip: 426.48kb
+
+

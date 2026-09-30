@@ -1,0 +1,26 @@
+[
+  {
+    "sha": "122fe057e90a745208331dac690109d64ffcfcfa",
+    "command": "NODE_OPTIONS=--conditions=source NODE_ENV=production pnpm --dir apps/agor-ui exec vite build",
+    "versionLines": [
+      "vite v8.3.0 building client environment for production...",
+      "\u2713 built in 2.37s"
+    ],
+    "warnings": [
+      "vite.config.ts (2:49) [UNRESOLVED_IMPORT] Could not resolve '@agor-live/client/config' in vite.config.ts"
+    ],
+    "logSha256": "a872f0afd565e44355cb32f537dcdfcddabeab6c1e9b7a6a9ace66123cdc5786"
+  },
+  {
+    "sha": "e373b7069a483d2bb97ad91198d1ad6804f79047",
+    "command": "NODE_OPTIONS=--conditions=source NODE_ENV=production pnpm --dir apps/agor-ui exec vite build",
+    "versionLines": [
+      "vite v8.3.0 building client environment for production...",
+      "\u2713 built in 2.50s"
+    ],
+    "warnings": [
+      "vite.config.ts (2:49) [UNRESOLVED_IMPORT] Could not resolve '@agor-live/client/config' in vite.config.ts"
+    ],
+    "logSha256": "c226b848faf14e083dcb953e36267a4dad5cc3446c4905a03b93708353ebe1cc"
+  }
+]

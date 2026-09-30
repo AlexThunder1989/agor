@@ -1,0 +1,75 @@
+{
+  "tables": {
+    "boards": {
+      "count": 3,
+      "bytes": 3567,
+      "sha256": "05776e6e97209b48bac4107a458deac8899d03b433ed9145f15b7d3c04f32d53"
+    },
+    "branches": {
+      "count": 150,
+      "bytes": 242251,
+      "sha256": "f07a65c41d82b8fdf5a089ba27b53524a8dfe56d367a24b2a20c184ebc4eeebc"
+    },
+    "board_objects": {
+      "count": 150,
+      "bytes": 44145,
+      "sha256": "e5619342e9837ef551ab1f3791641b415e203ced646c60f98dbd49b641c65b7c"
+    },
+    "sessions": {
+      "count": 300,
+      "bytes": 317551,
+      "sha256": "d2948a37ef37957251d7396e2d166f3857d9c1a78fbdd1e63b44f3c25c82ed97"
+    },
+    "tasks": {
+      "count": 300,
+      "bytes": 302701,
+      "sha256": "7d5066e2bac7ee3a13126815fbeac551421086716ae5ad04db7b9da5f04591c7"
+    },
+    "messages": {
+      "count": 1200,
+      "bytes": 696601,
+      "sha256": "e48b7797d32871e602a5ac5235864e457e6413644388d9531aa5d2aeaf22568a"
+    }
+  },
+  "boards": [
+    {
+      "board_id": "01a0f23e-d791-765b-8db8-1c97bdc8bdf8",
+      "name": "Main Board",
+      "json_bytes": 97,
+      "branches": 0,
+      "sessions": 0
+    },
+    {
+      "board_id": "29280001-0003-7000-8000-000000000001",
+      "name": "Benchmark Engineering",
+      "json_bytes": 1211,
+      "branches": 120,
+      "sessions": 240
+    },
+    {
+      "board_id": "29280002-0003-7000-8000-000000000002",
+      "name": "Benchmark Operations",
+      "json_bytes": 1211,
+      "branches": 30,
+      "sessions": 60
+    }
+  ],
+  "roles": [
+    {
+      "current_user": "agor_app",
+      "rolsuper": false,
+      "rolbypassrls": false
+    }
+  ],
+  "states": [
+    {
+      "status": "completed",
+      "count": 300
+    }
+  ],
+  "version": [
+    {
+      "version": "PostgreSQL 16.14 (Debian 16.14-1.pgdg13+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+    }
+  ]
+}

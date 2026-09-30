@@ -1,0 +1,1107 @@
+agor
+benchmark-startup-2928-large-workspace
+🧪
+Benchmark Engineering
+BE
+🤖
+Claude Code isn't connected.
+Open settings
+Teammate
+Sessions
+Branches
+Comments
+This board does not have a primary teammate yet.
+Assign an existing teammate
+Select a teammate
+No existing teammates are available to assign.
+Assign
+Planned
+Implementation
+Review
+Complete
+bench-001-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 001
+Review checkout validation 001
+bench-002-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 002
+Review checkout validation 002
+bench-003-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 003
+Review checkout validation 003
+bench-004-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 004
+Review checkout validation 004
+bench-005-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 005
+Review checkout validation 005
+bench-006-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 006
+Review checkout validation 006
+bench-007-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 007
+Review checkout validation 007
+bench-008-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 008
+Review checkout validation 008
+bench-009-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 009
+Review checkout validation 009
+bench-010-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 010
+Review checkout validation 010
+bench-011-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 011
+Review checkout validation 011
+bench-012-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 012
+Review checkout validation 012
+bench-013-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 013
+Review checkout validation 013
+bench-014-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 014
+Review checkout validation 014
+bench-015-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 015
+Review checkout validation 015
+bench-016-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 016
+Review checkout validation 016
+bench-017-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 017
+Review checkout validation 017
+bench-018-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 018
+Review checkout validation 018
+bench-019-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 019
+Review checkout validation 019
+bench-020-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 020
+Review checkout validation 020
+bench-021-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 021
+Review checkout validation 021
+bench-022-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 022
+Review checkout validation 022
+bench-023-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 023
+Review checkout validation 023
+bench-024-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 024
+Review checkout validation 024
+bench-025-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 025
+Review checkout validation 025
+bench-026-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 026
+Review checkout validation 026
+bench-027-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 027
+Review checkout validation 027
+bench-028-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 028
+Review checkout validation 028
+bench-029-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 029
+Review checkout validation 029
+bench-030-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 030
+Review checkout validation 030
+bench-031-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 031
+Review checkout validation 031
+bench-032-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 032
+Review checkout validation 032
+bench-033-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 033
+Review checkout validation 033
+bench-034-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 034
+Review checkout validation 034
+bench-035-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 035
+Review checkout validation 035
+bench-036-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 036
+Review checkout validation 036
+bench-037-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 037
+Review checkout validation 037
+bench-038-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 038
+Review checkout validation 038
+bench-039-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 039
+Review checkout validation 039
+bench-040-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 040
+Review checkout validation 040
+bench-041-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 041
+Review checkout validation 041
+bench-042-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 042
+Review checkout validation 042
+bench-043-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 043
+Review checkout validation 043
+bench-044-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 044
+Review checkout validation 044
+bench-045-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 045
+Review checkout validation 045
+bench-046-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 046
+Review checkout validation 046
+bench-047-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 047
+Review checkout validation 047
+bench-048-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 048
+Review checkout validation 048
+bench-049-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 049
+Review checkout validation 049
+bench-050-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 050
+Review checkout validation 050
+bench-051-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions
+2
+Recent
+Implement checkout validation 051
+Review checkout validation 051
+bench-052-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-053-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-054-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-055-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-056-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-057-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-058-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-059-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-060-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-061-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-062-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-063-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-064-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-065-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-066-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-067-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-068-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-069-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-070-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-071-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-072-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-073-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-074-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-075-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-076-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-077-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-078-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-079-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-080-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-081-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-082-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-083-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-084-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-085-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-086-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-087-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-088-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-089-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-090-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-091-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-092-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-093-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-094-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-095-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-096-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-097-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-098-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-099-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-100-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-101-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-102-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-103-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-104-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-105-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-106-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-107-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-108-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-109-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-110-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-111-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-112-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-113-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-114-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-115-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-116-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-117-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-118-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-119-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+bench-120-checkout-validation
+bench-checkout
+env
+
+Synthetic checkout change: validation, regression coverage and review notes. No filesystem or executor exists.
+
+Sessions (2)
+Markdown Note
+Synthetic engineering workspace
+
+Checkout validation, accessibility, API compatibility and release documentation.
+
+All conversations are completed. This fixture performs no network requests or agent work.
+
+Review checklist:
+
+Validate input
+Preserve permissions
+Exercise rollback
+Document test coverage
+React Flow
+Implement checkout validation 001
+Completed
+Esc to close
+bench-checkout
+bench-001-checkout-validation
+env
+BE
+
+Please summarize the synthetic checkout validation.
+
+Tool calls
+
+I will inspect the fixture and report the validation outcome.
+
+BE
+
+Validation completed: 12 synthetic checks passed.
+
+BENCHMARK TRANSCRIPT READY — Checkout validation passed. No external services were contacted.
+
+01:00
+·
+aaaaaaa
+01:00
+MCP
+0
+sonnet-4.6
+Send

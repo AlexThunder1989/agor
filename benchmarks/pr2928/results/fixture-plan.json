@@ -1,0 +1,33 @@
+{
+  "boards": [
+    {
+      "id": "29280001-0003-7000-8000-000000000001",
+      "name": "Benchmark Engineering",
+      "slug": "bench-engineering",
+      "branches": 120,
+      "sessions": 240
+    },
+    {
+      "id": "29280002-0003-7000-8000-000000000002",
+      "name": "Benchmark Operations",
+      "slug": "bench-operations",
+      "branches": 30,
+      "sessions": 60
+    }
+  ],
+  "branches": 150,
+  "sessions": 300,
+  "tasks": 300,
+  "messages": 1200,
+  "zones": 8,
+  "owner": "29280001-0001-7000-8000-000000000001",
+  "repoId": "29280001-0002-7000-8000-000000000001",
+  "session": "29280001-0005-7000-8000-000000000001",
+  "transcript": [
+    "Please summarize the synthetic checkout validation.",
+    "I will inspect the fixture and report the validation outcome.",
+    "Validation completed: 12 synthetic checks passed.",
+    "BENCHMARK TRANSCRIPT READY — Checkout validation passed. No external services were contacted."
+  ],
+  "planHash": "a2212d61f1d5d0072d8165c573b3de336227f1c5d3957a306b2b03039ab1e0ed"
+}

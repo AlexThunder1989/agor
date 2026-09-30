@@ -1,0 +1,12 @@
+{
+  "branchId": "01a0f235-f474-72ca-88b5-4cb9eb4506bb",
+  "status": "stopped",
+  "finishedAt": "2026-09-30T12:29:16.692Z",
+  "volumesRetained": true,
+  "nuke": false,
+  "originalPreviewTouched": false,
+  "implementationChanged": false,
+  "prBodyChanged": false,
+  "rootComposeRestored": true,
+  "researchBranchRestored": true
+}

@@ -1,0 +1,18 @@
+{
+  "at": "2026-09-30T12:26:22.296Z",
+  "hostname": "agor-2",
+  "cpu": "AMD EPYC 7R13 Processor",
+  "logicalCPUs": 16,
+  "totalMemory": 132246835200,
+  "freeMemory": 65836498944,
+  "loadavg": [
+    6.23,
+    6.28,
+    5.2
+  ],
+  "kernel": "6.1.0-51-cloud-amd64",
+  "nodeDriver": "v22.22.2",
+  "daemonRuntime": "v22.23.3",
+  "image": "sha256:3dfc2393847df0b7f7714354ed954c1d314a7b370127b997b4aa585a5da3a32a",
+  "limits": "Memory=0 NanoCpus=0"
+}

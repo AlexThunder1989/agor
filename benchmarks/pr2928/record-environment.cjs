@@ -1,0 +1,4 @@
+const fs=require('fs'),os=require('os'),cp=require('child_process');
+const name='agor-benchmark-startup-2928-large-workspace-agor-dev-1';
+const r={at:new Date().toISOString(),hostname:os.hostname(),cpu:os.cpus()[0].model,logicalCPUs:os.cpus().length,totalMemory:os.totalmem(),freeMemory:os.freemem(),loadavg:os.loadavg(),kernel:os.release(),nodeDriver:process.version,daemonRuntime:cp.execFileSync('docker',['exec',name,'node','--version'],{encoding:'utf8'}).toString().trim(),image:cp.execFileSync('docker',['inspect','--format','{{.Image}}',name]).toString().trim(),limits:cp.execFileSync('docker',['inspect','--format','Memory={{.HostConfig.Memory}} NanoCpus={{.HostConfig.NanoCpus}}',name]).toString().trim()};
+fs.writeFileSync('benchmarks/pr2928/results/environment-'+process.argv[2]+'.json',JSON.stringify(r,null,2)+'\n');console.log(r);
