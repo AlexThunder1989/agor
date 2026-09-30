@@ -82,7 +82,8 @@ export function LandingShell({ ctaPrefix, children }: LandingShellProps) {
           </h2>
           <p>
             Start on your own with Agor Community Edition and bring colleagues in as you go, or talk
-            to us about rolling Agor out across your team. Agor Cloud is opening to teams now.
+            to us about rolling Agor out across your team. Agor Cloud is here when you’d rather we
+            run it.
           </p>
           <div className={styles.heroActions}>
             <CloudCtaLink placement={`${ctaPrefix}-final-cta`} className={styles.primaryButton} />

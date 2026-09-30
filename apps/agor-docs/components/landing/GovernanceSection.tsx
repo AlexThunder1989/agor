@@ -67,10 +67,10 @@ const busItems: Array<{
     rippleDelays: [0, 600, 1200, 1800, 2400],
   },
   {
-    title: 'Agor Cloud is coming',
+    title: 'Agor Cloud is here',
     page: 'governance',
     anchor: 'cloud',
-    desc: 'Managed hosting for teams who’d rather not run it themselves. ',
+    desc: 'Fully managed Agor for teams who’d rather not run it themselves. ',
     beta: true,
     rippleSize: 27,
     rippleDelays: [0, 600, 1200, 1800, 2400],

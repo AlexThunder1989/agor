@@ -158,7 +158,7 @@ const deployments: Array<{
   featured?: boolean;
 }> = [
   {
-    badge: 'Available in beta',
+    badge: 'Available now',
     badgeClass: styles.badgeNow,
     title: 'Agor Cloud (hosted)',
     body: 'A managed, single-tenant Agor instance on our infrastructure. Up in minutes, always on the latest secured release, hardened to sit safely on the public internet.',
@@ -305,7 +305,7 @@ export function AgorCloudLanding() {
         <div className={styles.heroInner} data-reveal>
           <p className={styles.heroBadge}>
             <span className={styles.heroBadgeDot} aria-hidden="true" />
-            Agor Cloud · Private beta
+            Agor Cloud is here
           </p>
           <h1>
             Fully managed Agor for your <span className={styles.headingStrong}>whole team</span>
@@ -691,10 +691,7 @@ export function AgorCloudLanding() {
           <h2>
             Bring your team to <span className={styles.headingAccent}>Agor Cloud</span>
           </h2>
-          <p>
-            We’re bringing teams onto Agor Cloud now. Start from the console, and we’ll help your
-            team get set up.
-          </p>
+          <p>Agor Cloud is here. Start from the console, and we’ll help your team get set up.</p>
           <div className={styles.heroActions}>
             <CloudCtaLink placement="cloud-page-final" className={styles.primaryButton} />
             <button
