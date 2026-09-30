@@ -1,9 +1,11 @@
 import { Head } from 'nextra/components';
 import 'nextra-theme-docs/style.css';
-import { Hanken_Grotesk, JetBrains_Mono, Space_Grotesk } from 'next/font/google';
+import { Geist, Hanken_Grotesk, JetBrains_Mono, Space_Grotesk } from 'next/font/google';
+import localFont from 'next/font/local';
 import Script from 'next/script';
 import { type ReactNode, Suspense } from 'react';
 import { DocsAuroraBackground } from '../components/DocsAuroraBackground';
+import { FontTrial } from '../components/FontTrial';
 import { GoogleAnalytics } from '../components/GoogleAnalytics';
 import {
   AGOR_CLOUD_DEMO_URL,
@@ -53,6 +55,22 @@ const monoFont = JetBrains_Mono({
   display: 'swap',
 });
 
+// TEMPORARY font trial (components/FontTrial.tsx). Not preloaded, so they
+// only download once the switcher selects them.
+const geistTrial = Geist({
+  subsets: ['latin'],
+  variable: '--font-trial-geist',
+  display: 'swap',
+  preload: false,
+});
+const aspektaTrial = localFont({
+  src: './fonts/AspektaVF.woff2',
+  weight: '50 1000',
+  variable: '--font-trial-aspekta',
+  display: 'swap',
+  preload: false,
+});
+
 export const metadata = {
   applicationName: BRAND_NAME,
   generator: 'Next.js',
@@ -81,7 +99,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       lang="en"
       dir="ltr"
       suppressHydrationWarning
-      className={`${displayFont.variable} ${bodyFont.variable} ${monoFont.variable}`}
+      className={`${displayFont.variable} ${bodyFont.variable} ${monoFont.variable} ${geistTrial.variable} ${aspektaTrial.variable}`}
     >
       <Head>
         {/* Google Tag Manager (container GTM-WL3Q29NW). Loaded as high in the
@@ -154,6 +172,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         </noscript>
         <DocsAuroraBackground />
         {children}
+        <FontTrial />
         {analyticsEnabled && googleAnalyticsId ? (
           <Suspense fallback={null}>
             <GoogleAnalytics measurementId={googleAnalyticsId} />
