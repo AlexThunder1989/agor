@@ -17,13 +17,21 @@
   --bs-ease: cubic-bezier(0.45, 0.05, 0.3, 1);
 }
 
-.head {
+div.head {
   position: relative;
   z-index: 1;
+  /* The shared .sectionHeader caps at 920px, which wraps this heading. */
+  max-width: none;
+}
+
+.head h1,
+.head h2 {
+  text-wrap: balance;
 }
 
 .sub {
-  max-width: 60ch;
+  max-width: 72ch;
+  text-wrap: pretty;
   margin: 20px 0 0;
   color: var(--bs-muted);
   font-size: clamp(1.05rem, 1.5vw, 1.3rem);
