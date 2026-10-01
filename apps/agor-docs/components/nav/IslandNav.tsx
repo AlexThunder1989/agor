@@ -15,7 +15,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { trackEvent } from '../../lib/analytics';
-import { DISCORD_INVITE_URL, GITHUB_REPO_URL } from '../../lib/links';
+import { AGOR_CLOUD_URL, DISCORD_INVITE_URL, GITHUB_REPO_URL } from '../../lib/links';
 import { getBasePath, LOGO_MARK_PATH } from '../../lib/siteMetadata';
 import { DiscordIcon, GitHubIcon } from '../BrandIcons';
 import { CloudCtaLink } from '../CloudCtaLink';
@@ -231,7 +231,7 @@ export function IslandNav() {
         label: 'Agor Cloud',
         desc: 'Fully managed Agor',
         icon: Cloud,
-        href: '/cloud',
+        href: AGOR_CLOUD_URL,
       },
       {
         section: 'Actions',
@@ -272,13 +272,16 @@ export function IslandNav() {
         className={styles.island}
         {...islandState}
         style={{ '--panel-h': `${panelHeight}px` } as CSSProperties}
+        // Menus close when the pointer leaves the whole island (or on click,
+        // Esc, or navigation), not when it crosses Docs/Blog/the logo: the
+        // pill widens on open and the row slides under a still cursor.
         onMouseLeave={narrow ? undefined : leaveIsland}
         onMouseEnter={() => clearTimeout(closeTimer.current)}
         onBlur={onIslandBlur}
       >
         <div className={styles.bar}>
           <div className={styles.barLeft}>
-            <Link href="/" className={styles.logo} aria-label="Agor home" onMouseEnter={closeMenu}>
+            <Link href="/" className={styles.logo} aria-label="Agor home">
               {/* biome-ignore lint/performance/noImgElement: Static logo asset */}
               <img src={`${basePath}${LOGO_MARK_PATH}`} alt="" width="30" height="30" />
               <span className="agor-docs-wordmark">agor</span>
@@ -313,7 +316,6 @@ export function IslandNav() {
                   key={link.href}
                   href={link.href}
                   className={styles.trigger}
-                  onMouseEnter={closeMenu}
                   onClick={() => trackNav(link, 'navbar')}
                 >
                   {link.label}
@@ -327,11 +329,10 @@ export function IslandNav() {
               className={styles.iconButton}
               aria-label="Search (⌘K)"
               onClick={openPalette}
-              onMouseEnter={closeMenu}
             >
               <Search size={17} aria-hidden />
             </button>
-            <span className={styles.ctaSlot} onMouseEnter={closeMenu}>
+            <span className={styles.ctaSlot}>
               <CloudCtaLink placement="navbar" compact className={styles.cta} />
             </span>
             <button
@@ -391,6 +392,9 @@ export function IslandNav() {
                   <Link
                     href={menu.feature.href}
                     className={styles.feature}
+                    {...(isExternal(menu.feature.href)
+                      ? { target: '_blank', rel: 'noopener noreferrer' }
+                      : {})}
                     onClick={() => {
                       trackNav({ href: menu.feature?.href ?? '' }, 'navbar-feature');
                       closeMenu();

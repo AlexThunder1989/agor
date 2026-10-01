@@ -8,6 +8,8 @@
 
 export const DISCORD_INVITE_URL = 'https://discord.gg/Qh4TrFQZpd';
 export const GITHUB_REPO_URL = 'https://github.com/preset-io/agor';
+// Agor Cloud's own site (the global nav's "Agor Cloud" destination).
+export const AGOR_CLOUD_URL = 'https://agor.cloud';
 export const X_URL = 'https://x.com/agorcloud';
 export const LINKEDIN_URL = 'https://www.linkedin.com/company/agorcloud/';
 
