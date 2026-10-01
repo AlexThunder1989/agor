@@ -8,7 +8,9 @@
  *   during a paged read shifts rows and skips one), capped at
  *   `MY_SESSIONS_FULL_LIMIT`; hitting the cap sets `mySessionsTruncated`.
  * - U2: my branches (`branches{created_by}`).
- * - U3: every teammate branch I can view (`branches{teammate: true}`).
+ * - U3: every teammate branch I can view (`branches{teammate: true}`), capped
+ *   at `PAGINATION.MAX_TEAMMATE_BRANCHES`; the daemon's real total sets
+ *   `teammatesTruncated` when the cap was hit.
  * - U5: every branch my sessions or candidate comment threads reference that
  *   is still absent, read by id in chunks; ids the server does not return go
  *   into `absentBranchIds` (archived, deleted or invisible).
@@ -246,6 +248,7 @@ function applyGlobalCompatibility(run: ScopeRun): void {
   state.setUserScope({
     ...(state.mySessionsLoaded ? {} : { mySessionsLoaded: true, mySessionsTruncated: false }),
     teammatesLoaded: true,
+    teammatesTruncated: false,
   });
   if (run.pending.size === 0) state.setUserScope({ homeBranchesLoaded: true });
 }
@@ -502,13 +505,17 @@ export async function startUserScope(
     }),
     ({ branches }) => (branches ?? []).some((row) => row.created_by !== run.userId)
   ).then(Boolean);
-  const u3 = fillRead(run, async () => ({
-    branches: rowsOf<Branch>(
-      await client.service('branches').find({
-        query: { teammate: true, archived: false, $limit: PAGINATION.MAX_TEAMMATE_BRANCHES },
-      })
-    ),
-  })).then(async (rows) => {
+  // The daemon reports the real total, so a capped read is never "all teammates".
+  let teammateTotal = 0;
+  const u3 = fillRead(run, async () => {
+    const result = await client.service('branches').find({
+      query: { teammate: true, archived: false, $limit: PAGINATION.MAX_TEAMMATE_BRANCHES },
+    });
+    const branches = rowsOf<Branch>(result);
+    const total = (result as { total?: unknown }).total;
+    teammateTotal = typeof total === 'number' ? total : branches.length;
+    return { branches };
+  }).then(async (rows) => {
     if (!rows) return false;
     // U3's rows can't be checked against its filter (the server's teammate
     // set is a superset of the client's), but a daemon that ignores
@@ -516,7 +523,10 @@ export async function startUserScope(
     // the keys are honoured.
     const keysHonoured = await u2.catch(() => false);
     if (!keysHonoured || run.degraded || !isCurrent(run)) return false;
-    store().setUserScope({ teammatesLoaded: true });
+    store().setUserScope({
+      teammatesLoaded: true,
+      teammatesTruncated: teammateTotal > (rows.branches?.length ?? 0),
+    });
     return true;
   });
 

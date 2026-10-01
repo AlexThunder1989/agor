@@ -244,17 +244,20 @@ function parseStartWebhookResult(options: {
 }
 
 /**
- * `branches.find({ teammate: true, archived? , $limit? })`: every teammate
- * branch the caller can view, through `BranchRepository.findTeammateBranches`.
- * The marker set is a superset of the client's teammate check (it also matches
- * branches with an enabled schedule), so clients keep their own filter.
+ * `branches.find({ teammate: true, archived?, $limit?, $skip? })`: the teammate
+ * branches the caller can view, through `BranchRepository.findTeammateBranches`,
+ * at most `PAGINATION.MAX_TEAMMATE_BRANCHES` per page. `total` is the real
+ * number of matching branches, so a caller can tell a capped page from a
+ * complete one. The marker set is a superset of the client's teammate check (it
+ * also matches branches with an enabled schedule), so clients keep their own
+ * filter.
  */
 function isTeammateBranchQuery(query?: Record<string, unknown>): boolean {
   if (!query || query.teammate === undefined) return false;
   if (query.teammate !== true) {
     throw new BadRequest('teammate only supports true');
   }
-  const allowed = new Set(['teammate', 'archived', '$limit']);
+  const allowed = new Set(['teammate', 'archived', '$limit', '$skip']);
   const extra = Object.keys(query).filter((key) => !allowed.has(key));
   if (extra.length > 0) {
     throw new BadRequest(`teammate cannot be combined with ${extra.join(', ')}`);
@@ -1792,16 +1795,27 @@ export class BranchesService extends DrizzleService<Branch, Partial<Branch>, Bra
         requested ?? PAGINATION.MAX_TEAMMATE_BRANCHES,
         PAGINATION.MAX_TEAMMATE_BRANCHES
       );
-      const data = await this.branchRepo.findTeammateBranches({
+      const skip = typeof query?.$skip === 'number' ? query.$skip : 0;
+      const filter = {
         archived: typeof query?.archived === 'boolean' ? query.archived : undefined,
         userId: findParams?._agorSqlBranchAccessUserId,
-        minimumPermission: 'view',
-        limit,
+        minimumPermission: 'view' as const,
+      };
+      // One row past the page tells a complete read from a capped one; only a
+      // capped read pays for the count.
+      const probe = await this.branchRepo.findTeammateBranches({
+        ...filter,
+        limit: limit + 1,
+        offset: skip,
       });
-      const enriched = await this.branchRepo.enrichManyWithZoneInfo(data);
-      // One bounded read: `total` equals the returned rows so a client
-      // `findAll` stops after this page instead of walking offsets.
-      return { total: enriched.length, limit, skip: 0, data: enriched };
+      const hasMore = probe.length > limit;
+      const data = await this.branchRepo.enrichManyWithZoneInfo(
+        hasMore ? probe.slice(0, limit) : probe
+      );
+      const total = hasMore
+        ? await this.branchRepo.countTeammateBranches(filter)
+        : skip + data.length;
+      return { total, limit, skip, data };
     }
     if (shouldSqlPageBranchQuery(query)) {
       const branchFilter = query?.branch_id;

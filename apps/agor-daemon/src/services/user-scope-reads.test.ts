@@ -81,6 +81,33 @@ describe('user-scope reads through transport hooks', () => {
     ).map((b) => b.branch_id);
     expect(mates).toEqual([mateId]);
     expect(mates).not.toContain(privateMateId);
+
+    // A capped page reports the real total (no false "all loaded")…
+    const owner = (await new UsersRepository(db).findById(fixture.owner)) as User;
+    const capped = (await app.service('branches').find({
+      provider: 'rest',
+      user: owner,
+      query: { teammate: true, archived: false, $limit: 1 },
+    } as never)) as { total: number; data: Branch[] };
+    expect(capped.data).toHaveLength(1);
+    expect(capped.total).toBe(2);
+    // …and the next page continues where it stopped.
+    const next = (await app.service('branches').find({
+      provider: 'rest',
+      user: owner,
+      query: { teammate: true, archived: false, $limit: 1, $skip: 1 },
+    } as never)) as { total: number; data: Branch[] };
+    expect(next.total).toBe(2);
+    expect(new Set([...capped.data, ...next.data].map((b) => b.branch_id))).toEqual(
+      new Set([mateId, privateMateId])
+    );
+    // A complete page's total is its row count.
+    const complete = (await app.service('branches').find({
+      provider: 'rest',
+      user: owner,
+      query: { teammate: true, archived: false },
+    } as never)) as { total: number; data: Branch[] };
+    expect(complete.total).toBe(complete.data.length);
     await expect(
       app
         .service('branches')

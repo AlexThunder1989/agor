@@ -146,6 +146,14 @@ describe('TeammatesDirectory', () => {
     expect(screen.queryByText('Teammate mine')).not.toBeInTheDocument();
   });
 
+  it('says the list is partial when the teammate read hit its cap', () => {
+    seed([teammate('shared', 'b-shared')], [board('b-shared')]);
+    renderDirectory();
+    expect(screen.queryByText(/Showing the first/)).not.toBeInTheDocument();
+    act(() => agorStore.setState({ teammatesTruncated: true }));
+    expect(screen.getByText(/Showing the first 1,000 teammates/)).toBeInTheDocument();
+  });
+
   it('shows superadmins only teammates whose board policy reaches them, groups included', async () => {
     seed(
       [teammate('open', 'b-open'), teammate('crew', 'b-crew'), teammate('private', 'b-private')],

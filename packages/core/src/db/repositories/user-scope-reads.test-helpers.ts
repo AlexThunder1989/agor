@@ -173,6 +173,21 @@ export async function exerciseUserScopeReads(db: Database) {
     limit: 1000,
   });
   expect(new Set(ownerMates.map((b) => b.branch_id))).toEqual(new Set([ids.mate, ids.privateMate]));
+  // The count matches the same filter, so a capped read can report its real total.
+  expect(
+    await branchRepo.countTeammateBranches({
+      userId: viewer,
+      archived: false,
+      minimumPermission: 'view',
+    })
+  ).toBe(1);
+  expect(
+    await branchRepo.countTeammateBranches({
+      userId: owner,
+      archived: false,
+      minimumPermission: 'view',
+    })
+  ).toBe(2);
 
   // ── Per-board counts: active, visible branches on visible boards. ───────
   const countsFor = async (visibleToUserId?: UserID) =>

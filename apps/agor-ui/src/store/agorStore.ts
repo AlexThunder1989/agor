@@ -85,8 +85,10 @@ export interface UserScopeMeta {
   mySessionsTruncated: boolean;
   /** Every branch my sessions or candidate comment threads reference is present or absent. */
   homeBranchesLoaded: boolean;
-  /** Every active teammate branch the caller can view is in `branchById`. */
+  /** The teammate read finished; with `teammatesTruncated`, only up to its cap. */
   teammatesLoaded: boolean;
+  /** More teammates are visible than the capped read returned: lists are partial. */
+  teammatesTruncated: boolean;
   /** Referenced branch ids the server did not return (archived, deleted or invisible). */
   absentBranchIds: Set<string>;
   /**
@@ -102,6 +104,7 @@ const INITIAL_USER_SCOPE: UserScopeMeta = {
   mySessionsTruncated: false,
   homeBranchesLoaded: false,
   teammatesLoaded: false,
+  teammatesTruncated: false,
   absentBranchIds: new Set(),
   userScopeDegraded: false,
 };

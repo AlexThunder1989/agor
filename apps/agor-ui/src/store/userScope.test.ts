@@ -176,6 +176,26 @@ describe('user scope', () => {
     expect(flags().teammatesLoaded).toBe(true);
   });
 
+  it('marks teammates truncated when the server reports more than the capped read', async () => {
+    const { client } = makeClient({ teammates: () => [branch('mate-1')] });
+    const find = client.service('branches').find;
+    const service = client.service;
+    (client as { service: unknown }).service = (name: string) => {
+      const svc = service(name);
+      if (name !== 'branches') return svc;
+      return {
+        ...svc,
+        find: async (args: { query: Record<string, unknown> }) => {
+          const result = (await find(args)) as { data: Branch[] };
+          return args.query.teammate ? { ...result, total: 1001 } : result;
+        },
+      };
+    };
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: true });
+    expect(flags().teammatesLoaded).toBe(true);
+    expect(agorStore.getState().teammatesTruncated).toBe(true);
+  });
+
   it('ensures referenced branches in chunks of 200 and records the absent ones', async () => {
     const mine = Array.from({ length: 250 }, (_, i) => session(`s-${i}`, `br-${i}`));
     const { client, calls } = makeClient({
