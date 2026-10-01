@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { trackEvent } from '../lib/analytics';
 import {
   type CloudCta,
+  type CloudCtaVariant,
   COMPACT_CTA_LABELS,
   cloudCtaFor,
   isTeamSignupStatus,
@@ -82,6 +83,8 @@ interface CloudCtaLinkProps {
   className?: string;
   /** Use the short label (see COMPACT_CTA_LABELS). */
   compact?: boolean;
+  /** A label per variant, e.g. TIER_CTA_LABELS; wins over `compact`. */
+  labels?: Record<CloudCtaVariant, string>;
 }
 
 /**
@@ -89,7 +92,7 @@ interface CloudCtaLinkProps {
  * unknown (still loading, request failed, unexpected body) a click opens the
  * HubSpot sign-up modal instead; the href stays as the no-JS fallback.
  */
-export function CloudCtaLink({ placement, className, compact }: CloudCtaLinkProps) {
+export function CloudCtaLink({ placement, className, compact, labels }: CloudCtaLinkProps) {
   const { label, href, status, variant } = useCloudCta(placement);
   const [isFormOpen, setIsFormOpen] = useState(false);
 
@@ -109,7 +112,7 @@ export function CloudCtaLink({ placement, className, compact }: CloudCtaLinkProp
   return (
     <>
       <a href={href} className={className} onClick={onClick}>
-        {compact ? COMPACT_CTA_LABELS[variant] : label}
+        {labels ? labels[variant] : compact ? COMPACT_CTA_LABELS[variant] : label}
       </a>
       {/* Portaled: CTAs sit inside transformed reveal sections, which would
           otherwise trap the modal's position: fixed. */}

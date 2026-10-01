@@ -3014,44 +3014,45 @@ a.radarBlip .blipName {
 .homeCtaRow {
   display: flex;
   align-items: center;
-  gap: 28px;
-  margin-top: 8px;
+  gap: 24px;
 }
 
 .homeHero a.homePrimary {
   display: inline-flex;
   flex: none;
   align-items: center;
-  gap: 10px;
-  height: 52px;
-  padding: 0 26px;
+  justify-content: center;
+  padding: 22px 44px;
   border-radius: 999px;
-  background: #45c4bb;
-  box-shadow: 0 0 40px rgba(69, 196, 187, 0.35);
-  color: #062321;
-  font: 600 16px var(--font-body-stack);
+  background: #3fd9c4;
+  box-shadow: 0 0 50px rgba(63, 217, 196, 0.35);
+  color: #061010;
+  font: 600 24px / 1 var(--font-body-stack);
   text-decoration: none;
   white-space: nowrap;
   transition: background 0.15s;
 }
 
 .homeHero a.homePrimary:hover {
-  background: #6fd8cf;
-  color: #062321;
+  background: #6fe3d3;
+  color: #061010;
+}
+
+.homeHero a.homePrimary:active {
+  background: #2bb8a5;
 }
 
 .homeHero .homeSecondary {
   display: inline-flex;
   flex: none;
   align-items: center;
-  height: 52px;
-  padding: 0 26px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  justify-content: center;
+  padding: 22px 44px;
+  border: 1.5px solid #3a4545;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(10px);
-  color: #e9efef;
-  font: 600 16px var(--font-body-stack);
+  background: #161c1c;
+  color: #fff;
+  font: 600 24px / 1 var(--font-body-stack);
   white-space: nowrap;
   cursor: pointer;
   transition:
@@ -3064,91 +3065,67 @@ a.radarBlip .blipName {
   background: rgba(69, 196, 187, 0.1);
 }
 
-/* Agor Community Edition bar: label, copyable install command, and two small
- * buttons, on one glassy strip under the CTAs. */
-.homeCeBar {
+/* CTA tiers (handoff "hero CTA tiers"): a labelled Agor Cloud tier, then a
+ * smaller Agor Community Edition tier below it. */
+.homeTiers {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 8px 8px 8px 16px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 14px;
-  background: rgba(5, 7, 7, 0.55);
-  backdrop-filter: blur(10px);
+  gap: 52px;
+  margin-top: 8px;
 }
 
-.homeCeLabel {
-  margin-right: 4px;
-  color: #cfe9e5;
-  font: 600 13.5px var(--font-body-stack);
-  white-space: nowrap;
+.homeTier {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.homeTierCe {
+  gap: 12px;
+}
+
+.homeKicker {
+  margin: 0;
+  color: #3fd9c4;
+  font: 500 13px var(--font-mono-stack);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.homeKickerMuted {
+  color: #5f7d7a;
+  font-size: 12px;
+}
+
+.homeCeRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
 }
 
 .homeHero a.homeCeBtn {
   display: inline-flex;
   flex: none;
   align-items: center;
-  gap: 7px;
-  height: 34px;
-  padding: 0 14px;
+  gap: 8px;
+  padding: 10px 18px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  color: #e9efef;
-  font: 500 13.5px var(--font-body-stack);
+  border-radius: 999px;
+  color: #e8f2f1;
+  font: 500 16px var(--font-body-stack);
   text-decoration: none;
   white-space: nowrap;
   transition:
     border-color 0.15s,
-    background-color 0.15s;
+    color 0.15s;
 }
 
 .homeHero a.homeCeBtn:hover {
-  border-color: rgba(69, 196, 187, 0.5);
+  border-color: #3fd9c4;
   color: #fff;
-}
-
-.homeHero a.homeCeBtnAccent {
-  border-color: rgba(69, 196, 187, 0.45);
-  background: rgba(69, 196, 187, 0.12);
-  color: #8ee3db;
-}
-
-.homeHero a.homeCeBtnAccent:hover {
-  background: rgba(69, 196, 187, 0.2);
-  color: #b5f0ea;
-}
-
-.homeInstall {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 10px;
-  height: 34px;
-  padding: 0 10px 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  background: rgba(5, 7, 7, 0.45);
-  color: #b7c1c3;
-  font: 400 13.5px var(--font-mono-stack);
-  white-space: nowrap;
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-
-.homeInstall:hover {
-  border-color: rgba(69, 196, 187, 0.4);
-}
-
-.homeInstallPrompt {
-  color: #45c4bb;
-}
-
-.homeGithubIcon {
-  width: 16px;
-  height: 16px;
 }
 
 .homeRow {
@@ -3248,7 +3225,6 @@ a.radarBlip .blipName {
 
 .homeHero a.homePrimary:focus-visible,
 .homeHero .homeSecondary:focus-visible,
-.homeInstall:focus-visible,
 .homeHero a.homeCeBtn:focus-visible,
 .homeHero a.homeRowItem:focus-visible,
 .homeVideoToggle:focus-visible {
@@ -3294,6 +3270,16 @@ a.radarBlip .blipName {
     padding-top: 108px;
     padding-bottom: 24px;
   }
+
+  .homeTiers {
+    gap: 28px;
+  }
+
+  .homeHero a.homePrimary,
+  .homeHero .homeSecondary {
+    padding: 16px 34px;
+    font-size: 20px;
+  }
 }
 
 @media (max-width: 639px) {
@@ -3322,8 +3308,23 @@ a.radarBlip .blipName {
     width: 100%;
   }
 
-  .homeCeBar {
-    padding: 10px;
+  /* Tiers span the column; Cloud buttons stack full width (above), the
+   * Community Edition pair stays side by side. */
+  .homeTiers {
+    align-self: stretch;
+    align-items: stretch;
+    gap: 36px;
+  }
+
+  .homeTier {
+    align-items: stretch;
+    text-align: center;
+  }
+
+  .homeHero a.homePrimary,
+  .homeHero .homeSecondary {
+    padding: 18px 28px;
+    font-size: 20px;
   }
 }
 

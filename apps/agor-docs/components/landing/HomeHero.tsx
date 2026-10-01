@@ -1,10 +1,12 @@
 'use client';
 
-import { Check, Copy, Pause, Play } from 'lucide-react';
+import { Download, Pause, Play } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { trackEvent } from '../../lib/analytics';
+import { TIER_CTA_LABELS } from '../../lib/cloudCta';
 import { GITHUB_REPO_URL } from '../../lib/links';
+import { GitHubIcon } from '../BrandIcons';
 import { CloudCtaLink } from '../CloudCtaLink';
 import { HighlightedText, HOME_HERO } from '../heroCopy';
 import styles from '../LandingPage.module.css';
@@ -12,51 +14,11 @@ import { DemoButton } from './DemoButton';
 import { LandingLink } from './LandingLink';
 import { LANDING_PAGES } from './pages';
 
-const INSTALL_COMMAND = 'npm install -g agor-live';
-
-function GitHubIcon() {
-  return (
-    <svg
-      className={styles.homeGithubIcon}
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      fill="currentColor"
-    >
-      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.6 7.6 0 0 1 8 3.86c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
-    </svg>
-  );
-}
-
-function InstallCommand() {
-  const [copied, setCopied] = useState(false);
-  const copy = () => {
-    navigator.clipboard?.writeText(INSTALL_COMMAND).then(() => {
-      setCopied(true);
-      trackEvent('install_command_copy', { placement: 'home-hero' });
-      setTimeout(() => setCopied(false), 1400);
-    });
-  };
-  return (
-    <button
-      type="button"
-      className={styles.homeInstall}
-      onClick={copy}
-      aria-label={copied ? 'Copied install command' : `Copy install command: ${INSTALL_COMMAND}`}
-    >
-      <span className={styles.homeInstallPrompt} aria-hidden="true">
-        $
-      </span>
-      {INSTALL_COMMAND}
-      {copied ? <Check size={15} aria-hidden /> : <Copy size={15} aria-hidden />}
-    </button>
-  );
-}
-
 /**
- * Home hero (design handoff 2a): the pitch over a full-bleed video, one
- * primary CTA plus a text link, a copyable install command, and the landing
- * pages as a quiet row along the bottom edge, so visitors who never scroll
- * still see a way in.
+ * Home hero (design handoff 2a): the pitch over a full-bleed video, the CTAs
+ * in two labelled tiers (handoff "hero CTA tiers": Agor Cloud first, Agor
+ * Community Edition smaller below), and the landing pages as a quiet row along
+ * the bottom edge, so visitors who never scroll still see a way in.
  */
 export function HomeHero() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -115,36 +77,50 @@ export function HomeHero() {
         <p className={styles.homeSub}>
           <HighlightedText text={HOME_HERO.subheadline} />
         </p>
-        <div className={styles.homeCtaRow}>
-          <CloudCtaLink placement="landing-hero" className={styles.homePrimary} />
-          <DemoButton className={styles.homeSecondary}>Book a demo</DemoButton>
-        </div>
-        {/* Agor Community Edition: copy the install command, open the setup
-            guide, or star the repo. */}
-        <div className={styles.homeCeBar}>
-          <span className={styles.homeCeLabel}>Agor Community Edition</span>
-          <InstallCommand />
-          <Link
-            href="/guide/getting-started"
-            className={`${styles.homeCeBtn} ${styles.homeCeBtnAccent}`}
-            onClick={() =>
-              trackEvent('nav_click', {
-                target: '/guide/getting-started',
-                placement: 'home-hero-ce',
-              })
-            }
-          >
-            Install locally
-          </Link>
-          <a
-            href={GITHUB_REPO_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={styles.homeCeBtn}
-          >
-            <GitHubIcon />
-            Star on GitHub
-          </a>
+        <div className={styles.homeTiers}>
+          <div className={styles.homeTier}>
+            <p className={styles.homeKicker}>Agor Cloud</p>
+            <div className={styles.homeCtaRow}>
+              <CloudCtaLink
+                placement="landing-hero"
+                labels={TIER_CTA_LABELS}
+                className={styles.homePrimary}
+              />
+              <DemoButton className={styles.homeSecondary}>Book a demo</DemoButton>
+            </div>
+          </div>
+          <div className={`${styles.homeTier} ${styles.homeTierCe}`}>
+            <p className={`${styles.homeKicker} ${styles.homeKickerMuted}`}>
+              Agor Community Edition
+            </p>
+            <div className={styles.homeCeRow}>
+              <Link
+                href="/guide/getting-started"
+                className={styles.homeCeBtn}
+                onClick={() =>
+                  trackEvent('nav_click', {
+                    target: '/guide/getting-started',
+                    placement: 'home-hero-ce',
+                  })
+                }
+              >
+                <Download size={16} aria-hidden />
+                Install locally
+              </Link>
+              <a
+                href={GITHUB_REPO_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={styles.homeCeBtn}
+                onClick={() =>
+                  trackEvent('nav_click', { target: GITHUB_REPO_URL, placement: 'home-hero-ce' })
+                }
+              >
+                <GitHubIcon size={16} />
+                Star on GitHub
+              </a>
+            </div>
+          </div>
         </div>
       </section>
 

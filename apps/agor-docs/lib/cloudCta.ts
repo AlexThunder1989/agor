@@ -44,6 +44,18 @@ export const COMPACT_CTA_LABELS: Record<CloudCtaVariant, string> = {
   hubspot_modal: 'Try Cloud',
 };
 
+/**
+ * Labels for a button that already sits under an "Agor Cloud" label (the home
+ * hero's Cloud tier), so they needn't repeat the product name. No "free":
+ * nothing establishes a free tier.
+ */
+export const TIER_CTA_LABELS: Record<CloudCtaVariant, string> = {
+  console: 'Get started',
+  waitlist: 'Join the waitlist',
+  capacity: 'Sign up',
+  hubspot_modal: 'Sign up',
+};
+
 const CTA_UTM_BASE = 'utm_source=agor.live&utm_medium=referral&utm_campaign=agor-cloud-cta';
 
 export function isTeamSignupStatus(value: unknown): value is TeamSignupStatus {
