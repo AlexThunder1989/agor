@@ -257,3 +257,10 @@ html[data-font-trial="aspekta"] {
   --font-display: var(--font-trial-aspekta);
   --font-body: var(--font-trial-aspekta);
 }
+
+/* Site rule: no diagonal arrows. Nextra's link component appends a ↗ icon
+ * to every external link (post text, TOC feedback/edit links, sidebar);
+ * hide it. Matched by Nextra's own classes, so our icons are untouched. */
+a[target="_blank"] > svg.x\:align-baseline.x\:shrink-0:last-child {
+  display: none;
+}
