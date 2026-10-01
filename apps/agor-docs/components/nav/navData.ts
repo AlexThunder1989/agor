@@ -15,13 +15,7 @@ import {
   Users,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
-import {
-  AGOR_CLOUD_URL,
-  DISCORD_INVITE_URL,
-  GITHUB_REPO_URL,
-  LINKEDIN_URL,
-  X_URL,
-} from '../../lib/links';
+import { DISCORD_INVITE_URL, GITHUB_REPO_URL, LINKEDIN_URL, X_URL } from '../../lib/links';
 import { DiscordIcon, GitHubIcon, LinkedInIcon, XIcon } from '../BrandIcons';
 import { type LandingPageId, landingPage } from '../landing/pages';
 
@@ -78,7 +72,7 @@ export const NAV_MENUS: NavMenu[] = [
           {
             label: 'Agor Cloud',
             desc: 'Fully managed Agor for your whole team.',
-            href: AGOR_CLOUD_URL,
+            href: '/cloud',
             icon: Cloud,
           },
         ],
@@ -100,7 +94,7 @@ export const NAV_MENUS: NavMenu[] = [
       kicker: 'Agor Cloud',
       title: 'Fully managed Agor for your whole team',
       cta: 'See Agor Cloud',
-      href: AGOR_CLOUD_URL,
+      href: '/cloud',
     },
   },
   {

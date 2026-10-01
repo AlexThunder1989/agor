@@ -1,6 +1,6 @@
 import { Head } from 'nextra/components';
 import 'nextra-theme-docs/style.css';
-import { Geist, Hanken_Grotesk, JetBrains_Mono, Space_Grotesk } from 'next/font/google';
+import { DM_Sans, Hanken_Grotesk, JetBrains_Mono, Space_Grotesk } from 'next/font/google';
 import localFont from 'next/font/local';
 import Script from 'next/script';
 import { type ReactNode, Suspense } from 'react';
@@ -57,9 +57,9 @@ const monoFont = JetBrains_Mono({
 
 // TEMPORARY font trial (components/FontTrial.tsx). Not preloaded, so they
 // only download once the switcher selects them.
-const geistTrial = Geist({
+const dmSansTrial = DM_Sans({
   subsets: ['latin'],
-  variable: '--font-trial-geist',
+  variable: '--font-trial-dmsans',
   display: 'swap',
   preload: false,
 });
@@ -99,7 +99,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       lang="en"
       dir="ltr"
       suppressHydrationWarning
-      className={`${displayFont.variable} ${bodyFont.variable} ${monoFont.variable} ${geistTrial.variable} ${aspektaTrial.variable}`}
+      className={`${displayFont.variable} ${bodyFont.variable} ${monoFont.variable} ${dmSansTrial.variable} ${aspektaTrial.variable}`}
     >
       <Head>
         {/* Google Tag Manager (container GTM-WL3Q29NW). Loaded as high in the

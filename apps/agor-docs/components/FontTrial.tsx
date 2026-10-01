@@ -12,7 +12,7 @@ import styles from './FontTrial.module.css';
  */
 const OPTIONS = [
   { id: 'today', label: 'Today', title: 'Space Grotesk + Hanken Grotesk' },
-  { id: 'geist', label: 'Geist', title: 'Geist' },
+  { id: 'dmsans', label: 'DM Sans', title: 'DM Sans' },
   { id: 'aspekta', label: 'Aspekta', title: 'Aspekta' },
 ] as const;
 

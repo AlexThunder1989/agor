@@ -110,9 +110,6 @@ export const ROSTER: RosterMember[] = [
     meta: 'Slack-native · on call for redlines',
     r: 145,
     a: 182,
-    abstract:
-      'Preset’s contract and legal specialist. When a customer sends a redlined MSA, Saul reads it against the negotiation grid, flags the hard lines and the usual flex points, and drafts a response. He knows the difference between a deal-breaker and a concession the team makes most of the time.',
-    story: { href: '/blog/meet-blake#not-just-me', label: 'Read about Saul in Blake’s post' },
   },
   {
     id: 'blake',

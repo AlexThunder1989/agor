@@ -248,9 +248,9 @@ html:not(.dark) body:not(:has([class*="landingShell"])) main :is(h1, h2, h3) {
 
 /* TEMPORARY font trial (components/FontTrial.tsx): swap the marketing stacks.
  * The attribute selector outranks next/font's variable class on <html>. */
-html[data-font-trial="geist"] {
-  --font-display: var(--font-trial-geist);
-  --font-body: var(--font-trial-geist);
+html[data-font-trial="dmsans"] {
+  --font-display: var(--font-trial-dmsans);
+  --font-body: var(--font-trial-dmsans);
 }
 
 html[data-font-trial="aspekta"] {

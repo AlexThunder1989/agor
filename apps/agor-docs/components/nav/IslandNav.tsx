@@ -15,7 +15,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { trackEvent } from '../../lib/analytics';
-import { AGOR_CLOUD_URL, DISCORD_INVITE_URL, GITHUB_REPO_URL } from '../../lib/links';
+import { DISCORD_INVITE_URL, GITHUB_REPO_URL } from '../../lib/links';
 import { getBasePath, LOGO_MARK_PATH } from '../../lib/siteMetadata';
 import { DiscordIcon, GitHubIcon } from '../BrandIcons';
 import { CloudCtaLink } from '../CloudCtaLink';
@@ -231,7 +231,7 @@ export function IslandNav() {
         label: 'Agor Cloud',
         desc: 'Fully managed Agor',
         icon: Cloud,
-        href: AGOR_CLOUD_URL,
+        href: '/cloud',
       },
       {
         section: 'Actions',
