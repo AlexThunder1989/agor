@@ -1,6 +1,7 @@
 /**
- * Board partitions: one board's branches, sessions, board objects, cards,
- * comments and full board record, loaded when the board is opened.
+ * Board partitions: one board's branches, sessions, board objects, cards and
+ * full board record, loaded when the board is opened. Comments are
+ * global and gated at first paint, so they are not part of a partition.
  *
  * Invariant I1 — presence is not completeness. Realtime keeps upserting rows
  * for every board the caller can see, so a row (or a non-empty bucket) in a map
@@ -17,14 +18,7 @@
  * Loads are deduplicated per (authority, board), and a load whose authority
  * changed before it resolved applies nothing.
  */
-import type {
-  AgorClient,
-  Board,
-  BoardComment,
-  Branch,
-  CardWithType,
-  Session,
-} from '@agor-live/client';
+import type { AgorClient, Board, Branch, CardWithType, Session } from '@agor-live/client';
 import { PAGINATION } from '@agor-live/client';
 import {
   beginPartitionLoad,
@@ -41,6 +35,7 @@ import {
   GLOBALLY_HYDRATED_COLLECTIONS,
 } from './agorStore';
 import { getRealtimeAuthorityScope } from './realtimeBatch';
+import { sessionListQuery } from './sessionListQuery';
 
 /**
  * Whether `boardId` is complete: its partition loaded, or (Steps 1–2) every
@@ -88,30 +83,26 @@ async function fetchBoardPartition(
   boardId: string,
   canUseMemberWorkspaceServices: boolean
 ): Promise<BoardPartitionSnapshot> {
-  // The same six queries as the board-scoped first paint in `useAgorData`;
-  // each is pushed down to SQL and RBAC-scoped by the daemon.
-  const [branches, sessions, boardObjects, comments, cards, board] = await Promise.all([
+  // The board-scoped first-paint queries of `useAgorData` (comments are
+  // global and gated, so not part of a partition); each is pushed down to SQL
+  // and RBAC-scoped by the daemon.
+  const [branches, sessions, boardObjects, cards, board] = await Promise.all([
     client.service('branches').findAll({
       query: { archived: false, board_id: boardId, $limit: PAGINATION.DEFAULT_LIMIT },
     }) as Promise<Branch[]>,
     client.service('sessions').findAll({
-      query: {
+      query: sessionListQuery({
         archived: false,
         board_id: boardId,
         $limit: PAGINATION.DEFAULT_LIMIT,
         $sort: { updated_at: -1 },
-      },
+      }),
     }) as Promise<Session[]>,
     canUseMemberWorkspaceServices
       ? client
           .service('board-objects')
           .findAll({ query: { board_id: boardId, $limit: PAGINATION.DEFAULT_LIMIT } })
       : Promise.resolve(null),
-    client
-      .service('board-comments')
-      .findAll({ query: { board_id: boardId, $limit: PAGINATION.DEFAULT_LIMIT } }) as Promise<
-      BoardComment[]
-    >,
     client
       .service('cards')
       .findAll({ query: { board_id: boardId, $limit: PAGINATION.DEFAULT_LIMIT } }) as Promise<
@@ -124,7 +115,6 @@ async function fetchBoardPartition(
     branches,
     sessions,
     boardObjects: boardObjects as BoardPartitionSnapshot['boardObjects'],
-    comments,
     cards,
     board,
   };

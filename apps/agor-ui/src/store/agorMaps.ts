@@ -672,50 +672,41 @@ export interface BoardPartitionSnapshot {
   sessions: readonly Session[];
   /** `null` when the caller may not read board objects (global viewers). */
   boardObjects: readonly BoardEntityObject[] | null;
-  comments: readonly BoardComment[];
   cards: readonly CardWithType[];
   /** Full board record (objects / custom_css); `null` keeps the lean row. */
   board: Board | null;
 }
 
-/** Collections the partition fence consults. */
-export type PartitionCollection =
-  | 'sessions'
-  | 'branches'
-  | 'boards'
-  | 'boardObjects'
-  | 'cards'
-  | 'comments';
+/** Collections the fill fence consults. */
+export type PartitionCollection = 'sessions' | 'branches' | 'boards' | 'boardObjects' | 'cards';
 
 /** Whether a live event wrote `id` in `collection` since the load started. */
 export type PartitionTouched = (collection: PartitionCollection, id: string) => boolean;
 
 /**
- * Fill-only merge of a board partition snapshot (invariant I2: a load never
- * overwrites a live row).
+ * Fill-only merge of branch and session rows (invariant I2: a load never
+ * overwrites a live row). Shared by board partitions and the user-scope reads.
  *
- * - A snapshot row is inserted only when its id is ABSENT from the store and
- *   no live event touched it since the load started. Present rows are kept
- *   current by realtime events and are never overwritten. A touched absent row
- *   was removed/archived/evicted, or its newer patch is queued and will flush.
- * - A session, board object or comment whose branch was touched since the load
- *   started and is now absent from `branchById` is skipped: its branch was
- *   archived or deleted while the load was in flight.
- * - The full board record replaces the lean one unless `boards:<id>` was
- *   touched.
+ * - A row is inserted only when its id is ABSENT from the store and no live
+ *   event touched it since the load started. Present rows are kept current by
+ *   realtime events and are never overwritten. A touched absent row was
+ *   removed/archived/evicted, or its newer patch is queued and will flush.
+ * - A session whose branch was touched since the load started and is now
+ *   absent from `branchById` is skipped: that branch was archived or deleted
+ *   while the load was in flight.
  *
  * Returns `prev` unchanged when nothing was filled. Never bumps revisions, so a
  * fill cannot make a concurrent global hydration discard its snapshot.
  */
-export function applyBoardPartition(
+export function applyEntityFill(
   prev: DataMaps,
-  snapshot: BoardPartitionSnapshot,
+  rows: { branches?: readonly Branch[]; sessions?: readonly Session[] },
   touched: PartitionTouched
 ): DataMaps {
   let maps = prev;
 
   let branchById = maps.branchById;
-  for (const branch of snapshot.branches) {
+  for (const branch of rows.branches ?? []) {
     if (branch.archived || branchById.has(branch.branch_id)) continue;
     if (touched('branches', branch.branch_id)) continue;
     if (branchById === maps.branchById) branchById = new Map(branchById);
@@ -723,37 +714,73 @@ export function applyBoardPartition(
   }
   if (branchById !== maps.branchById) maps = { ...maps, branchById };
 
-  const onRemovedBranch = (branchId: string | null | undefined) =>
-    !!branchId && !maps.branchById.has(branchId) && touched('branches', branchId);
-
+  const inserts: Session[] = [];
+  for (const session of rows.sessions ?? []) {
+    if (session.archived || maps.sessionById.has(session.session_id)) continue;
+    if (
+      touched('sessions', session.session_id) ||
+      isOnRemovedBranch(maps, session.branch_id, touched)
+    )
+      continue;
+    inserts.push(session);
+  }
+  if (inserts.length === 0) return maps;
+  if (inserts.length > INCREMENTAL_SESSION_FILL_LIMIT) {
+    // One O(n) rebuild instead of a map copy per row (a user-scope read can
+    // insert thousands). Present rows are passed through unchanged;
+    // `buildSessionMaps` recomputes buckets and remote surrogates and reuses
+    // every unchanged reference.
+    const { sessionById, sessionsByBranch } = buildSessionMaps(
+      [...maps.sessionById.values(), ...inserts],
+      { sessionById: maps.sessionById, sessionsByBranch: maps.sessionsByBranch }
+    );
+    return { ...maps, sessionById, sessionsByBranch };
+  }
   // Insert remote-create sources after their targets so the surrogate
   // projection in `applySessionPatchToMaps` can find the target bucket.
-  const sessions = [...snapshot.sessions].sort(
+  inserts.sort(
     (a, b) =>
       Number(!!a.remote_relationships?.as_source?.length) -
       Number(!!b.remote_relationships?.as_source?.length)
   );
-  for (const session of sessions) {
-    if (session.archived || maps.sessionById.has(session.session_id)) continue;
-    if (touched('sessions', session.session_id) || onRemovedBranch(session.branch_id)) continue;
-    maps = applySessionPatchToMaps(maps, session);
-  }
+  for (const session of inserts) maps = applySessionPatchToMaps(maps, session);
+  return maps;
+}
+
+/** Above this many new sessions, a fill rebuilds the session maps once. */
+const INCREMENTAL_SESSION_FILL_LIMIT = 64;
+
+function isOnRemovedBranch(
+  maps: DataMaps,
+  branchId: string | null | undefined,
+  touched: PartitionTouched
+): boolean {
+  return !!branchId && !maps.branchById.has(branchId) && touched('branches', branchId);
+}
+
+/**
+ * Fill-only merge of a board partition snapshot: branches and sessions through
+ * `applyEntityFill`, then board objects and cards under the same rules (rows on
+ * a touched-and-absent branch are skipped). The full board record replaces the
+ * lean one unless `boards:<id>` was touched. Comments are global and loaded
+ * before first paint, so they are not part of a partition.
+ */
+export function applyBoardPartition(
+  prev: DataMaps,
+  snapshot: BoardPartitionSnapshot,
+  touched: PartitionTouched
+): DataMaps {
+  let maps = applyEntityFill(prev, snapshot, touched);
 
   for (const boardObject of snapshot.boardObjects ?? []) {
     if (maps.boardObjectById.has(boardObject.object_id)) continue;
-    if (touched('boardObjects', boardObject.object_id) || onRemovedBranch(boardObject.branch_id))
+    if (
+      touched('boardObjects', boardObject.object_id) ||
+      isOnRemovedBranch(maps, boardObject.branch_id, touched)
+    )
       continue;
     maps = upsertBoardObjectInMaps(maps, boardObject, 'create');
   }
-
-  let commentById = maps.commentById;
-  for (const comment of snapshot.comments) {
-    if (commentById.has(comment.comment_id)) continue;
-    if (touched('comments', comment.comment_id) || onRemovedBranch(comment.branch_id)) continue;
-    if (commentById === maps.commentById) commentById = new Map(commentById);
-    commentById.set(comment.comment_id, comment);
-  }
-  if (commentById !== maps.commentById) maps = { ...maps, commentById };
 
   let cardById = maps.cardById;
   for (const card of snapshot.cards) {

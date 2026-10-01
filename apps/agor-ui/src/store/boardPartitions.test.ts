@@ -1,7 +1,6 @@
 import type {
   AgorClient,
   Board,
-  BoardComment,
   BoardEntityObject,
   Branch,
   CardWithType,
@@ -53,8 +52,6 @@ const session = (id: string, branchId: string, overrides: Partial<Session> = {})
   }) as unknown as Session;
 const boardObject = (id: string, branchId: string) =>
   ({ object_id: id, board_id: BOARD, branch_id: branchId }) as BoardEntityObject;
-const comment = (id: string, branchId?: string) =>
-  ({ comment_id: id, board_id: BOARD, branch_id: branchId, content: id }) as BoardComment;
 const card = (id: string) => ({ card_id: id, board_id: BOARD, title: id }) as CardWithType;
 const fullBoard = (overrides: Partial<Board> = {}) =>
   ({
@@ -69,7 +66,6 @@ const snapshotOf = (overrides: Partial<BoardPartitionSnapshot> = {}): BoardParti
   branches: [],
   sessions: [],
   boardObjects: [],
-  comments: [],
   cards: [],
   board: null,
   ...overrides,
@@ -85,7 +81,6 @@ describe('applyBoardPartition (fill-only merge)', () => {
         branches: [branch('br-1')],
         sessions: [session('s-1', 'br-1')],
         boardObjects: [boardObject('o-1', 'br-1')],
-        comments: [comment('c-1')],
         cards: [card('k-1')],
         board: fullBoard(),
       }),
@@ -95,7 +90,6 @@ describe('applyBoardPartition (fill-only merge)', () => {
     expect(next.sessionById.has('s-1')).toBe(true);
     expect(next.sessionsByBranch.get('br-1')?.map((s) => s.session_id)).toEqual(['s-1']);
     expect(next.boardObjectsByBoardId.get(BOARD)?.map((o) => o.object_id)).toEqual(['o-1']);
-    expect(next.commentById.has('c-1')).toBe(true);
     expect(next.cardById.has('k-1')).toBe(true);
     expect(next.boardById.get(BOARD)?.objects).toBeDefined();
   });
@@ -133,7 +127,6 @@ describe('applyBoardPartition (fill-only merge)', () => {
           session('s-orphan', 'br-archived'),
         ],
         boardObjects: [boardObject('o-1', 'br-1'), boardObject('o-orphan', 'br-archived')],
-        comments: [comment('c-1', 'br-1'), comment('c-orphan', 'br-archived')],
         cards: [card('k-1'), card('k-gone')],
       }),
       (collection, id) => touched.has(`${collection}:${id}`)
@@ -141,7 +134,6 @@ describe('applyBoardPartition (fill-only merge)', () => {
     expect([...next.branchById.keys()]).toEqual(['br-1']);
     expect([...next.sessionById.keys()]).toEqual(['s-1']);
     expect([...next.boardObjectById.keys()]).toEqual(['o-1']);
-    expect([...next.commentById.keys()]).toEqual(['c-1']);
     expect([...next.cardById.keys()]).toEqual(['k-1']);
   });
 
@@ -206,7 +198,6 @@ function makePartitionClient(data: {
   branches?: Branch[];
   sessions?: Session[];
   boardObjects?: BoardEntityObject[];
-  comments?: BoardComment[];
   cards?: CardWithType[];
   board?: Board;
 }) {
@@ -224,7 +215,6 @@ function makePartitionClient(data: {
     branches: data.branches ?? [],
     sessions: data.sessions ?? [],
     'board-objects': data.boardObjects ?? [],
-    'board-comments': data.comments ?? [],
     cards: data.cards ?? [],
   };
   const client = {
@@ -274,6 +264,14 @@ describe('loadBoardPartition', () => {
     release();
     await a;
     expect(calls.filter((c) => c === 'sessions')).toHaveLength(1);
+  });
+
+  it('never reads comments: they are global and gated at first paint', async () => {
+    const { client, release, calls } = makePartitionClient({});
+    const load = loadBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true });
+    release();
+    await load;
+    expect(calls).not.toContain('board-comments');
   });
 
   it('skips board objects for callers without member workspace services', async () => {
@@ -405,15 +403,9 @@ describe('board readiness', () => {
     expect(makeBoardReadySelector('board-2')(agorStore.getState())).toBe(false);
   });
 
-  it('treats every board as ready once all six global snapshots have applied', async () => {
-    const collections = [
-      'sessions',
-      'branches',
-      'boardObjects',
-      'cards',
-      'comments',
-      'boards',
-    ] as const;
+  it('treats every board as ready once all five global snapshots have applied', async () => {
+    // Comments are excluded: they are global and gated at first paint.
+    const collections = ['sessions', 'branches', 'boardObjects', 'cards', 'boards'] as const;
     for (const [i, c] of collections.entries()) {
       expect(makeBoardReadySelector('board-2')(agorStore.getState())).toBe(false);
       await runHydration(

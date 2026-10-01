@@ -64,16 +64,40 @@ export type GloballyHydratedCollection =
   | 'branches'
   | 'boardObjects'
   | 'cards'
-  | 'comments'
   | 'boards';
+/** Comments are excluded: they are global and gated at first paint. */
 export const GLOBALLY_HYDRATED_COLLECTIONS: readonly GloballyHydratedCollection[] = [
   'sessions',
   'branches',
   'boardObjects',
   'cards',
-  'comments',
   'boards',
 ];
+
+/**
+ * Completeness flags of the caller's user scope (`userScope.ts`). Each says a
+ * user-scoped set is complete in the store; none says the workspace is loaded.
+ */
+export interface UserScopeMeta {
+  /** Every active session the caller created is in `sessionById`. */
+  mySessionsLoaded: boolean;
+  /** The all-my-sessions read hit its cap; counts are lower bounds ("N+"). */
+  mySessionsTruncated: boolean;
+  /** Every branch my sessions or candidate comment threads reference is present or absent. */
+  homeBranchesLoaded: boolean;
+  /** Every active teammate branch the caller can view is in `branchById`. */
+  teammatesLoaded: boolean;
+  /** Referenced branch ids the server did not return (archived, deleted or invisible). */
+  absentBranchIds: Set<string>;
+}
+
+const INITIAL_USER_SCOPE: UserScopeMeta = {
+  mySessionsLoaded: false,
+  mySessionsTruncated: false,
+  homeBranchesLoaded: false,
+  teammatesLoaded: false,
+  absentBranchIds: new Set(),
+};
 
 /** Load/meta fields that ride alongside the data maps. */
 interface AgorMeta {
@@ -99,6 +123,8 @@ interface AgorMeta {
   /** Collections whose global snapshot has applied at least once. */
   globallyHydrated: Set<GloballyHydratedCollection>;
 }
+
+type AgorMetaWithUserScope = AgorMeta & UserScopeMeta;
 
 /** Store actions: foundational primitives + named branch lifecycle cascades. */
 interface AgorActions {
@@ -152,6 +178,8 @@ interface AgorActions {
   applyMaps: (updater: (prev: DataMaps) => DataMaps) => void;
   /** Set (or clear, with `null`) one board's partition state. */
   setBoardPartition: (boardId: string, state: BoardPartitionState | null) => void;
+  /** Merge user-scope flags; a no-op when nothing changes. */
+  setUserScope: (partial: Partial<UserScopeMeta>) => void;
   /** Forget every board partition (authority transitions). */
   resetBoardPartitions: () => void;
   /** Record that a global snapshot of these collections has applied. */
@@ -162,7 +190,7 @@ interface AgorActions {
   applyBranchHardDeleteCascade: (branchId: string) => void;
 }
 
-export type AgorState = DataMaps & AgorMeta & AgorActions;
+export type AgorState = DataMaps & AgorMetaWithUserScope & AgorActions;
 
 function shallowEqualPartition(a: BoardPartitionState, b: BoardPartitionState): boolean {
   return a.status === b.status && a.authorityScope === b.authorityScope && a.error === b.error;
@@ -206,7 +234,8 @@ function removeRelationshipsToDeletedSessions(
 }
 
 /** Initial meta values — identical to `useAgorData`'s `useState` defaults. */
-const INITIAL_META: AgorMeta = {
+const INITIAL_META: AgorMetaWithUserScope = {
+  ...INITIAL_USER_SCOPE,
   deletedMcpServerIds: new Set(),
   loading: true,
   loadingStage: 'idle',
@@ -233,6 +262,7 @@ export const agorStore = createStore<AgorState>()(
         ...INITIAL_META,
         boardPartitions: new Map(),
         globallyHydrated: new Set(),
+        absentBranchIds: new Set(),
       }),
 
     // Also clear the tenant-specific tool-settings map AND its hydration flag:
@@ -250,6 +280,8 @@ export const agorStore = createStore<AgorState>()(
         // Readiness describes the maps being cleared, so it resets with them.
         boardPartitions: new Map(),
         globallyHydrated: new Set(),
+        ...INITIAL_USER_SCOPE,
+        absentBranchIds: new Set(),
       }),
 
     // Meta setters mirror `useState`'s bail-out: a write equal to the current
@@ -296,6 +328,13 @@ export const agorStore = createStore<AgorState>()(
       if (state === null) next.delete(boardId);
       else next.set(boardId, state);
       set({ boardPartitions: next });
+    },
+    setUserScope: (partial) => {
+      const state = get();
+      const changed = (Object.keys(partial) as (keyof UserScopeMeta)[]).some(
+        (key) => !Object.is(partial[key], state[key])
+      );
+      if (changed) set(partial as Partial<AgorState>);
     },
     resetBoardPartitions: () => {
       if (get().boardPartitions.size > 0) set({ boardPartitions: new Map() });

@@ -67,6 +67,12 @@ import {
   tombstoneSession,
   untombstoneSession,
 } from '../store/realtimeBatch';
+import {
+  MY_SESSIONS_GATED_LIMIT,
+  mySessionsQuery,
+  startUserScope,
+  stopUserScope,
+} from '../store/userScope';
 import { createInitialLoadDebugTimer, isInitialLoadDebugEnabled } from '../utils/initialLoadDebug';
 import { runLatestMCPOAuthStatusRequest } from '../utils/mcpOAuthAttempt';
 import { TOKENS_REFRESHED_EVENT } from '../utils/singleFlightRefresh';
@@ -115,6 +121,18 @@ export type InitialLoadItemKey = (typeof INITIAL_LOAD_ITEMS)[number]['key'];
 // so `sessionById` must never be the source for those. The open session reads
 // them from its full `sessions.get` (the reactive session / settings modal).
 const RECENT_SESSIONS_LIMIT = 50;
+
+// Items the Home first paint gates on. Board objects and cards are only needed
+// to paint a canvas, so on Home they leave the gate and hydrate globally in the
+// background instead. Comments stay gated on every route: Home's "comments for
+// you" rule scans them all.
+const HOME_DEFERRED_ITEMS: ReadonlySet<InitialLoadItemKey> = new Set(['board-objects', 'cards']);
+const ALL_INITIAL_LOAD_KEYS: readonly InitialLoadItemKey[] = INITIAL_LOAD_ITEMS.map(
+  ({ key }) => key
+);
+const HOME_INITIAL_LOAD_KEYS: readonly InitialLoadItemKey[] = ALL_INITIAL_LOAD_KEYS.filter(
+  (key) => !HOME_DEFERRED_ITEMS.has(key)
+);
 
 // One row in the loading checklist. `count` is captured atomically with
 // `done` when each tracked fetch resolves — readers never see a green row
@@ -409,6 +427,11 @@ export function useAgorData(
   // maps stale until manual page refresh).
   const [hasInitiallyFetched, setHasInitiallyFetched] = useState(false);
 
+  // The gated items of the current first-paint load. Home gates on fewer
+  // items than a board route (see HOME_DEFERRED_ITEMS).
+  const [initialLoadPlan, setInitialLoadPlan] =
+    useState<readonly InitialLoadItemKey[]>(ALL_INITIAL_LOAD_KEYS);
+
   // Single-flight guard for reconnect-triggered refetches. Prevents stampedes
   // when the socket flaps (e.g. waking from sleep on a flaky network). The
   // authority key prevents an older identity's flight from blocking the next.
@@ -512,6 +535,7 @@ export function useAgorData(
           debugTimer?.markStage('fetching');
           agorStore.getState().setError(null);
           agorStore.getState().setItemCounts({});
+          setInitialLoadPlan(ALL_INITIAL_LOAD_KEYS);
         }
 
         // Marks a tracked item complete (and captures its count from the
@@ -621,6 +645,25 @@ export function useAgorData(
         // at recent-N, branches are deferred to the board-scoped heavy batch, and
         // BOTH full sets are background-hydrated after the gate opens.
         debugTimer?.startFetchPhase();
+        // Set when the gated page of MY sessions returned fewer rows than its
+        // limit, i.e. it already holds every active session I created.
+        let gatedMineComplete = false;
+        // The global recent slice: the reconnect resync's full set, the
+        // fallback when the user-scoped page is unavailable (an older daemon
+        // rejects `created_by` with `$count:false`), and the standalone default.
+        const recentSessions = () =>
+          client
+            .service('sessions')
+            .find({
+              query: {
+                archived: false,
+                lean: true,
+                $limit: RECENT_SESSIONS_LIMIT,
+                $count: false,
+                $sort: { updated_at: -1 },
+              },
+            })
+            .then((result) => (Array.isArray(result) ? result : result.data) as Session[]);
         const [sessionsList, boardsList, cardTypesList, reposList, usersList] = await Promise.all([
           track(
             'sessions',
@@ -635,23 +678,27 @@ export function useAgorData(
                     $sort: { updated_at: -1 },
                   },
                 })
-              : // Bounded recent slice for first paint. Use find() (a SINGLE page),
-                // NOT findAll(): findAll loops until it has `total` rows, so a small
-                // $limit would still walk the whole table and defeat the cap. The
-                // daemon orders by `updated_at` in SQL (findPage), so this is the
-                // genuinely most-recent N. The FULL set is hydrated below.
-                client
-                  .service('sessions')
-                  .find({
-                    query: {
-                      archived: false,
-                      lean: true,
-                      $limit: RECENT_SESSIONS_LIMIT,
-                      $count: false,
-                      $sort: { updated_at: -1 },
-                    },
-                  })
-                  .then((result) => (Array.isArray(result) ? result : result.data))
+              : authenticatedUserId
+                ? // My newest sessions (user scope, design r3 §3.1), served from
+                  // SQL by `created_by`: correct however busy the rest of the
+                  // workspace is. One page via find() (findAll would walk every
+                  // page). The rest of mine load right after paint (`userScope`).
+                  client
+                    .service('sessions')
+                    .find({ query: mySessionsQuery(authenticatedUserId, MY_SESSIONS_GATED_LIMIT) })
+                    .then((result) => {
+                      const rows = (Array.isArray(result) ? result : result.data) as Session[];
+                      gatedMineComplete = rows.length < MY_SESSIONS_GATED_LIMIT;
+                      return rows;
+                    })
+                    .catch((err) => {
+                      console.warn(
+                        '[useAgorData] my-sessions page failed; using recent slice:',
+                        err
+                      );
+                      return recentSessions();
+                    })
+                : recentSessions()
           ),
           track(
             'boards',
@@ -790,6 +837,10 @@ export function useAgorData(
           ? undefined
           : (resolveDisplayedBoardId(pathname, boardsMap, interimBranchById, interimSessionById) ??
             undefined);
+        // Home (no displayed board): board objects and cards leave the gate and
+        // hydrate globally in the background after first paint.
+        const deferAnnotations = !silent && !boardScope;
+        if (deferAnnotations) setInitialLoadPlan(HOME_INITIAL_LOAD_KEYS);
 
         // ── Essential gated fetches — HEAVY + board-scoped batch ────────
         // Scoped to the first-paint board when resolved (board_id pushes to SQL
@@ -836,40 +887,43 @@ export function useAgorData(
                 },
               })
             : Promise.resolve([] as Session[]),
+          deferAnnotations
+            ? Promise.resolve(null)
+            : track(
+                'board-objects',
+                // The daemon intentionally keeps the whole board-objects service at
+                // the MEMBER floor (the rows carry editable canvas layout). A global
+                // viewer can still read the workspace shell and Marketplace, so an
+                // expected authorization failure here is not an essential bootstrap
+                // failure. Keep the collection empty and don't subscribe below.
+                canUseMemberWorkspaceServices
+                  ? client.service('board-objects').findAll({
+                      query: {
+                        $limit: PAGINATION.DEFAULT_LIMIT,
+                        ...(boardScope ? { board_id: boardScope } : {}),
+                      },
+                    })
+                  : Promise.resolve([])
+              ),
+          // Comments are GLOBAL and gated on every route: Home's comment rule
+          // and the mobile bell scan them all, so they are never board-scoped.
           track(
-            'board-objects',
-            // The daemon intentionally keeps the whole board-objects service at
-            // the MEMBER floor (the rows carry editable canvas layout). A global
-            // viewer can still read the workspace shell and Marketplace, so an
-            // expected authorization failure here is not an essential bootstrap
-            // failure. Keep the collection empty and don't subscribe below.
-            canUseMemberWorkspaceServices
-              ? client.service('board-objects').findAll({
+            'board-comments',
+            client
+              .service('board-comments')
+              .findAll({ query: { $limit: PAGINATION.DEFAULT_LIMIT } })
+          ),
+          deferAnnotations
+            ? Promise.resolve(null)
+            : track(
+                'cards',
+                client.service('cards').findAll({
                   query: {
                     $limit: PAGINATION.DEFAULT_LIMIT,
                     ...(boardScope ? { board_id: boardScope } : {}),
                   },
                 })
-              : Promise.resolve([])
-          ),
-          track(
-            'board-comments',
-            client.service('board-comments').findAll({
-              query: {
-                $limit: PAGINATION.DEFAULT_LIMIT,
-                ...(boardScope ? { board_id: boardScope } : {}),
-              },
-            })
-          ),
-          track(
-            'cards',
-            client.service('cards').findAll({
-              query: {
-                $limit: PAGINATION.DEFAULT_LIMIT,
-                ...(boardScope ? { board_id: boardScope } : {}),
-              },
-            })
-          ),
+              ),
           // Displayed board's FULL record (with objects/custom_css) so its
           // zones/text/markdown paint at first load — the gated boards fetch
           // above is lean. Only when a board is actually displayed; Home and
@@ -908,21 +962,19 @@ export function useAgorData(
 
         // Build board object Maps for efficient lookups (shared with the
         // background full-hydration pass so the two index builds stay identical)
-        const {
-          boardObjectById: boardObjectsMap,
-          boardObjectsByBoardId: boardObjectsByBoardMap,
-          boardObjectByBranchId: boardObjectByBranchMap,
-          boardObjectByCardId: boardObjectByCardMap,
-        } = buildBoardObjectMaps(boardObjectsList);
-        // Build comment Map for efficient lookups
+        // Deferred (Home) board-object and card slices are left untouched by
+        // the apply below; their background hydrations own them.
+        const annotationMaps = deferAnnotations
+          ? {}
+          : (() => {
+              const cardsMap = new Map<string, CardWithType>();
+              for (const card of cardsList ?? []) cardsMap.set(card.card_id, card);
+              return { ...buildBoardObjectMaps(boardObjectsList ?? []), cardById: cardsMap };
+            })();
+        // Build comment Map for efficient lookups (always the global set)
         const commentsMap = new Map<string, BoardComment>();
         for (const comment of commentsList) {
           commentsMap.set(comment.comment_id, comment);
-        }
-        // Build card Map for efficient lookups
-        const cardsMap = new Map<string, CardWithType>();
-        for (const card of cardsList) {
-          cardsMap.set(card.card_id, card);
         }
 
         // Replace the displayed board's LEAN row with its FULL record so the
@@ -970,12 +1022,8 @@ export function useAgorData(
           sessionById: sessionsById,
           sessionsByBranch: sessionsByBranchId,
           boardById: boardsMap,
-          boardObjectById: boardObjectsMap,
-          boardObjectsByBoardId: boardObjectsByBoardMap,
-          boardObjectByBranchId: boardObjectByBranchMap,
-          boardObjectByCardId: boardObjectByCardMap,
+          ...annotationMaps,
           commentById: commentsMap,
-          cardById: cardsMap,
           cardTypeById: cardTypesMap,
           repoById: reposMap,
           branchById: branchesMap,
@@ -1017,10 +1065,11 @@ export function useAgorData(
         // snapshot is discarded and refetched; we never overlay a racy snapshot.
 
         const hydrateGlobalSets = () => {
-          // Sessions + branches: now ALWAYS bounded at first paint (recent-N /
-          // board-scoped), so hydrate them on every non-silent load (silent
+          // Sessions + branches: now ALWAYS bounded at first paint (my newest
+          // N / board-scoped), so hydrate them on every non-silent load (silent
           // reconnect already fetched them full above). repos / users / boards /
-          // card-types stay global at first paint, so they need no top-up.
+          // card-types / comments stay global at first paint, so they need no
+          // top-up.
           //
           // Sessions and branches hydrate on INDEPENDENT loops (separate fetches,
           // separate revision guards, separate generation tokens). Coupling them
@@ -1094,15 +1143,17 @@ export function useAgorData(
             );
           }
 
-          // Board objects / cards / comments: only board-scoped at first paint when
-          // a board was resolved (`boardScope` set, non-silent only — silent
-          // reconnect already refetches everything global). Top up to the global set.
+          // Board objects / cards: board-scoped at first paint when a board was
+          // resolved, and not fetched at all on Home (deferred out of the gate).
+          // Either way, hydrate the global set in the background (non-silent only —
+          // silent reconnect already refetches everything global). Comments need
+          // no top-up: the gate always loads the global set.
           //
-          // Board objects / cards / comments also hydrate on INDEPENDENT loops so
-          // churn in one (e.g. rapid card moves) can't starve another's apply. Each
-          // global snapshot is a superset of its board-scoped first-paint slice, so
-          // no overlay is needed; the quiet-window guard prevents clobber/resurrect.
-          if (boardScope) {
+          // Board objects and cards hydrate on INDEPENDENT loops so churn in one
+          // (e.g. rapid card moves) can't starve the other's apply. Each global
+          // snapshot is a superset of its board-scoped first-paint slice, so no
+          // overlay is needed; the quiet-window guard prevents clobber/resurrect.
+          if (!silent) {
             if (canUseMemberWorkspaceServices) {
               void runAuthorityHydration(
                 'board-objects',
@@ -1133,19 +1184,6 @@ export function useAgorData(
                 agorStore.getState().applyMaps((prev) => ({
                   ...prev,
                   cardById: buildById(allCards, 'card_id', prev.cardById),
-                }))
-            );
-            void runAuthorityHydration(
-              'board-comments',
-              ['comments'],
-              () =>
-                client
-                  .service('board-comments')
-                  .findAll({ query: { $limit: PAGINATION.DEFAULT_LIMIT } }),
-              (allComments) =>
-                agorStore.getState().applyMaps((prev) => ({
-                  ...prev,
-                  commentById: buildById(allComments, 'comment_id', prev.commentById),
                 }))
             );
           }
@@ -1183,6 +1221,17 @@ export function useAgorData(
           hydrateGlobalSets();
         }
 
+        // User scope (design r3 §3): the rest of my sessions, my branches, every
+        // teammate I can view, and the branches my sessions and comment
+        // threads reference. Re-run fill-only on every silent resync so the
+        // scope recovers anything missed while disconnected.
+        if (authenticatedUserId) {
+          void startUserScope(client, {
+            userId: authenticatedUserId,
+            gatedMineComplete: !silent && gatedMineComplete,
+          });
+        }
+
         // Silent refetch succeeded — clear the retry flag so future token
         // refreshes don't trigger another wasted re-fetch.
         if (silent) {
@@ -1218,6 +1267,7 @@ export function useAgorData(
       }
     },
     [
+      authenticatedUserId,
       authorityScopeKey,
       canListUsers,
       canUseMemberWorkspaceServices,
@@ -1253,6 +1303,7 @@ export function useAgorData(
 
     cancelAllHydrations();
     releaseOpenedTranscriptPrefetch();
+    stopUserScope();
     refetchInflightRef.current = null;
     lastSilentFetchFailedRef.current = false;
 
@@ -1312,6 +1363,7 @@ export function useAgorData(
     discardRealtimeNow();
     cancelAndFailAllHydrations();
     releaseOpenedTranscriptPrefetch();
+    stopUserScope();
     agorStore.getState().resetMaps();
     setHasInitiallyFetched(false);
   }, [client, releaseOpenedTranscriptPrefetch]);
@@ -1323,6 +1375,7 @@ export function useAgorData(
     () => () => {
       cancelAllHydrations();
       releaseOpenedTranscriptPrefetch();
+      stopUserScope();
     },
     [releaseOpenedTranscriptPrefetch]
   );
@@ -1788,15 +1841,17 @@ export function useAgorData(
   // identity is stable across renders where no per-item count changed.
   const initialLoadItems = useMemo<InitialLoadItem[]>(
     () =>
-      INITIAL_LOAD_ITEMS.map(({ key, label }) => {
-        const count = storeState.itemCounts[key];
-        return { key, label, done: count !== undefined, count: count ?? 0 };
-      }),
-    [storeState.itemCounts]
+      INITIAL_LOAD_ITEMS.filter(({ key }) => initialLoadPlan.includes(key)).map(
+        ({ key, label }) => {
+          const count = storeState.itemCounts[key];
+          return { key, label, done: count !== undefined, count: count ?? 0 };
+        }
+      ),
+    [initialLoadPlan, storeState.itemCounts]
   );
 
-  const initialLoadComplete = INITIAL_LOAD_ITEMS.every(
-    ({ key }) => storeState.itemCounts[key] !== undefined
+  const initialLoadComplete = initialLoadPlan.every(
+    (key) => storeState.itemCounts[key] !== undefined
   );
 
   return {

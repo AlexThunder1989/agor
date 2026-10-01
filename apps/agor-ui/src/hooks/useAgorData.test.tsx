@@ -286,11 +286,13 @@ describe('useAgorData — socket-event bailouts', () => {
     try {
       await waitForInitialLoad(result);
 
-      for (const service of ['branches', 'sessions', 'board-objects', 'board-comments', 'cards']) {
+      for (const service of ['branches', 'sessions', 'board-objects', 'cards']) {
         expect(fetchArguments(service, 'findAll')).toContainEqual({
           query: expect.objectContaining({ board_id: boardId }),
         });
       }
+      // Comments are global on every route (design r3 §2), never board-scoped.
+      expect(fetchArguments('board-comments', 'findAll')).toEqual([{ query: { $limit: 10000 } }]);
     } finally {
       window.history.pushState({}, '', '/');
     }
@@ -1502,5 +1504,134 @@ describe('useAgorData — opened session transcript priority', () => {
 
     expect(transcriptPrefetch.prefetchOpenedTranscript).not.toHaveBeenCalled();
     await waitFor(() => expect(fetchCount('sessions', 'findAll')).toBe(1));
+  });
+
+  it('starts the user scope without waiting for the opened transcript', async () => {
+    const session = makeSession({ session_id: OPEN_ID, created_by: 'user-me' });
+    const { client, fetchArguments, fetchCount } = makeMockClient({ 'sessions:find': [session] });
+    const prefetch = deferredPrefetch();
+
+    const { result } = renderHook(() =>
+      useAgorData(client, {
+        authenticatedUserId: 'user-me',
+        authenticatedUserRole: 'member',
+        authGeneration: 1,
+        connectionReady: true,
+        directSessionId: OPEN_SHORT,
+      })
+    );
+    await waitForInitialLoad(result);
+
+    // The global snapshots wait for the transcript; my teammates (U3) do not.
+    await waitFor(() =>
+      expect(fetchArguments('branches', 'find')).toContainEqual({
+        query: { teammate: true, archived: false, $limit: 1000 },
+      })
+    );
+    expect(fetchCount('sessions', 'findAll')).toBe(0);
+    await waitFor(() => expect(agorStore.getState().teammatesLoaded).toBe(true));
+
+    await act(async () => prefetch.resolve());
+    await waitFor(() => expect(fetchCount('sessions', 'findAll')).toBe(1));
+  });
+});
+
+describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
+  const authority = {
+    authenticatedUserId: 'user-me',
+    authenticatedUserRole: 'member',
+    authGeneration: 1,
+    connectionReady: true,
+  };
+  const never = () => new Promise(() => {});
+
+  it('gates Home on my newest sessions and global comments, not on board objects or cards', async () => {
+    window.history.pushState({}, '', '/');
+    const mine = makeSession({ session_id: 's-mine', created_by: 'user-me' });
+    const { client, fetchArguments, onFetch } = makeMockClient({ 'sessions:find': [mine] });
+    // Annotations never resolve: Home must still open its gate.
+    onFetch('board-objects', 'findAll', never);
+    onFetch('cards', 'findAll', never);
+    // Hold the global sessions hydration so the first-paint state is observed.
+    onFetch('sessions', 'findAll', never);
+    const { result } = renderHook(() => useAgorData(client, authority));
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+      expect(result.current.initialLoadComplete).toBe(true);
+    });
+    // The gated page is MY sessions; it replaces the global recent slice.
+    expect(fetchArguments('sessions', 'find')[0]).toEqual({
+      query: {
+        created_by: 'user-me',
+        archived: false,
+        $sort: { updated_at: -1 },
+        $limit: 200,
+        $count: false,
+      },
+    });
+    expect(agorStore.getState().sessionById.has('s-mine')).toBe(true);
+    const gated = result.current.initialLoadItems.map((item) => item.key);
+    expect(gated).toContain('board-comments');
+    expect(gated).not.toContain('cards');
+    expect(gated).not.toContain('board-objects');
+    expect(fetchArguments('board-comments', 'findAll')).toEqual([{ query: { $limit: 10000 } }]);
+    // The deferred collections hydrate globally in the background.
+    expect(fetchArguments('board-objects', 'findAll')).toEqual([{ query: { $limit: 10000 } }]);
+    // One gated row < 200: the gated page already holds all of my sessions.
+    await waitFor(() => expect(agorStore.getState().mySessionsLoaded).toBe(true));
+  });
+
+  it('degrades to the global recent slice when an older daemon rejects the my-sessions page', async () => {
+    window.history.pushState({}, '', '/');
+    const recent = makeSession({ session_id: 's-recent' });
+    const { client, fetchArguments, onFetch } = makeMockClient({ 'sessions:find': [recent] });
+    // Call 1 is the my-sessions page; call 2 the fallback recent slice.
+    onFetch('sessions', 'find', (call) =>
+      call === 1 ? Promise.reject(new Error('400 $count unsupported')) : undefined
+    );
+    onFetch('sessions', 'findAll', never);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { result } = renderHook(() => useAgorData(client, authority));
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+        expect(result.current.initialLoadComplete).toBe(true);
+      });
+      expect(result.current.error).toBeNull();
+      expect(fetchArguments('sessions', 'find')[1]).toEqual({
+        query: {
+          archived: false,
+          lean: true,
+          $limit: 50,
+          $count: false,
+          $sort: { updated_at: -1 },
+        },
+      });
+      expect(agorStore.getState().sessionById.has('s-recent')).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('still gates a board route on its board objects and cards', async () => {
+    window.history.pushState({}, '', '/b/displayed/');
+    const gate = deferred();
+    const { client, onFetch } = makeMockClient({
+      boards: [{ board_id: 'board-D', slug: 'displayed', name: 'Displayed' }],
+    });
+    onFetch('cards', 'findAll', (call) => (call === 1 ? gate.promise : undefined));
+    try {
+      const { result } = renderHook(() => useAgorData(client, authority));
+      await waitFor(() =>
+        expect(result.current.initialLoadItems.find((i) => i.key === 'boards')?.done).toBe(true)
+      );
+      expect(result.current.initialLoadComplete).toBe(false);
+      expect(result.current.initialLoadItems.map((item) => item.key)).toContain('cards');
+      gate.resolve();
+      await waitFor(() => expect(result.current.initialLoadComplete).toBe(true));
+    } finally {
+      gate.resolve();
+      window.history.pushState({}, '', '/');
+    }
   });
 });
