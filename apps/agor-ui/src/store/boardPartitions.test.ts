@@ -206,6 +206,7 @@ function makePartitionClient(data: {
     release = resolve;
   });
   const calls: string[] = [];
+  const queries = new Map<string, unknown>();
   const respond = async <T>(name: string, value: T) => {
     calls.push(name);
     await gate;
@@ -219,11 +220,14 @@ function makePartitionClient(data: {
   };
   const client = {
     service: (name: string) => ({
-      findAll: vi.fn(() => respond(name, byService[name])),
+      findAll: vi.fn((args?: { query?: unknown }) => {
+        queries.set(name, args?.query);
+        return respond(name, byService[name]);
+      }),
       get: vi.fn(() => respond(`${name}:get`, data.board ?? fullBoard())),
     }),
   } as unknown as AgorClient;
-  return { client, release: () => release(), calls };
+  return { client, release: () => release(), calls, queries };
 }
 
 describe('loadBoardPartition', () => {
@@ -264,6 +268,14 @@ describe('loadBoardPartition', () => {
     release();
     await a;
     expect(calls.filter((c) => c === 'sessions')).toHaveLength(1);
+  });
+
+  it("reads the board's sessions as lean rows", async () => {
+    const { client, release, queries } = makePartitionClient({});
+    const load = loadBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true });
+    release();
+    await load;
+    expect(queries.get('sessions')).toMatchObject({ board_id: BOARD, archived: false, lean: true });
   });
 
   it('never reads comments: they are global and gated at first paint', async () => {

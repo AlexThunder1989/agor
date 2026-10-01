@@ -570,6 +570,71 @@ describe('SessionsService.find — lean list projection', () => {
     }
   );
 
+  dbTest('composes with created_by and session_id $in on the SQL page path', async ({ db }) => {
+    const user = await new UsersRepository(db).create({
+      user_id: generateId(),
+      email: `lean-scope-${generateId()}@example.invalid`,
+      role: 'member',
+    });
+    const visibleBranch = await createBranchOnBoard(db, null, user.user_id);
+    const hiddenBranch = await createBranchOnBoard(db, null);
+    const mine = await createSession(db, visibleBranch, {
+      created_by: user.user_id,
+      custom_context: heavyContext,
+    });
+    const theirs = await createSession(db, visibleBranch, { custom_context: heavyContext });
+    // Mine, but on a branch I can't see: lean never widens visibility.
+    const hidden = await createSession(db, hiddenBranch, {
+      created_by: user.user_id,
+      custom_context: heavyContext,
+    });
+    const app = feathers<{ sessions: SessionsService }>();
+    app.use('sessions', createService(db));
+    app.service('sessions').hooks({
+      before: {
+        all: [typedValidateQuery(sessionQueryValidator)],
+        find: [scopeFindToAccessibleSessionsSql()],
+      },
+    });
+    const findAllSpy = vi.spyOn(SessionRepository.prototype, 'findAll');
+    const pageSpy = vi.spyOn(SessionRepository.prototype, 'findPage');
+    try {
+      for (const provider of ['socketio', 'rest']) {
+        const lean = provider === 'rest' ? 'true' : true;
+        const $count = provider === 'rest' ? 'false' : false;
+        const byCreator = await app.service('sessions').find({
+          provider,
+          user,
+          query: {
+            created_by: user.user_id,
+            archived: false,
+            $sort: { updated_at: -1 },
+            $limit: 200,
+            $count,
+            lean,
+          },
+        });
+        expect(ids(byCreator)).toEqual([mine]);
+        expect(contextsById(byCreator).get(mine)).toEqual(leanContext);
+
+        const byIds = await app.service('sessions').find({
+          provider,
+          user,
+          query: { session_id: { $in: [mine, theirs, hidden] }, $count, lean },
+        });
+        expect(ids(byIds)).toEqual([mine, theirs].sort());
+        for (const context of contextsById(byIds).values()) {
+          expect(context).toEqual(leanContext);
+        }
+      }
+      expect(pageSpy).toHaveBeenCalledTimes(4);
+      expect(findAllSpy).not.toHaveBeenCalled();
+    } finally {
+      findAllSpy.mockRestore();
+      pageSpy.mockRestore();
+    }
+  });
+
   dbTest('applies to the generic find path and never to get', async ({ db }) => {
     const service = createService(db);
     const board = await createBoard(db);

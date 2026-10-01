@@ -117,11 +117,13 @@ describe('user scope', () => {
     await startUserScope(client, { userId: ME, gatedMineComplete: false });
     const reads = calls.filter((c) => c.service === 'sessions');
     expect(reads).toHaveLength(1);
-    expect(reads[0].query).toMatchObject({
+    expect(reads[0].query).toEqual({
       created_by: ME,
       archived: false,
+      $sort: { updated_at: -1 },
       $limit: MY_SESSIONS_FULL_LIMIT,
       $count: false,
+      lean: true,
     });
     expect(agorStore.getState().sessionById.size).toBe(MY_SESSIONS_FULL_LIMIT);
     expect(flags().mySessionsTruncated).toBe(true);

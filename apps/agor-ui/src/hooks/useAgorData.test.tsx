@@ -1566,6 +1566,7 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
         $sort: { updated_at: -1 },
         $limit: 200,
         $count: false,
+        lean: true,
       },
     });
     expect(agorStore.getState().sessionById.has('s-mine')).toBe(true);
