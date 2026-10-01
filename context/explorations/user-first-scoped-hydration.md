@@ -13,6 +13,14 @@ Status: design, revision 3 (2026-10-01), with Kamil's decisions applied (see bel
 - **Base:** `main`, which now contains the agent-first Home stack (#2905 → #2906 → #2901 → #2907) and lean PR #2887. The analysis below was done on the stack tip `6f8f538b`.
 - **Delivery:** one branch and one PR, reviewable commit by commit.
 - **Implementation status:** Step 1 (1.1–1.5) is implemented and rebased onto `main`. Session list reads go through `sessionListQuery` and are lean. The previous revision's 1.3 (edits to the old Home sections) is abandoned.
+- **Step 1 review fixes (2026-10-01):** contracts that changed after review, in the code:
+  - Every load (first paint, user scope, partitions) is fenced by a **load lifetime** (`store/loadLifetime.ts`: authority + cancellation epoch, captured before the first await). The user scope and partition records carry the starting load's lifetime.
+  - The first-paint/resync wholesale apply keeps every id touched by a live event during the load; a gated page that raced my own sessions never skips U1.
+  - Partition entries are owned by their load and released on cancellation; no fill-only load applies across a wholesale replacement (a retryable error instead).
+  - References: subscription before the first read, early pass for every gated page, at most 3 `$in` reads in flight, a run-owned retry queue, absent marks revalidated per run.
+  - Older daemon: rejected (400) or ignored keys put the scope in a terminal degraded state (`userScopeDegraded`); until 3.3 the global snapshots complete the flags (§10.2).
+  - Caps are visible: `mySessionsTruncated` renders "N+" and suppresses "All caught up"; the teammate read reports its real `total` and sets `teammatesTruncated`.
+  - On `/s/`, only U1 waits for the opened transcript.
 
 Paths are repo-relative: `UI` = `apps/agor-ui/src`, `D` = `apps/agor-daemon/src`, `core` = `packages/core/src`. `UI` line numbers refer to the stack tip. Daemon and core line numbers refer to `main`; the stack changes only `core/types/user.ts` there.
 
@@ -529,7 +537,7 @@ Sandbox baselines: heap 121 MB after GC (340 MB pre-GC); blocking global session
 - **What breaks:** an old daemon rejects `created_by` with `$count:false` (400), `$in`, and the `teammate`/`created_by` branch keys, and has no `search`.
 - **Requirement:** every new read is non-fatal.
   - The gated my-sessions read falls back to the global recent slice.
-  - User-scope failures leave flags unset, so Home keeps its loading state.
+  - An unsupported user-scope read (400, or rows that violate its filter) degrades the scope; the global snapshots then complete its flags (Steps 1–2 only). Other failures retry (references) or wait for the global snapshots too.
   - Teammates fall back to the teammates found in loaded branches.
   - Search falls back to local hits.
   - None of these may fail the first-paint gate.
