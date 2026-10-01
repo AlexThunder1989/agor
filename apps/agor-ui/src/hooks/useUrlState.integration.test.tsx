@@ -29,6 +29,7 @@ import {
 } from '../contexts/CanvasNavigationContext';
 import { agorStore } from '../store/agorStore';
 import { markBoardPartitionLoaded } from '../store/boardPartitions';
+import { captureLoadLifetime } from '../store/loadLifetime';
 import { setRealtimeAuthorityScope } from '../store/realtimeBatch';
 import { type UseUrlStateOptions, useUrlState } from './useUrlState';
 
@@ -376,7 +377,7 @@ describe('useUrlState — /s/ links to a board whose branch is not loaded', () =
 
       // The partition lands: the card now exists, so the recenter re-runs.
       act(() => {
-        markBoardPartitionLoaded(BOARD_ID);
+        markBoardPartitionLoaded(BOARD_ID, captureLoadLifetime()!);
       });
       act(() => {
         vi.advanceTimersByTime(100);

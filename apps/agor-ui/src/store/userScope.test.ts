@@ -1,8 +1,9 @@
 import type { AgorClient, BoardComment, Branch, Session } from '@agor-live/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetHydrationRevisions } from './agorHydration';
+import { cancelAllHydrations, resetHydrationRevisions } from './agorHydration';
 import { sessionCreated } from './agorRealtimeActions';
 import { agorStore } from './agorStore';
+import { captureLoadLifetime } from './loadLifetime';
 import { discardRealtimeNow, setRealtimeAuthorityScope } from './realtimeBatch';
 import {
   MY_SESSIONS_FULL_LIMIT,
@@ -13,6 +14,12 @@ import {
 
 const AUTHORITY = 'me:member:1';
 const ME = 'user-me';
+/** The current load lifetime (what `useAgorData` passes for its load). */
+const lifetime = () => {
+  const current = captureLoadLifetime();
+  if (!current) throw new Error('no authority');
+  return current;
+};
 
 const session = (id: string, branchId: string, overrides: Partial<Session> = {}) =>
   ({
@@ -96,7 +103,7 @@ afterEach(() => {
 describe('user scope', () => {
   it('skips the full read when the gated page already held all of my sessions', async () => {
     const { client, calls } = makeClient({});
-    await startUserScope(client, { userId: ME, gatedMineComplete: true });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: true });
     expect(calls.filter((c) => c.service === 'sessions')).toEqual([]);
     expect(flags()).toEqual({
       mySessionsLoaded: true,
@@ -114,7 +121,7 @@ describe('user scope', () => {
       mine: () => rows,
       byIds: () => [branch('br-1')],
     });
-    await startUserScope(client, { userId: ME, gatedMineComplete: false });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: false });
     const reads = calls.filter((c) => c.service === 'sessions');
     expect(reads).toHaveLength(1);
     expect(reads[0].query).toEqual({
@@ -143,7 +150,7 @@ describe('user scope', () => {
       mine: () => rows,
       byIds: (ids) => ids.map((id) => branch(id)),
     });
-    await startUserScope(client, { userId: ME, gatedMineComplete: false });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: false });
     const state = agorStore.getState();
     expect(state.sessionById.get('s-0')).toBe(live);
     expect(state.sessionById.size).toBe(500);
@@ -159,7 +166,7 @@ describe('user scope', () => {
     const { client } = makeClient({
       teammates: () => [branch('mate', { name: 'stale' }), branch('mate-2')],
     });
-    await startUserScope(client, { userId: ME, gatedMineComplete: true });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: true });
     expect(agorStore.getState().branchById.get('mate')).toBe(live);
     expect(agorStore.getState().branchById.has('mate-2')).toBe(true);
     expect(flags().teammatesLoaded).toBe(true);
@@ -172,7 +179,7 @@ describe('user scope', () => {
       // The server returns all but br-7 (archived, deleted or invisible).
       byIds: (ids) => ids.filter((id) => id !== 'br-7').map((id) => branch(id)),
     });
-    await startUserScope(client, { userId: ME, gatedMineComplete: false });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: false });
     const idReads = calls.filter((c) => c.query.branch_id);
     expect(idReads.map((c) => (c.query.branch_id as { $in: string[] }).$in.length)).toEqual([
       200, 50,
@@ -198,7 +205,11 @@ describe('user scope', () => {
       },
       byIds: (ids) => ids.map((id) => branch(id)),
     });
-    const run = startUserScope(client, { userId: ME, gatedMineComplete: true });
+    const run = startUserScope(client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: true,
+    });
     await vi.waitFor(() => expect(agorStore.getState().branchById.has('br-ref')).toBe(true));
     expect(calls.some((c) => c.query.branch_id)).toBe(true);
     expect(flags().homeBranchesLoaded).toBe(false);
@@ -232,7 +243,7 @@ describe('user scope', () => {
   it('ensures new references once, batched, and clears an absent mark when the branch arrives', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const { client, calls } = makeClient({ byIds: (ids) => ids.map((id) => branch(id)) });
-    await startUserScope(client, { userId: ME, gatedMineComplete: true });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: true });
     expect(flags().homeBranchesLoaded).toBe(true);
 
     sessionCreated(session('new-1', 'br-new'));
@@ -259,7 +270,7 @@ describe('user scope', () => {
     const { client } = makeClient({
       mine: () => Promise.reject(new Error('400 created_by unsupported')),
     });
-    await startUserScope(client, { userId: ME, gatedMineComplete: false });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: false });
     expect(flags()).toEqual({
       mySessionsLoaded: false,
       mySessionsTruncated: false,
@@ -279,7 +290,11 @@ describe('user scope', () => {
         return [session('s-1', 'br-1')];
       },
     });
-    const run = startUserScope(client, { userId: ME, gatedMineComplete: false });
+    const run = startUserScope(client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: false,
+    });
     setRealtimeAuthorityScope('someone-else:member:1');
     release();
     await run;
@@ -297,9 +312,51 @@ describe('user scope', () => {
     });
   });
 
+  it('rejects a lifetime that was cancelled before the run started', async () => {
+    const { client, calls } = makeClient({});
+    const stale = lifetime();
+    cancelAllHydrations(); // an unmount/remount, same authority
+    await startUserScope(client, { userId: ME, lifetime: stale, gatedMineComplete: true });
+    expect(calls).toEqual([]);
+    expect(flags().mySessionsLoaded).toBe(false);
+  });
+
+  it('drops a run cancelled mid-read even when the authority is the same again', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { client } = makeClient({
+      mine: async () => {
+        await gate;
+        return [session('s-1', 'br-1')];
+      },
+      teammates: async () => {
+        await gate;
+        return [branch('mate')];
+      },
+    });
+    const run = startUserScope(client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: false,
+    });
+    cancelAllHydrations();
+    release();
+    await run;
+    expect(agorStore.getState().sessionById.size).toBe(0);
+    expect(agorStore.getState().branchById.size).toBe(0);
+    expect(flags()).toEqual({
+      mySessionsLoaded: false,
+      mySessionsTruncated: false,
+      teammatesLoaded: false,
+      homeBranchesLoaded: false,
+    });
+  });
+
   it('keeps flags true while a silent-resync re-run is in flight', async () => {
     const { client } = makeClient({});
-    await startUserScope(client, { userId: ME, gatedMineComplete: true });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: true });
     expect(flags().homeBranchesLoaded).toBe(true);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -311,7 +368,11 @@ describe('user scope', () => {
         return [];
       },
     });
-    const rerun = startUserScope(slow.client, { userId: ME, gatedMineComplete: false });
+    const rerun = startUserScope(slow.client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: false,
+    });
     expect(flags()).toMatchObject({ mySessionsLoaded: true, homeBranchesLoaded: true });
     release();
     await rerun;

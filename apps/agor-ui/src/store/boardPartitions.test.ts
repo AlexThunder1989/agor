@@ -11,6 +11,7 @@ import {
   beginPartitionLoad,
   bumpFirstPaintMergeRevisions,
   bumpRevision,
+  cancelAllHydrations,
   endPartitionLoad,
   resetHydrationRevisions,
   runHydration,
@@ -25,6 +26,7 @@ import {
   markBoardPartitionLoaded,
   retryBoardPartition,
 } from './boardPartitions';
+import { captureLoadLifetime } from './loadLifetime';
 import {
   discardRealtimeNow,
   enqueueSessionPatch,
@@ -306,6 +308,15 @@ describe('loadBoardPartition', () => {
     expect(agorStore.getState().boardPartitions.get(BOARD)?.authorityScope).toBe(AUTHORITY);
   });
 
+  it('drops the apply when the load is cancelled, even under the same authority', async () => {
+    const { client, release } = makePartitionClient({ sessions: [session('s-1', 'br-1')] });
+    const load = loadBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true });
+    cancelAllHydrations(); // unmount + remount of the data owner
+    release();
+    await load;
+    expect(agorStore.getState().sessionById.size).toBe(0);
+  });
+
   it('lets a patch queued during the load beat the snapshot, and never resurrects a removal', async () => {
     const { client, release } = makePartitionClient({
       branches: [branch('br-1')],
@@ -410,7 +421,7 @@ describe('board readiness', () => {
   afterEach(() => setRealtimeAuthorityScope(null));
 
   it('is ready once the first-paint apply marks the board loaded', () => {
-    markBoardPartitionLoaded(BOARD);
+    markBoardPartitionLoaded(BOARD, captureLoadLifetime()!);
     expect(makeBoardReadySelector(BOARD)(agorStore.getState())).toBe(true);
     expect(makeBoardReadySelector('board-2')(agorStore.getState())).toBe(false);
   });
@@ -433,7 +444,7 @@ describe('board readiness', () => {
   });
 
   it('resets with the maps on an identity change', () => {
-    markBoardPartitionLoaded(BOARD);
+    markBoardPartitionLoaded(BOARD, captureLoadLifetime()!);
     agorStore.getState().resetMaps();
     expect(makeBoardReadySelector(BOARD)(agorStore.getState())).toBe(false);
   });

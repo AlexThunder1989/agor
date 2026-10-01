@@ -38,7 +38,7 @@ import {
 } from './agorHydration';
 import { applyEntityFill } from './agorMaps';
 import { type AgorState, agorStore } from './agorStore';
-import { getRealtimeAuthorityScope } from './realtimeBatch';
+import { isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
 import { sessionListQuery } from './sessionListQuery';
 
 /** Gated first-paint page of my sessions (replaces the global recent slice). */
@@ -101,7 +101,8 @@ export function referencedBranchIds(s: AgorState, userId: string): Set<string> {
 interface ScopeRun {
   client: AgorClient;
   userId: string;
-  authorityScope: string;
+  /** The lifetime of the load that started the run; never the current one. */
+  lifetime: LoadLifetime;
 }
 
 let currentRun: ScopeRun | null = null;
@@ -109,8 +110,7 @@ let unsubscribe: (() => void) | null = null;
 let referenceTimer: ReturnType<typeof setTimeout> | null = null;
 const pendingBranchIds = new Set<string>();
 
-const isCurrent = (run: ScopeRun) =>
-  currentRun === run && getRealtimeAuthorityScope() === run.authorityScope;
+const isCurrent = (run: ScopeRun) => currentRun === run && isLoadLifetimeCurrent(run.lifetime);
 
 /** Read rows and fill-merge them; false when the run went stale. Read errors propagate. */
 async function fillRead(
@@ -219,19 +219,22 @@ export function stopUserScope(): void {
 }
 
 /**
- * Load the user scope for the current authority. `gatedMineComplete` says the
- * gated first-paint page already holds all of my active sessions (it returned
- * fewer than `MY_SESSIONS_GATED_LIMIT` rows), so U1 can be skipped. Resolves
- * when the run finished, failed, or was superseded.
+ * Load the user scope under `lifetime`, the lifetime of the load that started
+ * it (captured before that load's first await). A lifetime that is no longer
+ * current — another authority, or a cancellation since — is rejected, so a
+ * load that outlived a logout/remount can never adopt the next user's
+ * authority. `gatedMineComplete` says the gated first-paint page already holds
+ * all of my active sessions (it returned fewer than `MY_SESSIONS_GATED_LIMIT`
+ * rows), so U1 can be skipped. Resolves when the run finished, failed, or was
+ * superseded.
  */
 export async function startUserScope(
   client: AgorClient,
-  options: { userId: string; gatedMineComplete: boolean }
+  options: { userId: string; lifetime: LoadLifetime; gatedMineComplete: boolean }
 ): Promise<void> {
-  const authorityScope = getRealtimeAuthorityScope();
-  if (!authorityScope) return;
+  if (!isLoadLifetimeCurrent(options.lifetime)) return;
   stopUserScope();
-  const run: ScopeRun = { client, userId: options.userId, authorityScope };
+  const run: ScopeRun = { client, userId: options.userId, lifetime: options.lifetime };
   currentRun = run;
   const store = () => agorStore.getState();
   if (options.gatedMineComplete) store().setUserScope({ mySessionsLoaded: true });

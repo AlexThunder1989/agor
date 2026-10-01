@@ -34,7 +34,7 @@ import {
   type BoardPartitionState,
   GLOBALLY_HYDRATED_COLLECTIONS,
 } from './agorStore';
-import { getRealtimeAuthorityScope } from './realtimeBatch';
+import { captureLoadLifetime, isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
 import { sessionListQuery } from './sessionListQuery';
 
 /**
@@ -59,12 +59,17 @@ export function makeBoardPartitionSelector(
 
 /**
  * Record that the gated first-paint apply loaded `boardId`'s partition (the
- * board-scoped first paint runs the same queries as a partition load).
+ * board-scoped first paint runs the same queries as a partition load), under
+ * that load's lifetime; a lifetime that is no longer current records nothing.
  */
-export function markBoardPartitionLoaded(boardId: string | null | undefined): void {
-  const authorityScope = getRealtimeAuthorityScope();
-  if (!boardId || !authorityScope) return;
-  agorStore.getState().setBoardPartition(boardId, { status: 'loaded', authorityScope });
+export function markBoardPartitionLoaded(
+  boardId: string | null | undefined,
+  lifetime: LoadLifetime
+): void {
+  if (!boardId || !isLoadLifetimeCurrent(lifetime)) return;
+  agorStore
+    .getState()
+    .setBoardPartition(boardId, { status: 'loaded', authorityScope: lifetime.authorityScope });
 }
 
 /** Forget a failed partition so `useBoardPartition` loads it again. */
@@ -129,13 +134,15 @@ export function loadBoardPartition(
   boardId: string,
   options: { canUseMemberWorkspaceServices: boolean }
 ): Promise<void> {
-  const authorityScope = getRealtimeAuthorityScope();
-  if (!authorityScope) return Promise.resolve();
-  const key = `${authorityScope}\u0000${boardId}`;
+  // Captured before the first await, like every load (see `loadLifetime`).
+  const lifetime = captureLoadLifetime();
+  if (!lifetime) return Promise.resolve();
+  const { authorityScope } = lifetime;
+  const key = `${authorityScope}\u0000${lifetime.loadEpoch}\u0000${boardId}`;
   const existing = inflight.get(key);
   if (existing) return existing;
 
-  const isCurrent = () => getRealtimeAuthorityScope() === authorityScope;
+  const isCurrent = () => isLoadLifetimeCurrent(lifetime);
   const store = () => agorStore.getState();
   const run = async () => {
     store().setBoardPartition(boardId, { status: 'loading', authorityScope });

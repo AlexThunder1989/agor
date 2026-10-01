@@ -55,6 +55,7 @@ import {
 import * as realtime from '../store/agorRealtimeActions';
 import { agorStore, shallow, useStoreWithEqualityFn } from '../store/agorStore';
 import { markBoardPartitionLoaded } from '../store/boardPartitions';
+import type { LoadLifetime } from '../store/loadLifetime';
 import {
   type OpenedTranscriptPrefetch,
   prefetchOpenedTranscript,
@@ -459,10 +460,15 @@ export function useAgorData(
    * One latest-request-wins coordinator for initial hydration and
    * realtime OAuth hints. A later request invalidates every earlier response,
    * preventing an old read from overwriting a newer disconnect/re-auth result.
+   * Like a load, a response is also dropped once the hydration cancellation
+   * epoch moves (unmount, authority change, logout): an unmount leaves
+   * `authorityScopeKeyRef` as it was, so the scope check alone would let a
+   * late answer write one user's OAuth grants into the next user's store.
    */
   const refetchOAuthDurableState = useCallback(
     async (requestAuthorityScope: string, mcpServerId?: string): Promise<boolean> => {
       if (!client) return false;
+      const requestEpoch = getHydrationCancellationEpoch();
       return runLatestMCPOAuthStatusRequest(
         oauthStatusRequestGenerationRef,
         async () => {
@@ -474,7 +480,9 @@ export function useAgorData(
           ]);
           return { status, freshServer };
         },
-        () => authorityScopeKeyRef.current === requestAuthorityScope,
+        () =>
+          authorityScopeKeyRef.current === requestAuthorityScope &&
+          getHydrationCancellationEpoch() === requestEpoch,
         ({ status, freshServer }) => {
           const ids =
             (status as { authenticated_server_ids?: string[] })?.authenticated_server_ids ?? [];
@@ -510,7 +518,16 @@ export function useAgorData(
       if (!client || !enabled || !fetchAuthorityScope) {
         return false;
       }
-      const authorityIsCurrent = () => authorityScopeKeyRef.current === fetchAuthorityScope;
+      // Load-lifetime cancellation token, captured BEFORE the first await.
+      // Every cancellation path (unmount, authority change, logout) bumps the
+      // hydration epoch, and an unmount leaves `authorityScopeKeyRef` as it
+      // was — so the scope check alone would let a load suspended in the
+      // light/heavy batch resume after teardown, retain a transcript prefetch,
+      // repopulate the singleton store and start deferred hydrations.
+      const loadEpoch = getHydrationCancellationEpoch();
+      const authorityIsCurrent = () =>
+        authorityScopeKeyRef.current === fetchAuthorityScope &&
+        getHydrationCancellationEpoch() === loadEpoch;
       const runAuthorityHydration = (
         name: string,
         revisions: Parameters<typeof runHydration>[1],
@@ -823,6 +840,8 @@ export function useAgorData(
             ? resolveSessionFromShortIdPure(directSessionId, interimSessionById)
             : null;
         let openedTranscriptReady: Promise<void> | null = null;
+        // The direct-session get above awaited; never retain after teardown.
+        if (!authorityIsCurrent()) return false;
         if (openedSessionId) {
           // Retain before releasing any earlier prefetch: for the same session
           // the shared handle stays warm instead of dropping to zero refs.
@@ -1038,7 +1057,10 @@ export function useAgorData(
         // The background hydrations kicked off below re-snapshot AFTER this bump,
         // so they're unaffected.
         bumpFirstPaintMergeRevisions();
-        if (!silent) markBoardPartitionLoaded(boardScope);
+        // The scope and the partition record carry THIS load's lifetime, never
+        // whatever authority is current when they run (a remount can swap it).
+        const loadLifetime: LoadLifetime = { authorityScope: fetchAuthorityScope, loadEpoch };
+        if (!silent) markBoardPartitionLoaded(boardScope, loadLifetime);
         // User scope (design r3 §3): the rest of my sessions, my branches, every
         // teammate I can view, and the branches my sessions and comment
         // threads reference. Started BEFORE the background global hydrations
@@ -1053,6 +1075,7 @@ export function useAgorData(
         if (authenticatedUserId) {
           void startUserScope(client, {
             userId: authenticatedUserId,
+            lifetime: loadLifetime,
             gatedMineComplete: !silent && gatedMineComplete,
           });
         }
@@ -1219,12 +1242,12 @@ export function useAgorData(
           }
         };
         // On a session route, the global sets wait for the opened transcript
-        // (bounded by the prefetch timeout). A cancellation in the meantime
-        // (unmount, authority change, logout) skips the deferred start.
+        // (bounded by the prefetch timeout). A cancellation at any point of
+        // this load (unmount, authority change, logout) skips the deferred
+        // start — `authorityIsCurrent` includes the load's epoch.
         if (openedTranscriptReady) {
-          const epoch = getHydrationCancellationEpoch();
           void openedTranscriptReady.then(() => {
-            if (epoch !== getHydrationCancellationEpoch() || !authorityIsCurrent()) return;
+            if (!authorityIsCurrent()) return;
             hydrateGlobalSets();
           });
         } else {

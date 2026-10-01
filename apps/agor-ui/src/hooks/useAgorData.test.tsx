@@ -1613,6 +1613,53 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
     }
   });
 
+  it("never applies a load that outlived its mount into the next user's store", async () => {
+    window.history.pushState({}, '', '/');
+    const seed: Record<string, unknown[]> = {
+      'sessions:find': [makeSession({ session_id: 's-alice', created_by: 'user-alice' })],
+    };
+    const { client, onFetch, fetchArguments } = makeMockClient(seed);
+    const aliceRead = deferred();
+    // Hold Alice's gated my-sessions page (call 1); Bob's (call 2) answers at once.
+    onFetch('sessions', 'find', (call) => (call === 1 ? aliceRead.promise : undefined));
+    onFetch('sessions', 'findAll', never);
+    const alice = renderHook(() =>
+      useAgorData(client, { ...authority, authenticatedUserId: 'user-alice' })
+    );
+    await waitFor(() => expect(fetchArguments('sessions', 'find')).toHaveLength(1));
+    alice.unmount();
+
+    // The response is captured at call time, so Bob's page differs from Alice's.
+    seed['sessions:find'] = [makeSession({ session_id: 's-bob', created_by: 'user-bob' })];
+    const bob = renderHook(() =>
+      useAgorData(client, { ...authority, authenticatedUserId: 'user-bob' })
+    );
+    try {
+      await waitForInitialLoad(bob.result);
+      await waitFor(() => expect(agorStore.getState().mySessionsLoaded).toBe(true));
+      const readsBefore = fetchArguments('branches', 'findAll').length;
+
+      await act(async () => {
+        aliceRead.resolve();
+        await aliceRead.promise;
+        // Long enough for an unfenced load to pass its indexing frame and apply.
+        await new Promise<void>((resolve) => setTimeout(resolve, 150));
+      });
+      const state = agorStore.getState();
+      expect(state.sessionById.has('s-alice')).toBe(false);
+      expect(state.sessionById.has('s-bob')).toBe(true);
+      // Alice's load neither started a user scope nor read anything after teardown.
+      expect(fetchArguments('branches', 'findAll')).toHaveLength(readsBefore);
+      expect(
+        fetchArguments('branches', 'findAll').some(
+          (args) => (args as { query?: { created_by?: string } }).query?.created_by === 'user-alice'
+        )
+      ).toBe(false);
+    } finally {
+      bob.unmount();
+    }
+  });
+
   it('still gates a board route on its board objects and cards', async () => {
     window.history.pushState({}, '', '/b/displayed/');
     const gate = deferred();
