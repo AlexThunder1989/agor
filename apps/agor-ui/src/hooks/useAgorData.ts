@@ -989,6 +989,11 @@ export function useAgorData(
         // The background hydrations kicked off below re-snapshot AFTER this bump,
         // so they're unaffected.
         bumpFirstPaintMergeRevisions();
+        if (silent) {
+          // A silent resync just applied the full active session and branch sets.
+          agorStore.getState().markHydrated('sessionsHydrated');
+          agorStore.getState().markHydrated('branchesHydrated');
+        }
         debugTimer?.endIndexing();
         debugFinishStatus = 'success';
 
@@ -1035,7 +1040,7 @@ export function useAgorData(
                     $sort: { updated_at: -1 },
                   },
                 }),
-              (allSessions) =>
+              (allSessions) => {
                 agorStore.getState().applyMaps((prev) => {
                   // The hydration fetches active sessions only. Deep-link-healed
                   // archived sessions (added to `sessionById` so a direct /s/<id>
@@ -1061,7 +1066,9 @@ export function useAgorData(
                     }
                   );
                   return { ...prev, sessionById, sessionsByBranch };
-                })
+                });
+                agorStore.getState().markHydrated('sessionsHydrated');
+              }
             );
             void runAuthorityHydration(
               'branches',
@@ -1070,7 +1077,7 @@ export function useAgorData(
                 client
                   .service('branches')
                   .findAll({ query: { archived: false, $limit: PAGINATION.DEFAULT_LIMIT } }),
-              (allBranches) =>
+              (allBranches) => {
                 // Quiet window proven by runHydration → apply wholesale. Branches
                 // are active-only (the snapshot query is archived:false and the
                 // handlers never keep an archived branch), so a wholesale replace
@@ -1078,7 +1085,9 @@ export function useAgorData(
                 agorStore.getState().applyMaps((prev) => ({
                   ...prev,
                   branchById: buildById(allBranches, 'branch_id', prev.branchById),
-                }))
+                }));
+                agorStore.getState().markHydrated('branchesHydrated');
+              }
             );
           }
 
