@@ -184,6 +184,7 @@ describe('user scope', () => {
       byIds: (ids) => ids.filter((id) => id !== 'br-7').map((id) => branch(id)),
     });
     await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: false });
+    await vi.waitFor(() => expect(flags().homeBranchesLoaded).toBe(true));
     const idReads = calls.filter((c) => c.query.branch_id);
     expect(idReads.map((c) => (c.query.branch_id as { $in: string[] }).$in.length)).toEqual([
       200, 50,
@@ -372,6 +373,139 @@ describe('user scope', () => {
     expect(reads).toBe(4);
     expect(agorStore.getState().sessionById.size).toBe(0);
     expect(flags().mySessionsLoaded).toBe(false);
+  });
+
+  it('sees a reference that appears while the referenced-branch reads are in flight', async () => {
+    let releaseIds!: () => void;
+    const idGate = new Promise<void>((resolve) => {
+      releaseIds = resolve;
+    });
+    const { client } = makeClient({
+      mine: () => [session('s-1', 'br-1')],
+      byIds: async (ids) => {
+        if (ids.includes('br-1')) await idGate;
+        return ids.map((id) => branch(id));
+      },
+    });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: false });
+    // A comment thread on an unloaded branch lands before br-1 resolves.
+    agorStore
+      .getState()
+      .setMap(
+        'commentById',
+        new Map([['c-1', comment('c-1', { branch_id: 'br-late', created_by: 'bob' })]])
+      );
+    await vi.waitFor(() => expect(agorStore.getState().branchById.has('br-late')).toBe(true));
+    expect(flags().homeBranchesLoaded).toBe(false);
+    releaseIds();
+    await vi.waitFor(() => expect(flags().homeBranchesLoaded).toBe(true));
+    expect(agorStore.getState().branchById.has('br-1')).toBe(true);
+  });
+
+  it('retries a failed referenced-branch read with backoff, and stops when the run stops', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let attempts = 0;
+    const { client } = makeClient({
+      mine: () => [session('s-1', 'br-1')],
+      byIds: (ids) => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('503');
+        return ids.map((id) => branch(id));
+      },
+    });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: false });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(attempts).toBe(1);
+    expect(flags().homeBranchesLoaded).toBe(false);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(attempts).toBe(2);
+    expect(flags().homeBranchesLoaded).toBe(true);
+
+    // A stopped run never retries.
+    let later = 0;
+    const failing = makeClient({
+      mine: () => [session('s-2', 'br-2')],
+      byIds: () => {
+        later += 1;
+        throw new Error('503');
+      },
+    });
+    await startUserScope(failing.client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: false,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(later).toBe(1);
+    stopUserScope();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(later).toBe(1);
+  });
+
+  it('keeps at most three referenced-branch reads in flight', async () => {
+    const releases: Array<() => void> = [];
+    let inflight = 0;
+    let peak = 0;
+    const mine = Array.from({ length: 1000 }, (_, i) => session(`s-${i}`, `br-${i}`));
+    const { client, calls } = makeClient({
+      mine: () => mine,
+      byIds: async (ids) => {
+        inflight += 1;
+        peak = Math.max(peak, inflight);
+        await new Promise<void>((resolve) => releases.push(resolve));
+        inflight -= 1;
+        return ids.map((id) => branch(id));
+      },
+    });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: false });
+    for (let i = 0; i < 20 && !agorStore.getState().homeBranchesLoaded; i++) {
+      await vi.waitFor(() => expect(releases.length).toBeGreaterThan(0));
+      for (const release of releases.splice(0)) release();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    expect(flags().homeBranchesLoaded).toBe(true);
+    expect(peak).toBe(3);
+    expect(calls.filter((c) => c.query.branch_id)).toHaveLength(5);
+  });
+
+  it('revalidates absent marks under the new run', async () => {
+    agorStore.getState().setUserScope({ absentBranchIds: new Set(['br-gone', 'br-back']) });
+    const { client } = makeClient({
+      byIds: (ids) => ids.filter((id) => id === 'br-back').map((id) => branch(id)),
+    });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: true });
+    await vi.waitFor(() => expect([...agorStore.getState().absentBranchIds]).toEqual(['br-gone']));
+    expect(agorStore.getState().branchById.has('br-back')).toBe(true);
+  });
+
+  it('resolves the references of a full gated page before the full read is sent', async () => {
+    agorStore.getState().applyMaps((prev) => ({
+      ...prev,
+      sessionById: new Map([['s-1', session('s-1', 'br-early')]]),
+    }));
+    let releaseMine!: () => void;
+    const mineGate = new Promise<void>((resolve) => {
+      releaseMine = resolve;
+    });
+    const { client, calls } = makeClient({
+      mine: async () => {
+        await mineGate;
+        return [];
+      },
+      byIds: (ids) => ids.map((id) => branch(id)),
+    });
+    const run = startUserScope(client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: false,
+    });
+    const order = calls.map((c) => (c.query.branch_id ? 'ids' : c.service));
+    expect(order.indexOf('ids')).toBeLessThan(order.indexOf('sessions'));
+    await vi.waitFor(() => expect(agorStore.getState().branchById.has('br-early')).toBe(true));
+    releaseMine();
+    await run;
+    await vi.waitFor(() => expect(flags().homeBranchesLoaded).toBe(true));
   });
 
   it('keeps flags true while a silent-resync re-run is in flight', async () => {

@@ -17,14 +17,18 @@
  * 2026-10-01); see `startedByUserLineage` in `homeSelectors.ts`.
  *
  * Every read applies with the fill-only merge and per-id touched fence
- * (`applyEntityFill`), under the authority scope it started with. Flags only
- * ever become true within one identity; `resetMaps` clears them. A failed read
- * leaves its flag unset (Home keeps its loading state) until the next run,
- * which `useAgorData` starts again on every silent reconnect resync.
+ * (`applyEntityFill`), under the lifetime of the load that started the run.
+ * Flags only ever become true within one identity; `resetMaps` clears them.
+ * A failed U1/U2/U3 read leaves its flag unset (Home keeps its loading state)
+ * until the next run, which `useAgorData` starts again on every silent
+ * reconnect resync.
  *
- * Realtime keeps the scope complete for rows; a store subscription keeps it
- * complete for new REFERENCES (a new session of mine, a new comment thread on a
- * branch that isn't loaded) by ensuring their branches, batched and debounced.
+ * Realtime keeps the scope complete for rows; a store subscription, installed
+ * before the first read, keeps it complete for new REFERENCES (a new session of
+ * mine, a new comment thread on a branch that isn't loaded) by ensuring their
+ * branches: debounced, in chunks, at most `MAX_CONCURRENT_ID_READS` at once,
+ * with a run-owned retry queue (capped backoff) for failed reads. Absent marks
+ * are revalidated at the start of every run.
  */
 import type { AgorClient, BoardComment, Branch, Session } from '@agor-live/client';
 import { PAGINATION } from '@agor-live/client';
@@ -49,6 +53,12 @@ export const MY_SESSIONS_GATED_LIMIT = 200;
 export const MY_SESSIONS_FULL_LIMIT = PAGINATION.MAX_LIMIT;
 /** Debounce for ensuring branches of newly referenced ids. */
 const REFERENCE_DEBOUNCE_MS = 100;
+/** Referenced-branch id reads in flight at once, per run. */
+export const MAX_CONCURRENT_ID_READS = 3;
+/** Backoff of a failed referenced-branch read: base, cap and attempts. */
+const RETRY_BASE_MS = 500;
+const RETRY_MAX_MS = 30_000;
+export const MAX_REFERENCE_READ_ATTEMPTS = 6;
 
 /** The newest-first query for my active sessions. */
 export function mySessionsQuery(userId: string, limit: number) {
@@ -103,12 +113,24 @@ interface ScopeRun {
   userId: string;
   /** The lifetime of the load that started the run; never the current one. */
   lifetime: LoadLifetime;
+  /** Ids waiting to be sent in an id-list read. */
+  queue: string[];
+  /** Ids queued, in flight or waiting for a retry; never requested twice meanwhile. */
+  pending: Set<string>;
+  /** Ids whose reads failed every attempt; retried by the next run. */
+  failed: Set<string>;
+  /** Failed attempts per id, for the retry backoff. */
+  attempts: Map<string, number>;
+  /** Id-list reads in flight (at most `MAX_CONCURRENT_ID_READS`). */
+  inflight: number;
+  /** Every reference is known: my sessions (U1 or a complete gated page) and my branches (U2) loaded. */
+  referencesKnown: boolean;
+  referenceTimer: ReturnType<typeof setTimeout> | null;
+  retryTimers: Set<ReturnType<typeof setTimeout>>;
+  unsubscribe: (() => void) | null;
 }
 
 let currentRun: ScopeRun | null = null;
-let unsubscribe: (() => void) | null = null;
-let referenceTimer: ReturnType<typeof setTimeout> | null = null;
-const pendingBranchIds = new Set<string>();
 
 const isCurrent = (run: ScopeRun) => currentRun === run && isLoadLifetimeCurrent(run.lifetime);
 
@@ -140,13 +162,72 @@ async function fillRead(
   }
 }
 
+/** Add absent marks and drop the marks of branches that are present now. */
+function updateAbsent(add: readonly string[]): void {
+  const state = agorStore.getState();
+  const next = new Set([...state.absentBranchIds, ...add]);
+  for (const id of next) if (state.branchById.has(id)) next.delete(id);
+  const same =
+    next.size === state.absentBranchIds.size &&
+    [...next].every((id) => state.absentBranchIds.has(id));
+  if (!same) state.setUserScope({ absentBranchIds: next });
+}
+
+/** Ids referenced but neither present, absent, nor pending or failed in this run. */
+function missingReferences(s: AgorState, run: ScopeRun): string[] {
+  const missing: string[] = [];
+  for (const id of referencedBranchIds(s, run.userId)) {
+    if (
+      !s.branchById.has(id) &&
+      !s.absentBranchIds.has(id) &&
+      !run.pending.has(id) &&
+      !run.failed.has(id)
+    ) {
+      missing.push(id);
+    }
+  }
+  return missing;
+}
+
+/** `homeBranchesLoaded` once every reference is known and none is unresolved. */
+function settleHomeBranches(run: ScopeRun): void {
+  if (!isCurrent(run) || !run.referencesKnown) return;
+  if (run.pending.size > 0 || run.failed.size > 0) return;
+  if (missingReferences(agorStore.getState(), run).length > 0) return;
+  agorStore.getState().setUserScope({ homeBranchesLoaded: true });
+}
+
+/** Queue branch ids for id-list reads (deduplicated by `pending`). */
+function queueBranches(run: ScopeRun, ids: Iterable<string>): void {
+  for (const id of ids) {
+    if (run.pending.has(id)) continue;
+    run.pending.add(id);
+    run.failed.delete(id);
+    run.queue.push(id);
+  }
+  pumpBranchReads(run);
+}
+
+/** Send queued ids in chunks of `PAGINATION.MAX_ID_LIST`, at most `MAX_CONCURRENT_ID_READS` at once. */
+function pumpBranchReads(run: ScopeRun): void {
+  while (isCurrent(run) && run.inflight < MAX_CONCURRENT_ID_READS && run.queue.length > 0) {
+    const chunk = run.queue.splice(0, PAGINATION.MAX_ID_LIST);
+    run.inflight += 1;
+    void readBranchChunk(run, chunk).finally(() => {
+      run.inflight -= 1;
+      pumpBranchReads(run);
+      settleHomeBranches(run);
+    });
+  }
+}
+
 /**
- * Read the given branch ids (chunks of `PAGINATION.MAX_ID_LIST`) and record the
- * ones the server doesn't return — and that didn't arrive meanwhile — as absent.
+ * Read one chunk of branch ids and record the ones the server doesn't return —
+ * and that didn't arrive meanwhile — as absent. A failed read is retried with
+ * backoff; the ids stay pending until it settles.
  */
-async function ensureBranches(run: ScopeRun, ids: readonly string[]): Promise<boolean> {
-  for (let i = 0; i < ids.length; i += PAGINATION.MAX_ID_LIST) {
-    const chunk = ids.slice(i, i + PAGINATION.MAX_ID_LIST);
+async function readBranchChunk(run: ScopeRun, chunk: string[]): Promise<void> {
+  try {
     const rows = await fillRead(run, async () => ({
       branches: rowsOf<Branch>(
         await run.client.service('branches').find({
@@ -154,56 +235,67 @@ async function ensureBranches(run: ScopeRun, ids: readonly string[]): Promise<bo
         })
       ),
     }));
-    if (!rows) return false;
+    if (!rows) return;
     const returned = new Set((rows.branches ?? []).map((branch) => branch.branch_id as string));
     const state = agorStore.getState();
-    const absent = chunk.filter((id) => !returned.has(id) && !state.branchById.has(id));
-    if (absent.length > 0) {
-      state.setUserScope({ absentBranchIds: new Set([...state.absentBranchIds, ...absent]) });
+    updateAbsent(chunk.filter((id) => !returned.has(id) && !state.branchById.has(id)));
+    for (const id of chunk) {
+      run.pending.delete(id);
+      run.attempts.delete(id);
     }
+  } catch (err) {
+    if (!isCurrent(run)) return;
+    console.warn('[userScope] referenced branches failed:', err);
+    scheduleRetry(run, chunk);
   }
-  return true;
 }
 
-/** Ids referenced but neither present, absent nor already being ensured. */
-function missingReferences(s: AgorState, userId: string): string[] {
-  const missing: string[] = [];
-  for (const id of referencedBranchIds(s, userId)) {
-    if (!s.branchById.has(id) && !s.absentBranchIds.has(id) && !pendingBranchIds.has(id)) {
-      missing.push(id);
+/** Retry failed ids with capped exponential backoff; give up after `MAX_REFERENCE_READ_ATTEMPTS`. */
+function scheduleRetry(run: ScopeRun, ids: string[]): void {
+  const attempt = Math.max(...ids.map((id) => (run.attempts.get(id) ?? 0) + 1));
+  for (const id of ids) run.attempts.set(id, attempt);
+  if (attempt >= MAX_REFERENCE_READ_ATTEMPTS) {
+    for (const id of ids) {
+      run.pending.delete(id);
+      run.failed.add(id);
     }
+    return;
   }
-  return missing;
+  const timer = setTimeout(
+    () => {
+      run.retryTimers.delete(timer);
+      if (!isCurrent(run)) return;
+      for (const id of ids) run.pending.delete(id);
+      queueBranches(
+        run,
+        ids.filter((id) => !agorStore.getState().branchById.has(id))
+      );
+      settleHomeBranches(run);
+    },
+    Math.min(RETRY_BASE_MS * 2 ** (attempt - 1), RETRY_MAX_MS)
+  );
+  run.retryTimers.add(timer);
+}
+
+/** Clear marks of branches that arrived, queue new references, and settle. */
+function checkReferences(run: ScopeRun): void {
+  if (!isCurrent(run)) return;
+  // A branch arriving by any path (event, partition, ensure) clears its mark.
+  updateAbsent([]);
+  queueBranches(run, missingReferences(agorStore.getState(), run));
+  settleHomeBranches(run);
 }
 
 function scheduleReferenceCheck(run: ScopeRun): void {
-  if (referenceTimer) return;
-  referenceTimer = setTimeout(() => {
-    referenceTimer = null;
-    if (!isCurrent(run)) return;
-    const state = agorStore.getState();
-    // A branch arriving by any path (event, partition, ensure) clears its mark.
-    if ([...state.absentBranchIds].some((id) => state.branchById.has(id))) {
-      state.setUserScope({
-        absentBranchIds: new Set(
-          [...state.absentBranchIds].filter((id) => !state.branchById.has(id))
-        ),
-      });
-    }
-    const missing = missingReferences(agorStore.getState(), run.userId);
-    if (missing.length === 0) return;
-    for (const id of missing) pendingBranchIds.add(id);
-    void ensureBranches(run, missing)
-      .catch((err) => console.warn('[userScope] ensuring referenced branches failed:', err))
-      .finally(() => {
-        for (const id of missing) pendingBranchIds.delete(id);
-      });
+  if (run.referenceTimer) return;
+  run.referenceTimer = setTimeout(() => {
+    run.referenceTimer = null;
+    checkReferences(run);
   }, REFERENCE_DEBOUNCE_MS);
 }
 
 function subscribeToReferences(run: ScopeRun): void {
-  unsubscribe?.();
-  unsubscribe = agorStore.subscribe((state, prev) => {
+  run.unsubscribe = agorStore.subscribe((state, prev) => {
     if (
       state.sessionById === prev.sessionById &&
       state.commentById === prev.commentById &&
@@ -215,14 +307,18 @@ function subscribeToReferences(run: ScopeRun): void {
   });
 }
 
-/** Stop the current run: unsubscribe, cancel timers, and drop its pending applies. */
+/** Stop the current run: unsubscribe, cancel its timers, and drop its pending applies. */
 export function stopUserScope(): void {
+  const run = currentRun;
   currentRun = null;
-  unsubscribe?.();
-  unsubscribe = null;
-  if (referenceTimer) clearTimeout(referenceTimer);
-  referenceTimer = null;
-  pendingBranchIds.clear();
+  if (!run) return;
+  run.unsubscribe?.();
+  run.unsubscribe = null;
+  if (run.referenceTimer) clearTimeout(run.referenceTimer);
+  run.referenceTimer = null;
+  for (const timer of run.retryTimers) clearTimeout(timer);
+  run.retryTimers.clear();
+  run.queue = [];
 }
 
 /**
@@ -232,8 +328,9 @@ export function stopUserScope(): void {
  * load that outlived a logout/remount can never adopt the next user's
  * authority. `gatedMineComplete` says the gated first-paint page already holds
  * all of my active sessions (it returned fewer than `MY_SESSIONS_GATED_LIMIT`
- * rows), so U1 can be skipped. Resolves when the run finished, failed, or was
- * superseded.
+ * rows and raced none of mine), so U1 can be skipped. Resolves when the
+ * initial reads finished, failed, or were superseded; the reference
+ * subscription and retries keep running until `stopUserScope`.
  */
 export async function startUserScope(
   client: AgorClient,
@@ -241,10 +338,35 @@ export async function startUserScope(
 ): Promise<void> {
   if (!isLoadLifetimeCurrent(options.lifetime)) return;
   stopUserScope();
-  const run: ScopeRun = { client, userId: options.userId, lifetime: options.lifetime };
+  const run: ScopeRun = {
+    client,
+    userId: options.userId,
+    lifetime: options.lifetime,
+    queue: [],
+    pending: new Set(),
+    failed: new Set(),
+    attempts: new Map(),
+    inflight: 0,
+    referencesKnown: false,
+    referenceTimer: null,
+    retryTimers: new Set(),
+    unsubscribe: null,
+  };
   currentRun = run;
   const store = () => agorStore.getState();
   if (options.gatedMineComplete) store().setUserScope({ mySessionsLoaded: true });
+
+  // Subscribe before any read: a reference that appears while the reads below
+  // are in flight is seen by the subscription, never lost between a scan and
+  // a late subscribe.
+  subscribeToReferences(run);
+  // Absent marks are negatives of the authority that produced them (a grant,
+  // reconnect or role change can make a branch visible): revalidate them.
+  queueBranches(run, store().absentBranchIds);
+  // Early pass: resolve what the gated page already references now — full
+  // page or not — so these small reads go out before U1 and the global
+  // snapshots instead of queuing behind them on a slow socket.
+  checkReferences(run);
 
   const u1 = options.gatedMineComplete
     ? Promise.resolve(true)
@@ -281,31 +403,16 @@ export async function startUserScope(
     return true;
   });
 
-  // When the gated page already holds all of my sessions, every reference is
-  // known now: resolve it alongside U2/U3 instead of after them, so it isn't
-  // queued behind the global snapshots on a slow socket. The pass after U1
-  // below then only covers what is still missing.
-  const early = options.gatedMineComplete
-    ? ensureBranches(run, missingReferences(store(), run.userId))
-    : Promise.resolve(true);
-  const settled = await Promise.allSettled([u1, u2, u3, early]);
+  const settled = await Promise.allSettled([u1, u2, u3]);
   for (const result of settled) {
     if (result.status === 'rejected') console.warn('[userScope] read failed:', result.reason);
   }
   if (!isCurrent(run)) return;
-  // U5 needs the complete set of my sessions and the branches U2/U3 already
-  // loaded; teammates (U3) only shrink the id list, so they needn't succeed.
-  if (settled[0].status !== 'fulfilled' || !settled[0].value) return;
-  if (settled[1].status !== 'fulfilled' || !settled[1].value) return;
-  if (settled[3].status !== 'fulfilled' || !settled[3].value) return;
-  try {
-    const missing = missingReferences(store(), run.userId);
-    if (!(await ensureBranches(run, missing))) return;
-  } catch (err) {
-    console.warn('[userScope] referenced branches failed:', err);
-    return;
-  }
-  if (!isCurrent(run)) return;
-  store().setUserScope({ homeBranchesLoaded: true });
-  subscribeToReferences(run);
+  // Every reference is known once all of my sessions and my branches are in;
+  // teammates (U3) only shrink the id list, so they needn't succeed.
+  const ok = (index: number) => settled[index].status === 'fulfilled' && settled[index].value;
+  if (!ok(0) || !ok(1)) return;
+  run.referencesKnown = true;
+  // Immediate catch-up scan (not debounced): references U1 added are queued now.
+  checkReferences(run);
 }
