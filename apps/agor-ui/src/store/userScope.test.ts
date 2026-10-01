@@ -585,6 +585,83 @@ describe('user scope', () => {
     expect(hasFullSessionDetails(state.sessionById.get('s-new') as Session)).toBe(false);
   });
 
+  it('never marks a store loaded when its run is cancelled between the fill and its completion', async () => {
+    const { client } = makeClient({ mine: () => [session('s-alice', 'br-1')] });
+    // Cancel exactly when Alice's U1 rows are applied (still current), so only
+    // the completion continuation runs after the teardown.
+    let tornDown = false;
+    const off = agorStore.subscribe((state) => {
+      if (tornDown || !state.sessionById.has('s-alice')) return;
+      tornDown = true;
+      cancelAllHydrations(); // unmount
+      setRealtimeAuthorityScope('bob:member:1');
+      agorStore.getState().resetMaps(); // Bob's empty store
+    });
+    try {
+      await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: false });
+    } finally {
+      off();
+    }
+    expect(tornDown).toBe(true);
+    expect(agorStore.getState().mySessionsLoaded).toBe(false);
+    expect(agorStore.getState().homeBranchesLoaded).toBe(false);
+  });
+
+  it("never lets a superseded run's id-read completion mark branches absent for the next user", async () => {
+    // Alice can't see br-x; her read returns only br-other.
+    agorStore.getState().applyMaps((prev) => ({
+      ...prev,
+      sessionById: new Map([
+        ['s-1', session('s-1', 'br-x')],
+        ['s-2', session('s-2', 'br-other')],
+      ]),
+    }));
+    const alice = makeClient({
+      byIds: (ids) => ids.filter((id) => id === 'br-other').map((id) => branch(id)),
+    });
+    const BOB = 'user-bob';
+    const bob = makeClient({
+      mine: () => [session('s-bob', 'br-x', { created_by: BOB })],
+      byIds: (ids) => ids.map((id) => branch(id)),
+    });
+    // When Alice's id read applies br-other, Bob's identity takes over and his
+    // scope starts (his U1 still pending) before her completion runs.
+    let switched = false;
+    let bobRun: Promise<void> | undefined;
+    const off = agorStore.subscribe((state) => {
+      if (switched || !state.branchById.has('br-other')) return;
+      switched = true;
+      cancelAllHydrations();
+      setRealtimeAuthorityScope('bob:member:1');
+      agorStore.getState().resetMaps();
+      bobRun = startUserScope(bob.client, {
+        userId: BOB,
+        lifetime: lifetime(),
+        gatedMineComplete: false,
+      });
+    });
+    try {
+      await startUserScope(alice.client, {
+        userId: ME,
+        lifetime: lifetime(),
+        gatedMineComplete: true,
+      });
+      await vi.waitFor(() => expect(switched).toBe(true));
+      await bobRun;
+      await vi.waitFor(() => expect(flags().homeBranchesLoaded).toBe(true));
+    } finally {
+      off();
+    }
+    const state = agorStore.getState();
+    expect(state.absentBranchIds.has('br-x')).toBe(false);
+    // Bob's U1 references br-x, so his scope reads it by id instead of trusting
+    // a negative Alice recorded.
+    expect(
+      bob.calls.some((c) => (c.query.branch_id as { $in?: string[] })?.$in?.includes('br-x'))
+    ).toBe(true);
+    expect(state.branchById.has('br-x')).toBe(true);
+  });
+
   it('keeps flags true while a silent-resync re-run is in flight', async () => {
     const { client } = makeClient({});
     await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: true });

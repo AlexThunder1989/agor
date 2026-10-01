@@ -202,8 +202,21 @@ async function fillRead(
   }
 }
 
-/** Add absent marks and drop the marks of branches that are present now. */
-function updateAbsent(add: readonly string[]): void {
+/**
+ * Write user-scope metadata for `run` — only while it is current. Every flag
+ * and absent-mark write goes through here (or `updateAbsent`), so a
+ * continuation that resumes after its run was cancelled or superseded (an
+ * awaited read's completion, a `.then`, a timer) can never write into the
+ * next authority's store, even when its rows were applied while it was
+ * still current.
+ */
+function setScope(run: ScopeRun, partial: Parameters<AgorState['setUserScope']>[0]): void {
+  if (isCurrent(run)) agorStore.getState().setUserScope(partial);
+}
+
+/** Add absent marks and drop the marks of branches that are present now (current run only). */
+function updateAbsent(run: ScopeRun, add: readonly string[]): void {
+  if (!isCurrent(run)) return;
   const state = agorStore.getState();
   const next = new Set([...state.absentBranchIds, ...add]);
   for (const id of next) if (state.branchById.has(id)) next.delete(id);
@@ -243,14 +256,14 @@ function applyGlobalCompatibility(run: ScopeRun): void {
   const unresolved = [...referencedBranchIds(state, run.userId)].filter(
     (id) => !state.branchById.has(id) && !run.pending.has(id)
   );
-  updateAbsent(unresolved);
+  updateAbsent(run, unresolved);
   for (const id of unresolved) run.failed.delete(id);
-  state.setUserScope({
+  setScope(run, {
     ...(state.mySessionsLoaded ? {} : { mySessionsLoaded: true, mySessionsTruncated: false }),
     teammatesLoaded: true,
     teammatesTruncated: false,
   });
-  if (run.pending.size === 0) state.setUserScope({ homeBranchesLoaded: true });
+  if (run.pending.size === 0) setScope(run, { homeBranchesLoaded: true });
 }
 
 /** Stop sending scope reads: the daemon doesn't support them (terminal for the run). */
@@ -263,7 +276,7 @@ function enterDegraded(run: ScopeRun, reason: unknown): void {
   run.pending.clear();
   for (const timer of run.retryTimers) clearTimeout(timer);
   run.retryTimers.clear();
-  agorStore.getState().setUserScope({ userScopeDegraded: true });
+  setScope(run, { userScopeDegraded: true });
   applyGlobalCompatibility(run);
 }
 
@@ -273,7 +286,7 @@ function settleHomeBranches(run: ScopeRun): void {
   if (!isCurrent(run) || !run.referencesKnown) return;
   if (run.pending.size > 0 || run.failed.size > 0) return;
   if (missingReferences(agorStore.getState(), run).length > 0) return;
-  agorStore.getState().setUserScope({ homeBranchesLoaded: true });
+  setScope(run, { homeBranchesLoaded: true });
 }
 
 /** Queue branch ids for id-list reads (deduplicated by `pending`). */
@@ -320,10 +333,15 @@ async function readBranchChunk(run: ScopeRun, chunk: string[]): Promise<void> {
       }),
       ({ branches }) => (branches ?? []).some((branch) => !requested.has(branch.branch_id))
     );
-    if (!rows) return;
+    // Recheck after the await: `fillRead` applied while current, but this
+    // continuation runs later, possibly after a cancellation or a new run.
+    if (!rows || !isCurrent(run)) return;
     const returned = new Set((rows.branches ?? []).map((branch) => branch.branch_id as string));
     const state = agorStore.getState();
-    updateAbsent(chunk.filter((id) => !returned.has(id) && !state.branchById.has(id)));
+    updateAbsent(
+      run,
+      chunk.filter((id) => !returned.has(id) && !state.branchById.has(id))
+    );
     for (const id of chunk) {
       run.pending.delete(id);
       run.attempts.delete(id);
@@ -371,7 +389,7 @@ function scheduleRetry(run: ScopeRun, ids: string[]): void {
 function checkReferences(run: ScopeRun): void {
   if (!isCurrent(run)) return;
   // A branch arriving by any path (event, partition, ensure) clears its mark.
-  updateAbsent([]);
+  updateAbsent(run, []);
   queueBranches(run, missingReferences(agorStore.getState(), run));
   settleHomeBranches(run);
 }
@@ -459,7 +477,7 @@ export async function startUserScope(
   };
   currentRun = run;
   const store = () => agorStore.getState();
-  if (options.gatedMineComplete) store().setUserScope({ mySessionsLoaded: true });
+  if (options.gatedMineComplete) setScope(run, { mySessionsLoaded: true });
 
   // Subscribe before any read: a reference that appears while the reads below
   // are in flight is seen by the subscription, never lost between a scan and
@@ -510,7 +528,7 @@ export async function startUserScope(
     // the keys are honoured.
     const keysHonoured = await u2.catch(() => false);
     if (!keysHonoured || run.degraded || !isCurrent(run)) return false;
-    store().setUserScope({
+    setScope(run, {
       teammatesLoaded: true,
       teammatesTruncated: teammateTotal > (rows.branches?.length ?? 0),
     });
@@ -539,8 +557,9 @@ export async function startUserScope(
         ({ sessions }) =>
           (sessions ?? []).some((row) => row.created_by !== run.userId || row.archived)
       ).then((rows) => {
-        if (!rows) return false;
-        store().setUserScope({
+        // Recheck after the await (see `readBranchChunk`).
+        if (!rows || !isCurrent(run)) return false;
+        setScope(run, {
           mySessionsLoaded: true,
           mySessionsTruncated: (rows.sessions?.length ?? 0) >= MY_SESSIONS_FULL_LIMIT,
         });
