@@ -1550,7 +1550,9 @@ describe('useAgorData — opened session transcript priority', () => {
     const session = makeSession({ session_id: OPEN_ID });
     const { client, fetchCount, onFetch } = makeMockClient({ 'sessions:find': [session] });
     const heavy = deferred();
-    onFetch('cards', 'findAll', () => heavy.promise);
+    // Comments are gated on every route (Home defers cards to the background),
+    // so holding them holds the heavy batch.
+    onFetch('board-comments', 'findAll', () => heavy.promise);
     const release = vi.fn();
     // `ready` settles at once, so a resumed load would start the global sets.
     transcriptPrefetch.prefetchOpenedTranscript.mockReturnValueOnce({
@@ -1559,7 +1561,7 @@ describe('useAgorData — opened session transcript priority', () => {
     });
 
     const { unmount } = renderHook(() => useAgorData(client, { directSessionId: OPEN_ID }));
-    await waitFor(() => expect(fetchCount('cards', 'findAll')).toBe(1));
+    await waitFor(() => expect(fetchCount('board-comments', 'findAll')).toBe(1));
     expect(transcriptPrefetch.prefetchOpenedTranscript).toHaveBeenCalledTimes(1);
     unmount();
     expect(release).toHaveBeenCalled();

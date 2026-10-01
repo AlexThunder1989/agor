@@ -1,7 +1,8 @@
 /**
- * Load lifetime: the token every asynchronous store load (first paint, user
- * scope, board partitions) captures BEFORE its first await and checks after
- * every await and before it starts follow-up work.
+ * Load lifetime: the one cancellation token every asynchronous store load
+ * (first paint, OAuth state refetch, user scope, board partitions) captures
+ * BEFORE its first await and checks after every await and before it starts
+ * follow-up work (PR #2948's `loadEpoch` contract, shared).
  *
  * Two parts, both required:
  * - the authority scope (identity, role and auth generation) the load started
@@ -34,10 +35,17 @@ export function captureLoadLifetime(
   return authorityScope ? { authorityScope, loadEpoch: getHydrationCancellationEpoch() } : null;
 }
 
-/** Whether nothing cancelled the load and its authority is still the realtime authority. */
-export function isLoadLifetimeCurrent(lifetime: LoadLifetime): boolean {
+/**
+ * Whether nothing cancelled the load and its authority is still current.
+ * `currentAuthority` defaults to the realtime queue's authority; the data hook
+ * passes its render-time authority ref, which moves before the layout phase.
+ */
+export function isLoadLifetimeCurrent(
+  lifetime: LoadLifetime,
+  currentAuthority: string | null = getRealtimeAuthorityScope()
+): boolean {
   return (
     getHydrationCancellationEpoch() === lifetime.loadEpoch &&
-    getRealtimeAuthorityScope() === lifetime.authorityScope
+    currentAuthority === lifetime.authorityScope
   );
 }

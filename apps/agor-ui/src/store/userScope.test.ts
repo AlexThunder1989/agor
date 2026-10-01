@@ -1,4 +1,5 @@
 import type { AgorClient, BoardComment, Branch, Session } from '@agor-live/client';
+import { hasFullSessionDetails, toLeanSessionListRow } from '@agor-live/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   bumpFirstPaintMergeRevisions,
@@ -561,6 +562,27 @@ describe('user scope', () => {
       })
     );
     expect([...agorStore.getState().absentBranchIds]).toEqual(['br-missing']);
+  });
+
+  it('fills lean rows as summaries and never downgrades a live full row (#2948 read_shape)', async () => {
+    const full = session('s-full', 'br-1', { title: 'live full' });
+    agorStore.getState().applyMaps((prev) => ({
+      ...prev,
+      sessionById: new Map([[full.session_id, full]]),
+      sessionsByBranch: new Map([['br-1', [full]]]),
+    }));
+    const { client } = makeClient({
+      mine: () =>
+        [session('s-full', 'br-1'), session('s-new', 'br-1')].map((row) =>
+          toLeanSessionListRow(row)
+        ) as unknown as Session[],
+      byIds: (ids) => ids.map((id) => branch(id)),
+    });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: false });
+    const state = agorStore.getState();
+    expect(state.sessionById.get('s-full')).toBe(full);
+    expect(hasFullSessionDetails(state.sessionById.get('s-full') as Session)).toBe(true);
+    expect(hasFullSessionDetails(state.sessionById.get('s-new') as Session)).toBe(false);
   });
 
   it('keeps flags true while a silent-resync re-run is in flight', async () => {
