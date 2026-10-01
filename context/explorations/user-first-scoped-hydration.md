@@ -1,6 +1,14 @@
 # User-first, board-scoped hydration
 
-Status: design, revision 3 (2026-10-01).
+Status: design, revision 3 (2026-10-01), with Kamil's decisions applied (see below).
+
+> **r3 decisions, 2026-10-01** (Kamil; they override any recommendation below that disagrees):
+>
+> - **Q1 — activity dots:** recent-board activity dots show only **my** running and needs-you sessions (`makeOwnBoardActivitySelector`).
+> - **Q2 — branch-count badges are kept** (board switcher and mobile nav tree). Add **one** minimal RBAC-scoped aggregate: the count of active (non-archived) branches per board visible to the caller. It composes `visibleBranchAccessCondition` and the visible-board predicates with the tenant condition, is classified `scoped`, is never published, and has cross-tenant and capability-negative tests. Daemon part in **1.3**; client use in **3.2** (until then the badges may keep deriving from loaded branches). The client refetches it, debounced, on branch create/archive/move/remove events.
+> - **Q3 — power users:** all of my active sessions load in **one** lean read (U1), capped at 10,000; at the cap `mySessionsTruncated` is set and counts render as "N+".
+> - **Q4 — fork ancestors are not fetched.** U4 and its tests/scenario are dropped. A retry forked from **someone else's** session no longer clears a failure; this is an accepted, documented limitation (§3.3, and a code comment near `startedByUserLineage`). `mySessionsLoaded` is set after U1.
+> - **Lean dependency:** PR #2887 replaces #2946 (abandoned). §11 is rewritten for #2887.
 
 - **Base:** the agent-first Home stack, #2905 → #2906 → #2901 → #2907 (branch `home-agent-first-4-teammates`, tip `6f8f538b`), not `main`.
 - **Delivery:** one branch and one PR, reviewable commit by commit.
@@ -20,15 +28,14 @@ This design loads three layers instead:
    - The small workspace collections that already load in the background.
 2. **User scope: everything Home and the teammates surfaces read, loaded in full for the caller.**
    - All of the caller's active sessions. The 200 newest are gated; the rest load right after paint.
-   - The active fork ancestors that Home's supersede rule needs.
    - The caller's branches, all visible teammate branches, and every branch the caller's sessions or comment threads point at.
 3. **Board partitions, loaded when the board opens.** A partition is one board's branches, sessions, board objects, cards and full board record.
 
 Realtime keeps applying every event; presence in the store never implies completeness. Loads use a fill-only merge with a per-ID touched fence, so they never discard a snapshot and never starve. The stack's `sessionsHydrated`/`branchesHydrated` flags are replaced by flags that mean exactly "this user-scoped set is complete".
 
-**No server-side summary.** The board grid, stats bar and activity feed that needed one are gone with #2901. Board emoji come from `board.icon`, and every teammate branch is now loaded. Branch-count badges are the only thing that would still need one, and §7 recommends dropping them (Q2).
+**One small server aggregate.** The board grid, stats bar and activity feed that needed a summary are gone with #2901. Board emoji come from `board.icon`, and every teammate branch is now loaded. Branch-count badges are the only thing that still needs one; per decision Q2 they are kept, backed by one RBAC-scoped per-board count of active branches (§7).
 
-**Delivery.** One PR in 3 steps and 11 commits: additive first, removals last, no migration, no feature flag. Land it after the stack and after lean PR #2946 (§11).
+**Delivery.** One PR in 3 steps and 11 commits: additive first, removals last, no migration, no feature flag. Land it after the stack and after lean PR #2887 (§11).
 
 | Step                                         | Commits | State if the branch stopped here                                                                                                                                                                                                                                                                                                            |
 | -------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -80,7 +87,7 @@ Facts from the previous revision that still hold:
 | boards (lean), users, repos, card-types                         | global, gated                                                        | unchanged                                                                                                                                        | none                    |
 | board full record                                               | displayed board gated; all boards in background                      | per board (partition)                                                                                                                            | 2                       |
 | **board-comments**                                              | board-scoped on board routes, global on Home; full set in background | **global and gated on every route**; not part of partitions                                                                                      | 1                       |
-| sessions                                                        | global 50 most recent gated, full set in background                  | **my 200 newest (gated)**, **all of mine** plus active fork ancestors after paint, **partition** on open, **by ID** on demand                    | 1 (mine), 3 (rest)      |
+| sessions                                                        | global 50 most recent gated, full set in background                  | **my 200 newest (gated)**, **all of mine** after paint, **partition** on open, **by ID** on demand                                               | 1 (mine), 3 (rest)      |
 | branches                                                        | displayed board's, or `[]` on Home; full set in background           | **mine** + **all visible teammates** + **referenced by my sessions or comment threads** (user scope), **partition** on open, **by ID** on demand | 1 (scope), 3 (rest)     |
 | board-objects, cards                                            | board-scoped, or global on Home, gated; full set in background       | partition                                                                                                                                        | 1 (out of Home gate), 2 |
 | session-mcp-servers                                             | global, background                                                   | per session (§6)                                                                                                                                 | 2                       |
@@ -97,18 +104,17 @@ Invariants:
 
 ### 3.1 What loads before and after paint
 
-| When                                 | Read                                                                                                                                         | Purpose                                                                                                             | Completes                                                        |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| **Gated** (light batch, every route) | lean boards, users, repos, card-types                                                                                                        | as today                                                                                                            | none                                                             |
-| **Gated**                            | `board-comments` (global)                                                                                                                    | Needs you comment rule, mobile bell, board badges                                                                   | always loaded at paint                                           |
-| **Gated**                            | `sessions{created_by: me, archived:false, $sort:{updated_at:-1}, $limit:200, $count:false, lean:true}`                                       | Needs you and My work rows, running, recent-boards fallback **at first paint**. Replaces the global 50 most recent. | `mySessionsLoaded` immediately if it returns fewer than 200 rows |
-| After paint (U1)                     | the same query with `$limit: 10000`                                                                                                          | complete set for exact counts and old unread results                                                                | then U4                                                          |
-| After paint (U2)                     | `branches{created_by: me, archived:false}` (new key)                                                                                         | pills, search recents                                                                                               | none                                                             |
-| After paint (U3)                     | `branches{teammate: true, archived:false, $limit:1000}` (new key → `findTeammateBranches`)                                                   | rail, directory, ask-box switcher, board teammate picker, emoji fallback                                            | `teammatesLoaded`                                                |
-| After U1 (U4)                        | `sessions{session_id:{$in}, archived:false}` for missing fork ancestors of my clean runs inside the 7-day failure window; repeat to depth 10 | supersede rule (§3.3)                                                                                               | `mySessionsLoaded`                                               |
-| After U1, U2 and comments (U5)       | `branches{branch_id:{$in}, archived:false}` for branch IDs referenced by my sessions or candidate comment threads that are still absent      | pills, My work filter, comment rules; IDs not returned go into `absentBranchIds`                                    | `homeBranchesLoaded`                                             |
+| When                                 | Read                                                                                                                                    | Purpose                                                                                                             | Completes                                                        |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| **Gated** (light batch, every route) | lean boards, users, repos, card-types                                                                                                   | as today                                                                                                            | none                                                             |
+| **Gated**                            | `board-comments` (global)                                                                                                               | Needs you comment rule, mobile bell, board badges                                                                   | always loaded at paint                                           |
+| **Gated**                            | `sessions{created_by: me, archived:false, $sort:{updated_at:-1}, $limit:200, $count:false, lean:true}`                                  | Needs you and My work rows, running, recent-boards fallback **at first paint**. Replaces the global 50 most recent. | `mySessionsLoaded` immediately if it returns fewer than 200 rows |
+| After paint (U1)                     | the same query with `$limit: 10000`                                                                                                     | complete set for exact counts and old unread results                                                                | `mySessionsLoaded` (`mySessionsTruncated` at 10,000 rows)        |
+| After paint (U2)                     | `branches{created_by: me, archived:false}` (new key)                                                                                    | pills, search recents                                                                                               | none                                                             |
+| After paint (U3)                     | `branches{teammate: true, archived:false, $limit:1000}` (new key → `findTeammateBranches`)                                              | rail, directory, ask-box switcher, board teammate picker, emoji fallback                                            | `teammatesLoaded`                                                |
+| After U1, U2 and comments (U5)       | `branches{branch_id:{$in}, archived:false}` for branch IDs referenced by my sessions or candidate comment threads that are still absent | pills, My work filter, comment rules; IDs not returned go into `absentBranchIds`                                    | `homeBranchesLoaded`                                             |
 
-- U1, U2 and U3 run in parallel. U4 and U5 follow U1.
+- U1, U2 and U3 run in parallel. U5 follows U1 (and U2, U3 and comments). U4 (fork ancestors) is dropped by decision Q4.
 - All of them apply with the fill-only merge and touched fence (§4.3), under the current authority scope.
 - **On every route, not only Home.** Mobile's bell badge (`MobileApp.tsx:250`), global search "owned by me", and Home's instant render all depend on this scope.
 
@@ -132,12 +138,12 @@ Invariants:
 
 **Size.** About 0.87 KB per lean row (#2946's measurement): 1,000 own sessions ≈ 0.9 MB, 5,000 ≈ 4.3 MB. For comparison, today's global set is 20 MB.
 
-### 3.3 Fork ancestors (supersede rule)
+### 3.3 Fork ancestors (supersede rule) — not fetched (decision Q4)
 
-- **Why:** `startedByUserLineage` needs every active fork ancestor of the caller's clean runs. A fork of someone else's session has an ancestor the user scope wouldn't otherwise load. Global hydration loads it today.
-- **Query:** U4 fetches only ancestors of clean runs updated within `HOME_FAILED_WINDOW_MS`, because only those can supersede a visible failure.
-- **`archived:false` filter:** it keeps today's semantics, where an archived or invisible ancestor is absent and counts as "not user-started".
-- **Bound:** fetches stop at depth 10, and cycles are guarded as in the selector.
+- **Rule:** `startedByUserLineage` walks fork ancestors through `sessionById`; a missing ancestor counts as "not user-started".
+- **Decision:** the user scope does **not** fetch other users' fork ancestors (the former U4 is dropped). Ancestors the caller created are loaded by U1 anyway.
+- **Accepted limitation:** a clean run forked from **someone else's** session no longer supersedes (clears) a failure on Home once global hydration is gone (Step 3). Until then global hydration may still load the ancestor. The limitation is documented in a code comment near `startedByUserLineage`.
+- **Readiness:** `mySessionsLoaded` is set after U1.
 
 ### 3.4 Branch references and `absentBranchIds`
 
@@ -160,7 +166,7 @@ Invariants:
 
 New store meta, reset by `resetMaps` on an identity change:
 
-- `mySessionsLoaded`: all of the caller's active sessions plus the needed fork ancestors.
+- `mySessionsLoaded`: all of the caller's active sessions (set after U1; fork ancestors are not fetched, §3.3).
 - `homeBranchesLoaded`: every referenced branch is present or in `absentBranchIds`.
 - `teammatesLoaded`: every visible active teammate branch is present.
 - `absentBranchIds`: the set described in §3.4.
@@ -189,7 +195,6 @@ The stack's contracts are preserved: counts wait, rows render immediately, teamm
 - **Not covered by events:** new **references**, such as a new session of mine or a new comment thread on a branch that isn't loaded.
   - A store subscription in `store/userScope.ts`, outside React, diffs referenced branch IDs against `branchById ∪ absentBranchIds ∪ pending`.
   - It calls the batched `ensureBranches` (debounced about 100 ms, chunks of 200).
-  - The same applies to ancestors of new clean runs.
 - **Grants:** a branch that becomes visible through a grant has no realtime event, so it appears after the next reconnect or reload. Global hydration has the same limit today.
 
 ### 3.8 Reconnect
@@ -270,7 +275,7 @@ The commit that delivers each replacement is in brackets.
 - **Comments for you** (Home, mobile bell, phone Needs you landing). Global comments plus `absentBranchIds` [1.4, 1.5].
 - **Recent-board activity dots.** Built from my sessions [1.5]. Q1 asks whether to keep them team-wide instead.
 - **Board-emoji fallback.** `board.icon`, or loaded teammate branches. No change needed.
-- **Branch-count badges** (`BoardSwitcher.tsx:83-92`, `MobileNavTree.tsx:156`). Recommended: remove them [3.2], so no server aggregate is needed. If Kamil keeps them (Q2), add one minimal RBAC-scoped grouped count of active branches per board, which becomes this design's only aggregate. The mobile tree's comment counts stay (comments are global).
+- **Branch-count badges** (`BoardSwitcher.tsx:83-92`, `MobileNavTree.tsx:156`). **Kept** (decision Q2), backed by this design's only aggregate: an RBAC-scoped count of active branches per board visible to the caller [daemon 1.3, client 3.2]. Until 3.2 the badges keep deriving from loaded branches. The client refetches the counts, debounced, on branch create/archive/move/remove events. The mobile tree's comment counts stay (comments are global).
 - **GlobalSearch.**
   - New `search.find({ q, types:['sessions','branches'], owned_by_me, $limit })` [3.1]. It applies the shared `SEARCHABLE_FIELDS` and `matchSearchTokens` (`core/search/searchable-fields.ts:34-73`) to rows already narrowed by the visibility predicates.
   - Local hits show first; server hits merge after a 250 ms debounce [3.2].
@@ -315,6 +320,7 @@ Rules for every commit:
 - **Branches:**
   - `branch_id: {$in}` in the validator (the fast path already supports it).
   - New fast-path keys `created_by` and `teammate: true`. `teammate` routes to `findTeammateBranches` with the RBAC user ID.
+- **Branch counts (decision Q2):** one RBAC-scoped read returning the number of active branches per board visible to the caller (`visibleBranchAccessCondition` + visible-board predicate + tenant condition). Classified `scoped`, never published.
 - **Caps:** 200 IDs per `$in`; at most 1,000 teammate rows.
 - **Lean:** every new key composes with `lean` (§11).
 - _After:_ additive API.
@@ -365,7 +371,7 @@ Rules for every commit:
 - Search merge; genealogy targets; `/w/` and short-ID fallback.
 - Mobile nav tree and assistant tab.
 - Settings tables.
-- Branch-count badge decision (Q2).
+- Branch-count badges read the per-board count aggregate (decision Q2), refetched debounced on branch create/archive/move/remove events.
 - Fill the sessions of a branch that moves onto a ready board.
 - Everything here works with or without global data.
 
@@ -406,6 +412,11 @@ There is no committed Playwright suite; only `vitest.browser.config.ts` runs in 
 
 - `created_by` and `teammate` respect `visibleBranchAccessCondition`: Alice gets neither Bob's private branch nor his private teammate.
 - `teammate` returns the superset with enabled schedules, so the client filter is needed.
+
+**Branch counts per board** [1.3]
+
+- Counts only active branches the caller can see: Alice's count excludes Bob's private branch; Bob's includes it; a board the caller cannot see is omitted.
+- Superadmin/service behaviour matches `branches.find`.
 - `archived:false` and `$in` caps hold.
 
 **Search** [3.1]
@@ -415,7 +426,7 @@ There is no committed Playwright suite; only `vitest.browser.config.ts` runs in 
 
 **Cross-tenant negatives**
 
-- `created_by`, `session_id $in`, `branch_id $in`, `teammate` and `search`: the same IDs from another tenant return nothing.
+- `created_by`, `session_id $in`, `branch_id $in`, `teammate`, branch counts and `search`: the same IDs from another tenant return nothing (counts: no rows for the other tenant's boards).
 
 **Boundary checks**
 
@@ -434,7 +445,6 @@ There is no committed Playwright suite; only `vitest.browser.config.ts` runs in 
 
 - The gated page sets `mySessionsLoaded` when it returns fewer than 200 rows.
 - U1 is one read; a full 10,000-row result sets truncated.
-- U4 fetches ancestors only for in-window clean runs, with `archived:false`, depth- and cycle-safe.
 - U5 chunks at 200 and records absent IDs; an arriving branch clears its absent mark.
 - The reference subscription ensures new references once, with batching.
 - An identity change resets the flags; a silent resync keeps them true.
@@ -454,17 +464,17 @@ There is no committed Playwright suite; only `vitest.browser.config.ts` runs in 
 
 ### 9.4 Stack suites to update (same commits)
 
-| Suite                                                                                             | Change                                                                                                                                                                    |
-| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `components/HomePage/testUtils.tsx`                                                               | `hydrated` sets `mySessionsLoaded`, `homeBranchesLoaded`, `teammatesLoaded` [1.5]                                                                                         |
-| `HomePage.test.tsx`                                                                               | counters wait on the new flags; **rows render from the gated page before counts**; recent-boards fallback at first paint with empty localStorage                          |
-| `HomePage.teammates.test.tsx`, `TeammatesDirectory.test.tsx`, `MobileApp.home.test.tsx:206`       | loading driven by `teammatesLoaded`                                                                                                                                       |
-| `HomePage.rerender.test.tsx`                                                                      | a background user-scope apply doesn't re-render unrelated rows                                                                                                            |
-| `HomePage.overflow.browser.test.tsx`, `App.homeSurface.test.tsx`, `MobileApp.home.test.tsx:83-84` | flag names                                                                                                                                                                |
-| `store/selectors.homeBuckets.test.ts`                                                             | the comment rule (`:636-638`) moves from `branchesHydrated` to `absentBranchIds`; buckets use `boardIdForSession`; lineage with ancestors loaded through `ensureSessions` |
-| `store/selectors.homeBuckets.perf.test.ts`                                                        | flag names; thresholds unchanged                                                                                                                                          |
-| `hooks/useAgorData.test.tsx:1290-1330`                                                            | "flags recover after an identity change and silent resync" becomes the same test for the user-scope flags                                                                 |
-| Older suites (skip-apply-on-race, lean boards and objects hydration, bulk-write revisions)        | retarget them to collections that stay global, or to the partition and scope replace [2.2, 3.3]                                                                           |
+| Suite                                                                                             | Change                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `components/HomePage/testUtils.tsx`                                                               | `hydrated` sets `mySessionsLoaded`, `homeBranchesLoaded`, `teammatesLoaded` [1.5]                                                                                                                                  |
+| `HomePage.test.tsx`                                                                               | counters wait on the new flags; **rows render from the gated page before counts**; recent-boards fallback at first paint with empty localStorage                                                                   |
+| `HomePage.teammates.test.tsx`, `TeammatesDirectory.test.tsx`, `MobileApp.home.test.tsx:206`       | loading driven by `teammatesLoaded`                                                                                                                                                                                |
+| `HomePage.rerender.test.tsx`                                                                      | a background user-scope apply doesn't re-render unrelated rows                                                                                                                                                     |
+| `HomePage.overflow.browser.test.tsx`, `App.homeSurface.test.tsx`, `MobileApp.home.test.tsx:83-84` | flag names                                                                                                                                                                                                         |
+| `store/selectors.homeBuckets.test.ts`                                                             | the comment rule (`:636-638`) moves from `branchesHydrated` to `absentBranchIds`; buckets use `boardIdForSession`; lineage: a fork of another user's (unloaded) session does not supersede a failure (decision Q4) |
+| `store/selectors.homeBuckets.perf.test.ts`                                                        | flag names; thresholds unchanged                                                                                                                                                                                   |
+| `hooks/useAgorData.test.tsx:1290-1330`                                                            | "flags recover after an identity change and silent resync" becomes the same test for the user-scope flags                                                                                                          |
+| Older suites (skip-apply-on-race, lean boards and objects hydration, bulk-write revisions)        | retarget them to collections that stay global, or to the partition and scope replace [2.2, 3.3]                                                                                                                    |
 
 ### 9.5 E2E scenarios
 
@@ -475,7 +485,7 @@ There is no committed Playwright suite; only `vitest.browser.config.ts` runs in 
 | S2  | Home → board while a session on it is patched every 100 ms: the drawer lists sessions in under 1 s, with no "teammate unavailable".                                                                                                                                                         | sqlite, rich     | 1.2               |
 | S3  | Deep links, cold and warm: `/b/`, `/s/` (other board), `/w/` (other board), `/a/`, `/m/*`, `/teammates`.                                                                                                                                                                                    | sqlite           | 1.5 / 3.2         |
 | S4  | RBAC on a shared board where Bob has a private branch and a private teammate. Alice's My work, comments for you, teammates (rail, directory, switcher), search and partitions never show them; Bob sees them.                                                                               | rich             | 1.3–1.5 / 3.1     |
-| S5  | Realtime. A new session of Alice's on an unloaded board appears in My work with its branch pill. A new comment thread on an unloaded branch appears in Needs you. A teammate Bob shares appears in the rail. A failure is superseded by a fork retry of Bob's session.                      | sqlite, rich, ha | 1.5               |
+| S5  | Realtime. A new session of Alice's on an unloaded board appears in My work with its branch pill. A new comment thread on an unloaded branch appears in Needs you. A teammate Bob shares appears in the rail. (The fork-retry supersede part is dropped by decision Q4.)                     | sqlite, rich, ha | 1.5               |
 | S6  | Reconnect: drop Alice's socket (on `ha`, restart her daemon) while Bob archives one of Alice-visible sessions and deletes a card. After resync, the store matches the server.                                                                                                               | sqlite, ha       | 2.2 / 3.3         |
 | S7  | Session-MCP attach and detach (desktop, settings, mobile): controls gated until loaded.                                                                                                                                                                                                     | sqlite           | 2.1               |
 | S8  | Search finds a session on a never-opened board, respecting RBAC.                                                                                                                                                                                                                            | sqlite, rich     | 3.2               |
@@ -499,19 +509,19 @@ Sandbox baselines: heap 121 MB after GC (340 MB pre-GC); blocking global session
 
 ### 10.1 What could break
 
-| Area              | Failure                                                           | Commit        | Guard                                                      |
-| ----------------- | ----------------------------------------------------------------- | ------------- | ---------------------------------------------------------- |
-| Home completeness | Counts or rows missing items                                      | 1.4, 1.5      | §9.3 user-scope tests; S1, S5                              |
-| Supersede rule    | A failure isn't cleared by a fork retry of another user's session | 1.4           | U4 tests; S5                                               |
-| Comment rule      | A thread on an unloaded branch is hidden or shown wrongly         | 1.5           | `absentBranchIds` tests; S5                                |
-| Teammates         | Rail or directory incomplete or leaking                           | 1.3, 1.5      | S4; directory suite                                        |
-| Power users       | A large U1 read is slow or heavy                                  | 1.4           | S1b; cap and "N+"                                          |
-| Comments growth   | The global gated comments read grows                              | 1.4           | Measure in S11; move to a candidates query later if needed |
-| Board view        | Empty or partial board                                            | 1.2, 2.2, 3.3 | S2, S9                                                     |
-| Missed deletes    | Ghost rows after a reconnect                                      | 2.2, 3.3      | S6 on `ha`                                                 |
-| Session-MCP       | Detaching servers on an edit before load                          | 2.1           | S7                                                         |
-| Mixed versions    | New UI against an old daemon                                      | all           | §10.2; S12                                                 |
-| Stack churn       | The stack changes while we rebase                                 | all           | Land after the stack; §9.4 lists every touched suite       |
+| Area              | Failure                                                           | Commit        | Guard                                                         |
+| ----------------- | ----------------------------------------------------------------- | ------------- | ------------------------------------------------------------- |
+| Home completeness | Counts or rows missing items                                      | 1.4, 1.5      | §9.3 user-scope tests; S1, S5                                 |
+| Supersede rule    | A failure isn't cleared by a fork retry of another user's session | 1.4           | Accepted limitation (Q4); comment near `startedByUserLineage` |
+| Comment rule      | A thread on an unloaded branch is hidden or shown wrongly         | 1.5           | `absentBranchIds` tests; S5                                   |
+| Teammates         | Rail or directory incomplete or leaking                           | 1.3, 1.5      | S4; directory suite                                           |
+| Power users       | A large U1 read is slow or heavy                                  | 1.4           | S1b; cap and "N+"                                             |
+| Comments growth   | The global gated comments read grows                              | 1.4           | Measure in S11; move to a candidates query later if needed    |
+| Board view        | Empty or partial board                                            | 1.2, 2.2, 3.3 | S2, S9                                                        |
+| Missed deletes    | Ghost rows after a reconnect                                      | 2.2, 3.3      | S6 on `ha`                                                    |
+| Session-MCP       | Detaching servers on an edit before load                          | 2.1           | S7                                                            |
+| Mixed versions    | New UI against an old daemon                                      | all           | §10.2; S12                                                    |
+| Stack churn       | The stack changes while we rebase                                 | all           | Land after the stack; §9.4 lists every touched suite          |
 
 ### 10.2 Mixed-version window
 
@@ -551,49 +561,49 @@ Sandbox baselines: heap 121 MB after GC (340 MB pre-GC); blocking global session
   - `ha` reconnect.
 - **Attach** timings, heap and network totals, plus the S1–S12 log.
 
-## 11. Interaction with lean PR #2946 (and neighbours)
+## 11. Interaction with lean PR #2887 (and neighbours)
 
-**What #2946 does**
+**Status (r3 decisions, 2026-10-01):** #2946 is abandoned; Kamil will merge #2887 (`aminghadersohi`, from a fork) after review. This branch is not rebased onto #2887 yet; the base stays `home-agent-first-4-teammates`.
 
-- `sessions.find({ lean: true })` withholds `custom_context.slash_commands`, `skills` and `scheduled_run`, and marks the row `custom_context_omitted`.
-- Its merge currently compares `last_updated`. Its review found that fragile, so it will move to a **server fingerprint carried in the omitted-fields marker**, with a **guarded reconciliation on reconnect**.
-- No Home selector reads the withheld fields.
+**What #2887 does** (verified against `pull/2887/head` @ `08ecacba`)
+
+- `sessions.find({ lean: true })` withholds `custom_context.scheduled_run`, `slash_commands` and `skills` (`LEAN_SESSION_LIST_OMITTED_CONTEXT_KEYS`, `toLeanSessionListRow` in `core/types/session.ts`). There is **no** omitted-fields marker, fingerprint or timestamp merge helper.
+- The daemon strips `lean` from the query **before** the existing `find` body runs (`SessionsService.find` → `findRows`), so `shouldSqlPageSessionQuery` never sees it: `lean` composes with every fast-path key (`created_by`, `session_id $in`, …) without further change. `lean` is also declared in the session query validator.
+- **Contract:** every session list read that feeds the store is lean, and `sessionById` is never the source for the withheld keys. The open session's composer reads the reactive full session (`sessions.get`, kept current by realtime patches); the settings modal seeds its editable `custom_context` from `get` and sends it only when edited.
+- It also adds WebSocket permessage-deflate compression and defers global hydration on `/s/` routes behind the opened transcript.
 
 **Implications for this design**
 
-1. **Every session list read** this design adds or keeps opts into `lean: true`: the gated my-200, U1, U4, partitions, `ensureSessions` and search hits.
-   - `shouldSqlPageSessionQuery` must accept `lean` together with `created_by` and `session_id $in`. This has a unit test (§9.2).
-2. **Fill-only applies never meet the merge.** They insert absent IDs only, so a lean row never lands on a full row through them.
-3. **Every path that overwrites a present row with a list row** must call lean's reconciliation helper. There must be no second comparison rule.
-   - The paths are: the gated first-paint wholesale apply, the remaining global loops until 3.3, and the Step 3 scope replace.
-   - Withheld keys survive only when the fingerprint matches. Otherwise they are dropped and `useSessionDetails` refetches them on open.
-   - The touched fence decides **whether** a row is replaced; the fingerprint decides **which withheld keys survive**.
-4. **One reconnect reconciliation.** Lean's guarded reconnect reconciliation and our Step 3 scope replace are the same operation, and should be built once in 3.3 on top of lean's helper.
-5. **Landing order:** stack → #2946 → this PR.
-   - #2946 needs a small rebase onto the stack (the flag lines in the hydration loops).
-   - The hard dependency is only 3.3. Steps 1–2 are fill-only, so they can be developed and reviewed before #2946 merges.
-6. **Neighbours.**
-   - **#2887** also adds `lean` and defers global hydration behind the open transcript. If it lands, the same rules apply, and 3.3 deletes its deferral.
-   - **#2896** (draft) does versioned reconnect resync. It complements 3.3: the scope replace can use its `$sync` reads for the user scope and the displayed partition.
+1. **Every session list read** this design adds or keeps should send `lean: true` once #2887 is in the base: the gated my-200, U1, partitions, `ensureSessions` and search hits. Until the rebase they must not send it (an older daemon rejects the unknown key), so the reads go through one shared query helper where adding `lean: true` is a one-line change.
+2. **Overwrite paths need no reconciliation.** Under #2887's contract a lean row may replace a full row anywhere (wholesale first-paint apply, global loops until 3.3, the Step 3 scope replace); consumers of the withheld keys read the full record from `get`. Fill-only applies never overwrite anyway. What must hold is the contract itself: no new store consumer may read the withheld keys from `sessionById`.
+3. **One reconnect path.** The Step 3 scope replace (§3.8) is built once in 3.3; there is no separate lean reconciliation to share.
+4. **Deferred hydration on `/s/`.** #2887's transcript-first deferral of the global sets is deleted together with the global loops in 3.3.
+5. **Landing order:** stack → #2887 → this PR. Steps 1–2 are fill-only and can be reviewed before #2887 merges; the rebase onto it is mechanical apart from the `lean` flag in the shared session-query helper and the `useAgorData` hydration blocks both PRs touch.
+6. **Neighbours.** **#2896** (draft) does versioned reconnect resync. It complements 3.3: the scope replace can use its `$sync` reads for the user scope and the displayed partition.
 
 ## 12. Multi-tenancy assessment
 
-| Change                                                   | Resource class             | Handling                                                                                                             |
-| -------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Sessions `created_by`, `session_id $in` (1.1, 1.3)       | Tenant-owned               | Filters, not access grants. They compose with the tenant condition and `inVisibleBranchSet`. Cross-tenant negatives. |
-| Branches `created_by`, `teammate`, `branch_id $in` (1.3) | Tenant-owned               | Same predicates as `branches.find` (`visibleBranchAccessCondition`). Cross-tenant and capability negatives.          |
-| `search` (3.1)                                           | Tenant-owned               | Classified `scoped`, not published. SQL narrowing before matching.                                                   |
-| Client user scope and partitions                         | Existing RBAC-scoped reads | Authority-fenced; reset on identity change. Superadmin teammate filtering is unchanged (`useBoardSharing`).          |
-| Realtime                                                 | Unchanged                  | Narrowing is a separate follow-up.                                                                                   |
+| Change                                                   | Resource class                                 | Handling                                                                                                                                         |
+| -------------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Sessions `created_by`, `session_id $in` (1.1, 1.3)       | Tenant-owned                                   | Filters, not access grants. They compose with the tenant condition and `inVisibleBranchSet`. Cross-tenant negatives.                             |
+| Branches `created_by`, `teammate`, `branch_id $in` (1.3) | Tenant-owned                                   | Same predicates as `branches.find` (`visibleBranchAccessCondition`). Cross-tenant and capability negatives.                                      |
+| Branch counts per board (1.3)                            | Derived (aggregate over tenant-owned branches) | Classified `scoped`, never published. `visibleBranchAccessCondition` + visible boards + tenant condition. Cross-tenant and capability negatives. |
+| `search` (3.1)                                           | Tenant-owned                                   | Classified `scoped`, not published. SQL narrowing before matching.                                                                               |
+| Client user scope and partitions                         | Existing RBAC-scoped reads                     | Authority-fenced; reset on identity change. Superadmin teammate filtering is unchanged (`useBoardSharing`).                                      |
+| Realtime                                                 | Unchanged                                      | Narrowing is a separate follow-up.                                                                                                               |
 
 ## 13. Open questions for Kamil
 
 1. **Recent-board activity dots.** Show only _my_ running and needs-you sessions (recommended)? That matches the "N need you · N running" greeting and needs no board data. Or keep them team-wide, which needs a per-board activity read for boards that aren't loaded?
+   - **Decided (2026-10-01): mine only** (`makeOwnBoardActivitySelector`).
 2. **Branch-count badges** in the board switcher and the mobile nav tree. Remove them (recommended)? Or keep them with one small RBAC-scoped "active branches per board" count endpoint, the only aggregate this design would add?
+   - **Decided (2026-10-01): keep them,** with the aggregate (daemon 1.3, client 3.2).
 3. **Power users.** Load all of a user's active sessions in one read (lean, about 0.9 KB/row, capped at 10,000 with "N+" counts)?
    - Before 1.4, measure the top per-user active-session counts on the sandbox.
    - If anyone exceeds about 5k, decide between a raised payload and per-bucket server reads.
+   - **Decided (2026-10-01): one lean read (U1), cap 10,000, "N+" via `mySessionsTruncated`.**
 4. **Fork-retry supersede across owners.** Keep today's behaviour by fetching other users' active fork ancestors (recommended; a few small reads)? Or accept that a retry forked from someone else's session no longer clears a failure?
+   - **Decided (2026-10-01): don't fetch ancestors** (U4 dropped); accepted limitation (§3.3).
 
 **Earlier answers:** they stand. Questions about the removed Home sections (My Sessions definition, Boards default, Team activity, server-saved visits) are moot.
 
@@ -608,3 +618,4 @@ Sandbox baselines: heap 121 MB after GC (340 MB pre-GC); blocking global session
   - The `$in` reads and branch keys moved into Step 1.
   - Three steps instead of four.
   - Lean fingerprint reconciliation.
+- **r3 decisions, 2026-10-01:** Q1 own-session activity dots; Q2 keep branch-count badges with one per-board count aggregate (daemon 1.3, client 3.2); Q3 one lean U1 read capped at 10,000; Q4 no fork-ancestor fetching (U4 dropped, limitation documented); lean dependency switched from #2946 to #2887 (§11 rewritten).
