@@ -12,17 +12,12 @@
  * from the same row-level security as every branch read. Never published.
  */
 import { BranchRepository, type TenantScopeAwareDatabase } from '@agor/core/db';
-import type { BoardID, UUID } from '@agor/core/types';
+import type { BoardBranchCount, UUID } from '@agor/core/types';
 
 export interface BranchCountsParams {
   query?: Record<string, unknown>;
   /** Internal RBAC SQL pushdown marker set by `scopeFindToAccessibleBranchesSql`. */
   _agorSqlBranchAccessUserId?: UUID;
-}
-
-export interface BoardBranchCount {
-  board_id: BoardID;
-  branch_count: number;
 }
 
 export class BranchCountsService {

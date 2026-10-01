@@ -12,6 +12,7 @@ import { TaskRepository } from './tasks';
 
 import type {
   AgenticToolName,
+  BoardBranchCount,
   BoardID,
   Branch,
   BranchID,
@@ -556,9 +557,7 @@ export class BranchRepository implements BaseRepository<Branch, Partial<Branch>>
    * `boards.find`), so a count never reveals a private branch or board. Tenancy
    * is enforced by the same row-level security as every branch read.
    */
-  async countActiveByBoard(opts: {
-    visibleToUserId?: UUID;
-  }): Promise<Array<{ board_id: BoardID; branch_count: number }>> {
+  async countActiveByBoard(opts: { visibleToUserId?: UUID }): Promise<BoardBranchCount[]> {
     const conditions: SQL[] = [eq(branches.archived, false), isNotNull(branches.board_id)];
     if (opts.visibleToUserId) {
       conditions.push(visibleBranchAccessCondition(this.db, opts.visibleToUserId));
