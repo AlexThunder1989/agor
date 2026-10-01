@@ -33,6 +33,104 @@ Every release-version bump PR must include its finalized changelog section; a ve
 
 ## Unreleased
 
+## 0.26.8 (2026-09-29)
+
+Release preparation includes merged changes from `v0.26.7` (`fb272b8d`) through `504c7ec7`, plus the Claude and Codex model and runtime updates below: [compare merged changes](https://github.com/preset-io/agor/compare/v0.26.7...504c7ec7608d45bbc069791196e620db9d606d38). This entry does not imply publication or deployment.
+
+### Features
+
+- **Claude Sonnet 5.5 is the new Claude default** — adds `claude-sonnet-5-5` with its native 1M context and uses it for new Claude sessions with no configured model. The pinned Claude Agent SDK moves to 0.3.284 (Claude Code 2.1.284); older runtimes cap the model at 200k context. Packaged installations must upgrade Agor and synchronize their managed integrations with `agor install --sync` before restarting. ([#2915](https://github.com/preset-io/agor/pull/2915))
+- **GPT-6.1 Sol for Codex** — adds `gpt-6.1-sol` with its 1.05M context and pricing, listed ahead of GPT-6 Sol; the Codex default stays GPT-6 Astra. The pinned Codex SDK and bundled CLI move to 0.159.0, because 0.156.1 rejects the model under ChatGPT sign-in. Packaged installations need their Codex integration synchronized with `agor install --sync` before restarting. ([#2915](https://github.com/preset-io/agor/pull/2915))
+- **Private and shared MCP installs** — Catalog installs are private by default, even for admins. Admins and members with CRUD authority can share a server's configuration for session-scoped use; the installer's credentials are never shared. ([#2913](https://github.com/preset-io/agor/pull/2913))
+- **Agents can read Discord channel history** — an opt-in `agent_tools.channel_history` capability for Discord gateway channels, with a bounded MCP tool limited to allowlisted channels and their public threads. ([#2872](https://github.com/preset-io/agor/pull/2872))
+- **Two-way Discord direct messages** — an opt-in, per-channel switch lets allowlisted server members message a gateway privately, with one session per person, and lets agents send proactive messages to current members. Disabled by default. ([#2885](https://github.com/preset-io/agor/pull/2885))
+- **A calmer interface** — borderless agent replies and grouped avatars in the transcript, compact board and session panel headers, table-first settings lists for MCP servers, teammates, gateways, and artifacts, and a single-row MCP Catalog filter bar. ([#2815](https://github.com/preset-io/agor/pull/2815), [#2904](https://github.com/preset-io/agor/pull/2904), [#2889](https://github.com/preset-io/agor/pull/2889), [#2900](https://github.com/preset-io/agor/pull/2900))
+
+### Fixes
+
+- **Gemini coding works again** — restores edits, follow-up turns, visible tool results, and usage accounting on the pinned Gemini SDK (0.61.0). Gemini is now marked Beta, and Manual permission mode is steered away from because it is unsupported. Packaged installations need their Gemini integration synchronized with `agor install --sync`. ([#2886](https://github.com/preset-io/agor/pull/2886))
+- **`AGOR_HOME` is honored** — every Agor-owned path now follows `AGOR_HOME`, so a test daemon no longer reads or writes the default deployment's configuration and database. ([#2891](https://github.com/preset-io/agor/pull/2891))
+- **Branch deletion recovers safely** — retryable deletion failures can be retried without treating executor exit or timeouts as proof that cleanup finished, and records with many unrelated references no longer block permanent deletion. ([#2902](https://github.com/preset-io/agor/pull/2902), [#2912](https://github.com/preset-io/agor/pull/2912))
+- **MCP choices match what you can attach** — the session picker lists only servers the caller may attach, and removing a Catalog server confirms the full attachment count before detaching it. Missing inherited MCP defaults are skipped with a visible warning instead of blocking session creation; explicit selections stay strict. ([#2899](https://github.com/preset-io/agor/pull/2899), [#2869](https://github.com/preset-io/agor/pull/2869))
+- **Branch commands work with per-user sandbox homes** — `.agor.yml` import/export, Knowledge branch commands, and Slack file uploads resolve the caller's sandbox mounts, and `.agor.yml` import no longer holds a database transaction while the executor runs. ([#2883](https://github.com/preset-io/agor/pull/2883), [#2894](https://github.com/preset-io/agor/pull/2894))
+- **Archiving keeps session trees intact** — remote-created child sessions no longer reappear as root sessions after their creator is archived. ([#2881](https://github.com/preset-io/agor/pull/2881))
+- **Internal Claude Code events stay out of conversations** — signals such as `vcs_state_changed` after a `git push` are dropped instead of rendering as raw SDK event rows. ([#2882](https://github.com/preset-io/agor/pull/2882))
+- **Managed environments tolerate cold starts** — launcher admission allows 30s and executor startup 180s, so autoscaling and image pulls no longer fail healthy launches. ([#2897](https://github.com/preset-io/agor/pull/2897))
+- **Knowledge export and import work on macOS** — `agor kb export` and `agor kb import` no longer require Linux; Windows reports a clear WSL requirement. ([#2880](https://github.com/preset-io/agor/pull/2880))
+- **Streaming code uses bounded memory** — completed syntax highlights are kept in a small shared cache instead of accumulating for the life of the page. ([#2909](https://github.com/preset-io/agor/pull/2909))
+- **Smaller fixes** — removes the primary teammate replace/clear controls from the board drawer and adds safe, bounded Codex failure diagnostics. ([#2903](https://github.com/preset-io/agor/pull/2903), [#2871](https://github.com/preset-io/agor/pull/2871))
+
+### Chores
+
+- **Docs refresh** — a Compose-first Environments quick start, implementation notes removed from user guides, and a contact page on the docs site. ([#2878](https://github.com/preset-io/agor/pull/2878), [#2875](https://github.com/preset-io/agor/pull/2875), [#2873](https://github.com/preset-io/agor/pull/2873))
+
+## 0.26.7 (2026-09-25)
+
+Release preparation covers merged changes from `v0.26.6` (`d5ef6a03`) through `4d7c3320`: [compare changes](https://github.com/preset-io/agor/compare/v0.26.6...4d7c3320fc5bb6b3927de7191322c6a16b74edd3). This entry does not imply publication or deployment.
+
+### Features
+
+- **CLI sign-in for hosted workspaces** — adds browser-assisted sign-in with an explicitly created, pasted CLI key, plus `agor login --api-key` for existing personal keys. CLI-created keys are managed per machine and normally revoked on logout; hosted use requires trusted workspace-host routing and an edge that forwards CLI REST requests to the daemon. ([#2847](https://github.com/preset-io/agor/pull/2847))
+- **Git changes in the Files tab** — shows staged and working-tree status separately, with status colors, badges, and File/Changes previews, including deleted files. Large diff previews are bounded rather than freezing the browser. ([#2621](https://github.com/preset-io/agor/pull/2621))
+- **Manage pending work without interrupting active tasks** — authorized agents can atomically cancel selected queued tasks or reorder a complete queue snapshot; stale queues are rejected. A conditional Stop workflow guards against stopping a different task after the observed task changes. ([#2800](https://github.com/preset-io/agor/pull/2800))
+- **Connect MCP accounts from the conversation** — agents can request a browser OAuth Connect card, including delivery into supported Slack threads. Credentials remain with the prompting user, and session attachment follows verified sign-in and attachment permissions, not merely a button click. ([#2774](https://github.com/preset-io/agor/pull/2774))
+- **More attachment options** — session uploads accept any file type within existing size/count limits, while only raster images and PDFs are eligible for inline viewing and other types download instead. Discord gateway messages gain image attachments; gateway ingestion retains its own narrower file policy. ([#2844](https://github.com/preset-io/agor/pull/2844), [#2773](https://github.com/preset-io/agor/pull/2773))
+- **Clearer session lists** — unifies rows across panels, board cards, and the Sessions tab, with roomier spacing, clearer failure and selection states, faster tree toggles, and title tooltips only for truncated titles. ([#2820](https://github.com/preset-io/agor/pull/2820), [#2837](https://github.com/preset-io/agor/pull/2837), [#2848](https://github.com/preset-io/agor/pull/2848), [#2855](https://github.com/preset-io/agor/pull/2855))
+
+### Fixes
+
+- **Conversation content stays intact** — preserves Claude thinking content before persistence and keeps confirmed prompt bubbles stable as messages arrive. ([#2833](https://github.com/preset-io/agor/pull/2833), [#2858](https://github.com/preset-io/agor/pull/2858))
+- **Concurrent Codex launches preserve authentication mounts** — keeps branch credential mountpoints stable across concurrent sandbox launches. ([#2851](https://github.com/preset-io/agor/pull/2851))
+- **Uploads recover from stale access tokens** — refreshes authentication after an upload 401 and retries rather than leaving a stale-token failure. ([#2838](https://github.com/preset-io/agor/pull/2838))
+- **Board imports tolerate unavailable objects** — imports boards containing artifact or app objects, retaining only artifact references accessible in the importing workspace; malformed or unavailable objects are skipped with a summary rather than failing the whole import. ([#2845](https://github.com/preset-io/agor/pull/2845))
+- **Knowledge lists respect pagination** — applies read permissions, sorting, limits, offsets, and totals in SQL instead of loading the full document corpus. API consumers should follow the returned pages rather than assume one request returns every document. ([#2843](https://github.com/preset-io/agor/pull/2843))
+- **Gateway activity and delegated cleanup recover** — restores Slack channel activity status and permits contained branch deletion in delegated execution mode without relaxing path containment. ([#2850](https://github.com/preset-io/agor/pull/2850), [#2841](https://github.com/preset-io/agor/pull/2841))
+- **More useful failure diagnostics** — distinguishes executor interruption causes, records safe credential-write failures, and adds bounded MCP authentication-rejection logs with safe client hints. Caller-supplied Stop reasons stay out of operational logs. ([#2835](https://github.com/preset-io/agor/pull/2835), [#2840](https://github.com/preset-io/agor/pull/2840), [#2857](https://github.com/preset-io/agor/pull/2857))
+
+## 0.26.6 (2026-09-23)
+
+Release preparation includes merged changes from `v0.26.5` through `0c9ad63a`, plus the Claude and Codex runtime updates below: [compare merged changes](https://github.com/preset-io/agor/compare/v0.26.5...0c9ad63adfaae859f65993f66d05939b137c9bcd).
+
+### Fixes
+
+- **Opus 5.5 uses a compatible Claude runtime** — upgrades the pinned Claude Agent SDK to 0.3.280, which bundles Claude Code 2.1.280, resolving the older-runtime model rejection. Packaged installations must upgrade Agor and synchronize their managed integrations with `agor install --sync` before restarting; updating a global `claude` executable does not update Agor's runtime. ([#2830](https://github.com/preset-io/agor/pull/2830))
+- **Codex runtime recognizes GPT-6 Sol and Luna** — includes the Luna compatibility fix and updates the pinned Codex SDK and bundled CLI to stable 0.156.1, including upstream Sol/Luna model-catalog support. Packaged installations need their version-aligned Codex integration synchronized before restart. ([#2827](https://github.com/preset-io/agor/pull/2827), [#2830](https://github.com/preset-io/agor/pull/2830))
+- **Older conversation text expands again** — restores **See more** for historical messages, bounds previews by characters or source lines, and stabilizes initial history hydration and explicit bottom scrolling. ([#2828](https://github.com/preset-io/agor/pull/2828))
+- **Session and board inventories do less work** — reuses configuration grant sets, enforces session recency, and skips optional inventory counts when they are not requested. ([#2829](https://github.com/preset-io/agor/pull/2829))
+
+### Chores
+
+- **Release verification tolerates registry propagation** — bounds npm visibility verification by an elapsed deadline rather than a misleading retry budget. ([#2826](https://github.com/preset-io/agor/pull/2826))
+
+## 0.26.5 (2026-09-23)
+
+Release preparation covers merged changes from `v0.26.4` (`15c779d5`) through `e4a88198`: [compare changes](https://github.com/preset-io/agor/compare/v0.26.4...e4a88198ab2090c563c2a239be0cb464cd5c43ed).
+
+### Breaking
+
+- **Recorded tool counts replace the legacy counter** — API clients must replace `tool_use_count` with nullable `recorded_tool_count`; custom callback templates must replace `toolUseCount` with `recordedToolCount`. Missing counts mean unknown, not zero; use `{{#if recordedToolCount includeZero=true}}` to include a verified zero in a template. ([#2806](https://github.com/preset-io/agor/pull/2806))
+
+### Features
+
+- **Move Knowledge namespaces with a plan-first CLI** — `agor kb export` and `agor kb import` support dry runs, hash-verified incremental copying, resumable transfers, and reference reconciliation; read-only namespace and document discovery helps inspect the source and destination. Import requires `--apply` and creates a new private, caller-owned namespace rather than copying source permissions. ([#2821](https://github.com/preset-io/agor/pull/2821))
+  - The directory adapter requires Linux. Transfers cover current Markdown documents, not a full backup: history, archived documents, asset bytes, manually authored graph edges, and credentials are excluded. Export requires workspace-admin access; review imported links and content before sharing.
+- **Lighter, paged conversations** — sessions initially load the latest ten turns, with older history and recorded tool details loaded on demand. Batched transcript reads and on-demand usage accounting reduce redundant work; search covers loaded history and expanded tool details only. ([#2806](https://github.com/preset-io/agor/pull/2806), [#2808](https://github.com/preset-io/agor/pull/2808))
+- **New model choices** — adds Claude Opus 5.5, including its 1M-context choice, and GPT-6 Sol and Luna to the supported model selectors. ([#2816](https://github.com/preset-io/agor/pull/2816))
+
+### Security
+
+- **Prompt failures do not expose database details** — database errors return sanitized messages while retaining bounded operator diagnostics; completion fanout runs after prompt locks are released. ([#2807](https://github.com/preset-io/agor/pull/2807))
+- **Tenant links use verified launch routing** — generated links and HA identity-picker redirects use trusted tenant origins, including packaged runtime paths, rather than accepting unconfigured destinations. ([#2789](https://github.com/preset-io/agor/pull/2789))
+
+### Fixes
+
+- **Branch sources no longer assume an `origin` remote** — branch creation and restoration resolve source refs while preserving source provenance and remote tracking, including repositories with differently named remotes. ([#2622](https://github.com/preset-io/agor/pull/2622))
+- **Streaming tool activity stays together** — live tool activity remains in one contiguous disclosure without duplicate ownership, routine tool errors stay out of activity summaries, and AgentChain text and reasoning blocks are extracted safely. ([#2818](https://github.com/preset-io/agor/pull/2818), [#2813](https://github.com/preset-io/agor/pull/2813))
+- **Reconnects tolerate partial board data** — comments and user initials render safely while missing content or identity fields are still being rehydrated, avoiding a session-panel crash. ([#2812](https://github.com/preset-io/agor/pull/2812))
+- **Session navigation and scrolling stay stable** — repairs mobile session exit, primary-teammate navigation, and board-switcher scrolling; preserves resize guards across consecutive frames and aligns session-tree hover surfaces and collapse controls. ([#2796](https://github.com/preset-io/agor/pull/2796), [#2797](https://github.com/preset-io/agor/pull/2797), [#2793](https://github.com/preset-io/agor/pull/2793))
+- **Archived teammate descendants reconcile correctly** — confirmed archive results refresh descendant sessions without overwriting newer state, with bounded refresh work and warnings when reconciliation cannot complete. ([#2786](https://github.com/preset-io/agor/pull/2786))
+- **Credential reminders respect multiple tools and dismissals** — onboarding handles multi-tool credential states and remembers explicit opt-outs; integrations reminders retain their separate snooze behavior. ([#2628](https://github.com/preset-io/agor/pull/2628), [#2796](https://github.com/preset-io/agor/pull/2796))
+
 ## 0.26.4 (2026-09-20)
 
 ### Breaking

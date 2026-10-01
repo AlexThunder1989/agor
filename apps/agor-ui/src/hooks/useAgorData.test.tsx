@@ -16,7 +16,7 @@
  * maps); the maps live in `agorStore`, so map assertions read them via
  * `agorStore.getState().<map>` while load-state reads stay on `result.current`.
  */
-import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { App as AntApp } from 'antd';
 import { describe, expect, it, vi } from 'vitest';
 import { BranchSessionSections } from '../components/BranchCard/BranchSessionSections';
@@ -263,6 +263,27 @@ function deferred() {
   return { promise, resolve };
 }
 
+it('does not resurrect deletion from an in-flight OAuth realtime refetch', async () => {
+  const { client, emit, emitIo, onFetch, fetchCount } = makeMockClient({
+    'mcp-servers:get': { mcp_server_id: 'server-1', name: 'stale' } as never,
+    'mcp-servers/oauth-status': { authenticated_server_ids: ['server-1'] } as never,
+  });
+  const { result, unmount } = renderHook(() => useAgorData(client));
+  try {
+    await waitForInitialLoad(result);
+    const held = deferred();
+    onFetch('mcp-servers', 'get', () => held.promise);
+    act(() => emitIo('oauth:completed', { success: true, mcp_server_id: 'server-1' }));
+    await waitFor(() => expect(fetchCount('mcp-servers', 'get')).toBe(1));
+    act(() => emit('mcp-servers', 'removed', { mcp_server_id: 'server-1' }));
+    held.resolve();
+    await flush();
+    expect(agorStore.getState().mcpServerById.has('server-1')).toBe(false);
+    expect(agorStore.getState().userAuthenticatedMcpServerIds.has('server-1')).toBe(false);
+  } finally {
+    unmount();
+  }
+});
 it('does not rescan OAuth grants on an idle 60-second timer', async () => {
   const { client, fetchCount } = makeMockClient();
   const { result, unmount } = renderHook(() => useAgorData(client));
@@ -499,14 +520,16 @@ describe('useAgorData — socket-event bailouts', () => {
     render(<VisibleProductionSessionIndicator sessionId="s-1" />);
 
     const sessionControl = screen.getByLabelText(/Open session Fictional long-running QA/i);
-    const activeSpinner = () => sessionControl.querySelector('.ant-spin-dot-spin');
-    expect(activeSpinner()?.isConnected).toBe(true);
+    const activeSpinner = () => within(sessionControl).queryByRole('img', { name: 'Running' });
+    const spinner = activeSpinner();
+    expect(spinner?.isConnected).toBe(true);
 
     act(() => {
       emit('sessions', 'patched', staleTerminal);
       flushRealtimeNow(STANDALONE_AUTHORITY_SCOPE);
     });
     expect(activeSpinner()?.isConnected).toBe(true);
+    expect(activeSpinner()).toBe(spinner);
     expect(agorStore.getState().sessionById.get('s-1')).toMatchObject({ status: 'running' });
 
     await act(async () => gate.resolve());
@@ -514,6 +537,7 @@ describe('useAgorData — socket-event bailouts', () => {
     act(() => flushRealtimeNow(STANDALONE_AUTHORITY_SCOPE));
 
     expect(activeSpinner()?.isConnected).toBe(true);
+    expect(activeSpinner()).toBe(spinner);
     expect(agorStore.getState().sessionById.get('s-1')).toMatchObject({ status: 'running' });
   });
 
@@ -1343,7 +1367,7 @@ describe('useAgorData — skip-apply-on-race hydration', () => {
     const s1 = makeSession({ session_id: 's-1', branch_id: 'b-1' });
     const s2 = makeSession({ session_id: 's-2', branch_id: 'b-1' });
     const b1 = makeBranch({ branch_id: 'b-1' });
-    const { client } = makeMockClient({
+    const { client, fetchArguments } = makeMockClient({
       // Gated first paint sees only the recent slice; hydration sees the full set.
       'sessions:find': [s1],
       'sessions:findAll': [s1, s2],
@@ -1351,6 +1375,17 @@ describe('useAgorData — skip-apply-on-race hydration', () => {
     });
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
+    expect(fetchArguments('sessions', 'find')).toContainEqual({
+      query: {
+        archived: false,
+        $limit: 50,
+        $count: false,
+        $sort: { updated_at: -1 },
+      },
+    });
+    for (const args of fetchArguments('sessions', 'findAll')) {
+      expect((args as { query: Record<string, unknown> }).query.$count).toBeUndefined();
+    }
 
     expect(agorStore.getState().sessionById.has('s-1')).toBe(true);
     // s-2 was absent from first paint and only arrives via the hydration.

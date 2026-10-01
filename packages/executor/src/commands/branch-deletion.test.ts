@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { type BranchDeletionOperations, runBranchDeletion } from './branch-deletion';
+import {
+  type BranchDeletionOperations,
+  runBranchDeletion,
+  verifyDelegatedDeletionStorageMounts,
+} from './branch-deletion';
 
 afterEach(() => vi.useRealTimers());
 function fixture() {
@@ -22,6 +26,26 @@ function fixture() {
   return { operations, calls };
 }
 describe('executor-owned branch deletion', () => {
+  it('rejects image-local directories masquerading as delegated storage mounts', async () => {
+    const { mkdtemp, mkdir, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tenantDataRoot = await mkdtemp(join(tmpdir(), 'agor-deletion-mounts-'));
+    const branchesRoot = join(tenantDataRoot, 'worktrees');
+    const repoPath = join(tenantDataRoot, 'repos', 'fixture');
+    try {
+      await Promise.all([
+        mkdir(branchesRoot, { recursive: true }),
+        mkdir(repoPath, { recursive: true }),
+        mkdir(join(tenantDataRoot, 'branch-homes'), { recursive: true }),
+      ]);
+      await expect(
+        verifyDelegatedDeletionStorageMounts({ tenantDataRoot, branchesRoot })
+      ).rejects.toThrow('mounts are unavailable');
+    } finally {
+      await rm(tenantDataRoot, { recursive: true, force: true });
+    }
+  });
   it('verifies storage, drains bounded batches, and finalizes last', async () => {
     const { operations, calls } = fixture();
     vi.mocked(operations.deleteDataBatch).mockImplementationOnce(async () => {
@@ -155,6 +179,7 @@ describe('concrete deletion command with disposable storage', () => {
             if (body.action === 'data' && malformedData) return new Response('{}');
             if (body.action === 'upload' && unknownUpload)
               throw new Error('fixture transport loss');
+            if (body.action === 'settled') return new Response(JSON.stringify({ ok: true }));
             return new Response(JSON.stringify({ remaining: false }), { status: 200 });
           })
         );
@@ -217,9 +242,11 @@ describe('concrete deletion command with disposable storage', () => {
           expect(result.success).toBe(false);
           expect((await stat(workspace)).isDirectory()).toBe(true);
           expect((await stat(neighbor)).isDirectory()).toBe(true);
-          expect(actions).toEqual(['claim', 'quiesce', 'failed']);
+          expect(actions).toEqual(['claim', 'quiesce', 'settled']);
           expect(log).toHaveBeenCalledWith(
-            `[branch.delete] event=storage_failed step=validate_sdk_home code=${unsafeHome === 'missing_root' ? 'ENOENT' : 'verification_failed'}`
+            expect.stringContaining(
+              `step=validate_sdk_home code=${unsafeHome === 'missing_root' ? 'ENOENT' : 'verification_failed'}`
+            )
           );
           expect(JSON.stringify(log.mock.calls)).not.toContain(root);
           return;
@@ -239,7 +266,7 @@ describe('concrete deletion command with disposable storage', () => {
           unknownUpload
             ? ['claim', 'quiesce', 'upload']
             : malformedData
-              ? ['claim', 'quiesce', 'upload', 'storage', 'data']
+              ? ['claim', 'quiesce', 'upload', 'storage', 'data', 'settled']
               : ['claim', 'quiesce', 'upload', 'storage', 'data', 'finalize']
         );
       } finally {

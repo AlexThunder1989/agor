@@ -22,17 +22,23 @@ import {
   shortId,
   type User,
 } from '@agor-live/client';
-import { RobotOutlined, SyncOutlined, WarningOutlined } from '@ant-design/icons';
+import {
+  ClockCircleOutlined,
+  RobotOutlined,
+  SyncOutlined,
+  WarningOutlined,
+} from '@ant-design/icons';
 import { Bubble } from '@ant-design/x';
 import { Button, Tooltip, theme } from 'antd';
 
 import React, { useState } from 'react';
 import { BRAND, brandBadgeHref } from '../../branding/brand';
+import { IDENTITY_AVATAR_SIZE } from '../../constants/ui';
 import { formatTimestampWithRelative } from '../../utils/time';
 import { getToolDisplayName } from '../../utils/toolDisplayName';
 import { toolResultToDisplayText } from '../../utils/toolResultToDisplayText';
 import { AgorAvatar } from '../AgorAvatar';
-import { CollapsibleMarkdown } from '../CollapsibleText/CollapsibleMarkdown';
+import { isLongMarkdown } from '../CollapsibleText/markdownPreview';
 import { CopyableContent } from '../CopyableContent';
 import { MarkdownRenderer } from '../MarkdownRenderer';
 import { MissingCredentialPanel } from '../MissingCredentialPanel';
@@ -52,6 +58,7 @@ import { ToolIcon } from '../ToolIcon';
 import { ToolUseRenderer } from '../ToolUseRenderer';
 import { TranscriptTruncationNotice } from '../ToolUseRenderer/TranscriptTruncationNotice';
 import { UserIdentityAvatar } from '../UserIdentityAvatar';
+import { HistoryMarkdown } from './HistoryMarkdown';
 // Side-effect import: registers every built-in widget component with the
 // `WidgetBlock` dispatcher (e.g. `env_vars`).
 import '../Widgets';
@@ -94,7 +101,7 @@ interface MessageBlockProps {
   sessionId?: string | null;
   taskId?: string;
   isFirstPendingPermission?: boolean; // For sequencing permission requests
-  isLatestMessage?: boolean; // Whether this is the most recent message (don't collapse by default)
+  isLatestMessage?: boolean; // Whether this is the most recent message (for pending tool status)
   teammateEmoji?: string; // Emoji override for teammate avatar (replaces tool icon)
   /** Authenticated Feathers client, forwarded to WidgetBlock for inline-form submission. */
   client?: AgorClient | null;
@@ -107,6 +114,15 @@ interface MessageBlockProps {
   ) => void;
   onOpenAgenticToolSettings?: (tool: AgenticToolName) => void;
   compact?: boolean;
+  defaultTextExpanded?: boolean;
+  /**
+   * False for every message after the first in a run from the same speaker.
+   * The avatar is then replaced by a gutter spacer, so the text stays aligned
+   * with the message that introduced the speaker.
+   */
+  showAvatar?: boolean;
+  /** Stable presentation identity while a confirmed task gains its initial message. */
+  textChoiceKey?: string;
 }
 
 /** Get short description for a tool call (file path, pattern, command, etc.) */
@@ -226,9 +242,13 @@ function getAgentAvatar({
       <img
         src={brandBadgeHref()}
         alt={`${BRAND.name} callback`}
-        width={32}
-        height={32}
-        style={{ width: 32, height: 32, borderRadius: '50%' }}
+        width={IDENTITY_AVATAR_SIZE}
+        height={IDENTITY_AVATAR_SIZE}
+        style={{
+          width: IDENTITY_AVATAR_SIZE,
+          height: IDENTITY_AVATAR_SIZE,
+          borderRadius: '50%',
+        }}
       />
     );
   }
@@ -236,12 +256,56 @@ function getAgentAvatar({
     return <AgorAvatar>{teammateEmoji}</AgorAvatar>;
   }
   if (agentic_tool) {
-    return <ToolIcon tool={agentic_tool} size={32} />;
+    return <ToolIcon tool={agentic_tool} size={IDENTITY_AVATAR_SIZE} />;
   }
   return (
     <AgorAvatar icon={<RobotOutlined />} style={{ backgroundColor: token.colorBgContainer }} />
   );
 }
+
+/**
+ * A filled bubble's padding hides the copy control's default overhang;
+ * borderless ones have none, so it would hang past the conversation's edge.
+ */
+const PLAIN_COPY_OFFSET = { right: 0 };
+
+/**
+ * Which side of the conversation a message renders as — the key transcripts
+ * group consecutive messages by. Null for the message types that render their
+ * own chrome instead of a bubble (permission prompts, widgets), which should
+ * break a run rather than extend it.
+ */
+export function getMessageSpeaker(message: Message): 'user' | 'agent' | null {
+  if (
+    message.type === 'permission_request' ||
+    message.type === 'input_request' ||
+    message.type === 'widget_request' ||
+    message.type === 'daemon_restart' ||
+    message.type === 'daemon_crash' ||
+    (message.role === 'system' &&
+      (message.metadata?.is_btw_result ||
+        message.metadata?.error_kind === 'missing_credential' ||
+        message.metadata?.error_kind === 'provider_credit_exhausted'))
+  ) {
+    return null;
+  }
+  if (message.role === 'user' && !isTaskToolPrompt(message) && !isTaskToolResult(message)) {
+    return 'user';
+  }
+  return 'agent';
+}
+
+/**
+ * Holds the avatar column open for a second bubble within the same message,
+ * which has no separate timestamp trigger. Zero height avoids padding the row.
+ */
+const AvatarGutterSpacer: React.FC = () => (
+  <span
+    aria-hidden="true"
+    data-testid="avatar-spacer"
+    style={{ display: 'block', width: IDENTITY_AVATAR_SIZE, height: 0 }}
+  />
+);
 
 interface DaemonRestartNoticeProps {
   isGraceful: boolean;
@@ -340,8 +404,17 @@ const MessageBlockInner: React.FC<MessageBlockProps> = ({
   client = null,
   onOpenAgenticToolSettings,
   compact = false,
+  defaultTextExpanded = true,
+  showAvatar = true,
+  textChoiceKey,
 }) => {
   const { token } = theme.useToken();
+  const [timestampOpen, setTimestampOpen] = useState(false);
+
+  // One vertical gap for every top-level block a message renders — speaker
+  // bubble, tool stack, notice — so the transcript holds a single rhythm.
+  // Adjacent blocks sit in normal flow, so these collapse rather than add up.
+  const blockMargin = `${token.marginSM}px 0`;
 
   // Handle permission request messages specially
   if (message.type === 'permission_request') {
@@ -352,7 +425,7 @@ const MessageBlockInner: React.FC<MessageBlockProps> = ({
     const canInteract = isPending && isFirstPendingPermission;
 
     return (
-      <div style={{ margin: `${token.sizeUnit * 1.5}px 0` }}>
+      <div style={{ margin: blockMargin }}>
         <PermissionRequestBlock
           message={message}
           content={content}
@@ -397,7 +470,7 @@ const MessageBlockInner: React.FC<MessageBlockProps> = ({
   // daemons. See `docs/internal/in-conversation-widgets-design-2026-05-19.md`.
   if (message.type === 'widget_request') {
     return (
-      <div style={{ margin: `${token.sizeUnit * 1.5}px 0` }}>
+      <div style={{ margin: blockMargin }}>
         <WidgetBlock message={message} client={client} />
       </div>
     );
@@ -410,7 +483,7 @@ const MessageBlockInner: React.FC<MessageBlockProps> = ({
   const isCallback = message.metadata?.is_agor_callback === true;
 
   // Determine if this should be displayed as user or agent message
-  const isUser = message.role === 'user' && !isTaskPrompt && !isTaskResult;
+  const isUser = getMessageSpeaker(message) === 'user';
   const isAgent = message.role === 'assistant' || isTaskPrompt || isTaskResult || isSystem;
 
   // Check if message is currently streaming
@@ -512,7 +585,7 @@ const MessageBlockInner: React.FC<MessageBlockProps> = ({
           border: `1px solid ${token.colorWarning}`,
           borderRadius: token.borderRadiusLG,
           padding: '8px 12px',
-          margin: '8px 0',
+          margin: blockMargin,
           background: token.colorWarningBg,
         }}
       >
@@ -682,6 +755,59 @@ const MessageBlockInner: React.FC<MessageBlockProps> = ({
     return null;
   }
 
+  /**
+   * The avatar column for one bubble. Grouping replaces the avatar with a
+   * timestamp trigger; a message that renders both a pre-tool and a post-tool
+   * bubble only introduces its speaker once, on whichever bubble comes first.
+   */
+  const renderAvatarSlot = (avatar: React.ReactNode, isFirstBubble = true): React.ReactNode => {
+    if (!isFirstBubble) return <AvatarGutterSpacer />;
+    if (!showAvatar) {
+      if (!message.timestamp) return <AvatarGutterSpacer />;
+      const timestamp = formatTimestampWithRelative(message.timestamp, message.index);
+      return (
+        <Tooltip
+          title={timestamp}
+          trigger={['hover', 'focus']}
+          open={timestampOpen}
+          onOpenChange={setTimestampOpen}
+          mouseEnterDelay={0.5}
+          fresh
+        >
+          <Button
+            type="text"
+            shape="circle"
+            icon={<ClockCircleOutlined />}
+            aria-label={`Message ${message.index} timestamp: ${timestamp}`}
+            onClick={() => setTimestampOpen(true)}
+            onBlur={() => setTimestampOpen(false)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.stopPropagation();
+                setTimestampOpen(false);
+              }
+            }}
+            style={{
+              width: IDENTITY_AVATAR_SIZE,
+              height: IDENTITY_AVATAR_SIZE,
+              color: token.colorTextTertiary,
+            }}
+          />
+        </Tooltip>
+      );
+    }
+    if (!message.timestamp) return avatar;
+    return (
+      <Tooltip
+        title={() => formatTimestampWithRelative(message.timestamp, message.index)}
+        mouseEnterDelay={0.5}
+        fresh
+      >
+        <span>{avatar}</span>
+      </Tooltip>
+    );
+  };
+
   // IMPORTANT: For messages with tools AND text:
   // 1. Show thinking first (if any)
   // 2. Show tools next (compact, no bubble)
@@ -704,34 +830,23 @@ const MessageBlockInner: React.FC<MessageBlockProps> = ({
       {hasTextBefore &&
         (() => {
           const avatar = isUser ? (
-            <UserIdentityAvatar user={currentUser} size={compact ? 32 : 40} />
+            <UserIdentityAvatar user={currentUser} size={IDENTITY_AVATAR_SIZE} />
           ) : (
             getAgentAvatar({ teammateEmoji, agentic_tool, isCallback, token })
           );
 
           return (
-            <div style={{ margin: `${token.sizeUnit}px 0` }}>
+            <div style={{ margin: blockMargin }}>
               <Bubble
                 placement={isUser ? 'end' : 'start'}
-                avatar={
-                  message.timestamp ? (
-                    <Tooltip
-                      title={() => formatTimestampWithRelative(message.timestamp, message.index)}
-                      mouseEnterDelay={0.5}
-                      fresh
-                    >
-                      <span>{avatar}</span>
-                    </Tooltip>
-                  ) : (
-                    avatar
-                  )
-                }
+                avatar={renderAvatarSlot(avatar)}
                 loading={isLoading}
                 typing={shouldUseTyping ? { effect: 'typing', step: 5, interval: 20 } : false}
                 content={
                   <CopyableContent
                     textContent={textBeforeTools.join('\n\n')}
                     copyTooltip="Copy message"
+                    copyButtonOffset={isUser || isCallback ? undefined : PLAIN_COPY_OFFSET}
                   >
                     <div
                       style={{
@@ -741,20 +856,23 @@ const MessageBlockInner: React.FC<MessageBlockProps> = ({
                         gap: token.sizeUnit,
                       }}
                     >
-                      {textBeforeTools.map((text) => {
-                        // Use CollapsibleMarkdown for long text blocks (15+ lines)
-                        const shouldTruncate = text.split('\n').length > 15;
+                      {textBeforeTools.map((text, textIndex) => {
+                        const shouldTruncate = isLongMarkdown(text);
 
                         return (
-                          <div key={`text-${text.length}-${text.substring(0, 32)}`}>
+                          // Text slots are ordered within a message; content changes while streaming.
+                          // biome-ignore lint/suspicious/noArrayIndexKey: stable slot, never key streamed text by its changing content.
+                          <div key={`text-${textIndex}`}>
                             {shouldTruncate ? (
-                              <CollapsibleMarkdown
-                                maxLines={10}
-                                defaultExpanded={isLatestMessage}
+                              <HistoryMarkdown
+                                textKey={textChoiceKey ?? message.message_id}
+                                defaultExpanded={
+                                  isSystem || isTaskPrompt || isTaskResult || defaultTextExpanded
+                                }
                                 isStreaming={isStreaming}
                               >
                                 {text}
-                              </CollapsibleMarkdown>
+                              </HistoryMarkdown>
                             ) : (
                               <MarkdownRenderer content={text} inline isStreaming={isStreaming} />
                             )}
@@ -764,7 +882,7 @@ const MessageBlockInner: React.FC<MessageBlockProps> = ({
                     </div>
                   </CopyableContent>
                 }
-                variant={isUser || isCallback ? 'filled' : 'outlined'}
+                variant={isUser || isCallback ? 'filled' : 'borderless'}
                 styles={{
                   // Bubble.body defaults to min-width:auto. A wide intrinsic
                   // child (notably Streamdown's max-content code <pre>) can
@@ -773,10 +891,14 @@ const MessageBlockInner: React.FC<MessageBlockProps> = ({
                   // Bound the whole row (including avatar) and allow the body
                   // to shrink; the code body then owns horizontal scrolling.
                   root: { maxWidth: '100%', gap: compact ? 8 : undefined },
+                  // Reserve the avatar's real width so an end-aligned user row
+                  // never overflows the conversation and introduces a
+                  // horizontal scrollbar.
+                  avatar: isUser ? { width: IDENTITY_AVATAR_SIZE, flexShrink: 0 } : undefined,
                   body: { minWidth: 0, alignSelf: compact && isUser ? 'center' : undefined },
                   content: {
                     padding: compact && isUser ? '4px 10px' : undefined,
-                    minHeight: compact && isUser ? 32 : undefined,
+                    minHeight: compact && isUser ? IDENTITY_AVATAR_SIZE : undefined,
                     display: compact && isUser ? 'flex' : undefined,
                     alignItems: compact && isUser ? 'center' : undefined,
                     backgroundColor: isCallback
@@ -796,10 +918,12 @@ const MessageBlockInner: React.FC<MessageBlockProps> = ({
       {hasTools && (
         <div
           style={{
-            margin: `${token.sizeUnit * 1.5}px 0`,
+            margin: blockMargin,
             display: 'flex',
             flexDirection: 'column',
-            gap: 2,
+            // Tools read as one stack, so they sit tighter than the gap
+            // between blocks rather than on it.
+            gap: token.sizeUnit / 2,
           }}
         >
           {/* Index of last tool with a result — tools after this are potentially running */}
@@ -858,42 +982,33 @@ const MessageBlockInner: React.FC<MessageBlockProps> = ({
           const avatar = getAgentAvatar({ teammateEmoji, agentic_tool, isCallback, token });
 
           return (
-            <div style={{ margin: `${token.sizeUnit}px 0` }}>
+            <div style={{ margin: blockMargin }}>
               <Bubble
                 placement="start"
-                avatar={
-                  message.timestamp ? (
-                    <Tooltip
-                      title={() => formatTimestampWithRelative(message.timestamp, message.index)}
-                      mouseEnterDelay={0.5}
-                      fresh
-                    >
-                      <span>{avatar}</span>
-                    </Tooltip>
-                  ) : (
-                    avatar
-                  )
-                }
+                avatar={renderAvatarSlot(avatar, !hasTextBefore)}
                 loading={isLoading}
                 typing={shouldUseTyping ? { effect: 'typing', step: 5, interval: 20 } : false}
                 content={
                   <CopyableContent
                     textContent={textAfterTools.join('\n\n')}
                     copyTooltip="Copy message"
+                    copyButtonOffset={isCallback ? undefined : PLAIN_COPY_OFFSET}
                   >
                     <div style={{ wordWrap: 'break-word' }}>
                       {(() => {
                         const combinedText = textAfterTools.join('\n\n');
-                        const shouldTruncate = combinedText.split('\n').length > 15;
+                        const shouldTruncate = isLongMarkdown(combinedText);
 
                         return shouldTruncate ? (
-                          <CollapsibleMarkdown
-                            maxLines={10}
-                            defaultExpanded={isLatestMessage}
+                          <HistoryMarkdown
+                            textKey={textChoiceKey ?? message.message_id}
+                            defaultExpanded={
+                              isSystem || isTaskPrompt || isTaskResult || defaultTextExpanded
+                            }
                             isStreaming={isStreaming}
                           >
                             {combinedText}
-                          </CollapsibleMarkdown>
+                          </HistoryMarkdown>
                         ) : (
                           <MarkdownRenderer
                             content={combinedText}
@@ -905,7 +1020,7 @@ const MessageBlockInner: React.FC<MessageBlockProps> = ({
                     </div>
                   </CopyableContent>
                 }
-                variant={isCallback ? 'filled' : 'outlined'}
+                variant={isCallback ? 'filled' : 'borderless'}
                 styles={{
                   root: { maxWidth: '100%' },
                   body: { minWidth: 0 },

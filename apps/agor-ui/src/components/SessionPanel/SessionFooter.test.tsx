@@ -1,5 +1,6 @@
 import { AGENTIC_TOOL_CAPABILITIES } from '@agor/agentic-tools';
 import type {
+  AgorClient,
   CodexApprovalPolicy,
   CodexSandboxMode,
   EffortLevel,
@@ -7,12 +8,25 @@ import type {
   PermissionMode,
   Session,
 } from '@agor-live/client';
-import { act, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { App, ConfigProvider, theme } from 'antd';
 import type React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ConnectionProvider } from '../../contexts/ConnectionContext';
 import { useFooterPreferences } from '../../hooks/useFooterPreferences';
 import { SessionFooter } from './SessionFooter';
+
+vi.mock('../../hooks/useAuth', () => ({
+  useAuth: () => ({ user: { user_id: 'footer-user', role: 'member' } }),
+}));
 
 // ModelSelector makes async network calls — replace with a stub
 vi.mock('../ModelSelector', () => ({
@@ -25,7 +39,8 @@ vi.mock('../EffortSelector', () => ({
 }));
 
 // TimerPill uses complex internal state not needed for footer layout tests
-vi.mock('../Pill', () => ({
+vi.mock('../Pill', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../Pill')>()),
   TimerPill: () => <span data-testid="timer-pill-stub" />,
 }));
 
@@ -42,19 +57,9 @@ const baseSession: Session = {
   model_config: undefined,
 } as unknown as Session;
 
-const baseTokenBreakdown = {
-  total: 0,
-  input: 0,
-  output: 0,
-  cacheRead: 0,
-  cacheCreation: 0,
-  cost: 0,
-};
-
 const baseProps = {
   session: baseSession,
   footerTimerTask: null,
-  tokenBreakdown: baseTokenBreakdown,
   latestContextWindow: null,
   footerGradient: undefined,
   sessionMcpServerIds: [] as string[],
@@ -162,12 +167,11 @@ describe('SessionFooter', () => {
             model_config: undefined,
           } as unknown as Session
         }
-        tokenBreakdown={{ ...baseTokenBreakdown, total: 0 }}
       />,
       { wrapper: Wrapper }
     );
     expect(screen.queryByTestId('model-chip')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('tokens-chip')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show session usage' })).toBeInTheDocument();
     expect(screen.queryByTestId('stats-chip')).not.toBeInTheDocument();
   });
 
@@ -206,9 +210,11 @@ describe('SessionFooter', () => {
       />,
       { wrapper: Wrapper }
     );
-    const chip = screen.getByTestId('context-chip');
+    const chip = screen.getByText('85%');
+    expect(chip.querySelector('.anticon-percentage')).toBeNull();
+    expect(chip).toHaveTextContent(/^85%$/);
     expect(chip).toBeInTheDocument();
-    expect(chip.getAttribute('data-warning')).toBe('true');
+    expect(chip.closest('.ant-tag')).toHaveClass('ant-tag-red');
   });
 
   it('Individual model chip renders when model is present', () => {
@@ -318,8 +324,25 @@ describe('SessionFooter', () => {
     expect(disclosure).toHaveFocus();
   });
 
-  it('exposes dialog popup state and restores disclosure focus when Escape dismisses it', () => {
-    render(<SessionFooter {...baseProps} client={{} as never} />, { wrapper: Wrapper });
+  it('exposes dialog popup state and restores disclosure focus when Escape dismisses it', async () => {
+    const findAvailable = vi.fn().mockResolvedValue([]);
+    const service = vi.fn(() => ({ find: findAvailable }));
+    const client = { service } as unknown as AgorClient;
+    render(
+      <ConnectionProvider
+        value={{
+          connected: true,
+          connecting: false,
+          authGeneration: 1,
+          outOfSync: false,
+          capturedSha: null,
+          currentSha: null,
+        }}
+      >
+        <SessionFooter {...baseProps} client={client} currentUserId="footer-user" />
+      </ConnectionProvider>,
+      { wrapper: Wrapper }
+    );
     const disclosure = screen.getByRole('button', {
       name: 'MCP servers. No MCP servers attached. Open to add or change MCP servers.',
     });
@@ -335,6 +358,9 @@ describe('SessionFooter', () => {
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
 
     const selector = within(popup).getByRole('combobox');
+    await waitFor(() => expect(selector).toBeEnabled());
+    expect(service).toHaveBeenCalledWith(`sessions/${baseSession.session_id}/mcp-servers`);
+    expect(findAvailable).toHaveBeenCalledWith({ query: { available: true } });
     act(() => selector.focus());
     expect(selector).toHaveFocus();
     fireEvent.keyDown(selector, { key: 'Escape' });
