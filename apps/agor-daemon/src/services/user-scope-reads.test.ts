@@ -101,6 +101,14 @@ describe('user-scope reads through transport hooks', () => {
     expect(new Set([...capped.data, ...next.data].map((b) => b.branch_id))).toEqual(
       new Set([mateId, privateMateId])
     );
+    // An empty page past the end still reports the real total.
+    const pastEnd = (await app.service('branches').find({
+      provider: 'rest',
+      user: owner,
+      query: { teammate: true, archived: false, $limit: 5, $skip: 10 },
+    } as never)) as { total: number; data: Branch[] };
+    expect(pastEnd.data).toEqual([]);
+    expect(pastEnd.total).toBe(2);
     // A complete page's total is its row count.
     const complete = (await app.service('branches').find({
       provider: 'rest',

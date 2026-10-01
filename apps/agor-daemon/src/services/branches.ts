@@ -1812,9 +1812,13 @@ export class BranchesService extends DrizzleService<Branch, Partial<Branch>, Bra
       const data = await this.branchRepo.enrichManyWithZoneInfo(
         hasMore ? probe.slice(0, limit) : probe
       );
-      const total = hasMore
-        ? await this.branchRepo.countTeammateBranches(filter)
-        : skip + data.length;
+      // A capped page can't know the total, and neither can an empty page
+      // past the end (`skip + 0` would invent one): count those. Otherwise
+      // the page ended inside the set, so the total is `skip + rows`.
+      const total =
+        hasMore || (skip > 0 && data.length === 0)
+          ? await this.branchRepo.countTeammateBranches(filter)
+          : skip + data.length;
       return { total, limit, skip, data };
     }
     if (shouldSqlPageBranchQuery(query)) {
