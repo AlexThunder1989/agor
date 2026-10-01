@@ -1301,10 +1301,12 @@ describe('useAgorData — lean boards list + objects hydration', () => {
 
 describe('useAgorData — user-scope flags', () => {
   it('reset on an identity change and recover once the silent resync re-runs the scope', async () => {
+    // Rows honour each user's `created_by` filter (rows violating it would
+    // read as an older daemon that ignores the key).
     const seed: Record<string, unknown[]> = {
-      'sessions:find': [makeSession()],
-      'sessions:findAll': [makeSession()],
-      'branches:findAll': [makeBranch()],
+      'sessions:find': [makeSession({ created_by: 'user-a' })],
+      'sessions:findAll': [makeSession({ created_by: 'user-a' })],
+      'branches:findAll': [makeBranch({ created_by: 'user-a' })],
     };
     const gate = deferred();
     const { client, onFetch, fetchCount } = makeMockClient(seed);
@@ -1328,6 +1330,9 @@ describe('useAgorData — user-scope flags', () => {
     // Hold the resync's full session fetch so the reset flags can be observed first.
     const calls = fetchCount('sessions', 'findAll');
     onFetch('sessions', 'findAll', (call) => (call > calls ? gate.promise : undefined));
+    seed['sessions:find'] = [makeSession({ created_by: 'user-b' })];
+    seed['sessions:findAll'] = [makeSession({ created_by: 'user-b' })];
+    seed['branches:findAll'] = [makeBranch({ created_by: 'user-b' })];
     rerender({ userId: 'user-b', generation: 2 });
     await flush();
     expect(scopeLoaded()).toEqual([false, false, false]);
@@ -1725,6 +1730,62 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
       ).toBe(false);
     } finally {
       bob.unmount();
+    }
+  });
+
+  it('completes Home from the global snapshots against an older daemon that rejects every new key', async () => {
+    window.history.pushState({}, '', '/');
+    const mine = makeSession({ session_id: 's-mine', created_by: 'user-me', branch_id: 'b-1' });
+    const lost = makeSession({ session_id: 's-lost', created_by: 'user-me', branch_id: 'b-gone' });
+    const mock = makeMockClient({
+      'sessions:find': [mine],
+      'sessions:findAll': [mine, lost],
+      'branches:findAll': [makeBranch({ branch_id: 'b-1', created_by: 'user-me' })],
+    });
+    // The pre-PR validator: `created_by` with `$count: false`, `teammate`,
+    // branch `created_by` and id lists are all rejected with 400, every time.
+    const rejected: unknown[] = [];
+    const isNewKey = (name: string, query: Record<string, unknown> = {}) =>
+      (name === 'sessions' && query.created_by !== undefined) ||
+      (name === 'branches' &&
+        (query.created_by !== undefined ||
+          query.teammate !== undefined ||
+          typeof query.branch_id === 'object'));
+    const service = mock.client.service;
+    (mock.client as { service: unknown }).service = (name: string) => {
+      const svc = service(name);
+      for (const method of ['find', 'findAll'] as const) {
+        const original = svc[method];
+        svc[method] = vi.fn((args?: { query?: Record<string, unknown> }) => {
+          if (isNewKey(name, args?.query)) {
+            rejected.push(args?.query);
+            return Promise.reject(
+              Object.assign(new Error('Invalid query'), { name: 'BadRequest', code: 400 })
+            );
+          }
+          return original(args);
+        });
+      }
+      return svc;
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { result } = renderHook(() => useAgorData(mock.client, authority));
+      await waitForInitialLoad(result);
+      expect(result.current.error).toBeNull();
+      await waitFor(() => {
+        const state = agorStore.getState();
+        expect(state.userScopeDegraded).toBe(true);
+        expect(state.mySessionsLoaded).toBe(true);
+        expect(state.teammatesLoaded).toBe(true);
+        expect(state.homeBranchesLoaded).toBe(true);
+      });
+      expect(agorStore.getState().sessionById.has('s-lost')).toBe(true);
+      expect([...agorStore.getState().absentBranchIds]).toEqual(['b-gone']);
+      // Only the gated page probed the new keys; the scope sent none after it.
+      expect(rejected).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
     }
   });
 

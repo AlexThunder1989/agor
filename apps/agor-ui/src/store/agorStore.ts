@@ -89,6 +89,12 @@ export interface UserScopeMeta {
   teammatesLoaded: boolean;
   /** Referenced branch ids the server did not return (archived, deleted or invisible). */
   absentBranchIds: Set<string>;
+  /**
+   * The daemon does not support the user-scope reads (an older daemon rejects
+   * or ignores their query keys). Terminal for the run; while global
+   * hydration exists (Steps 1–2) its snapshots complete the scope instead.
+   */
+  userScopeDegraded: boolean;
 }
 
 const INITIAL_USER_SCOPE: UserScopeMeta = {
@@ -97,6 +103,7 @@ const INITIAL_USER_SCOPE: UserScopeMeta = {
   homeBranchesLoaded: false,
   teammatesLoaded: false,
   absentBranchIds: new Set(),
+  userScopeDegraded: false,
 };
 
 /** Load/meta fields that ride alongside the data maps. */

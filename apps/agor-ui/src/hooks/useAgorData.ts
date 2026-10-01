@@ -57,7 +57,12 @@ import {
   keepLiveWrites,
 } from '../store/agorMaps';
 import * as realtime from '../store/agorRealtimeActions';
-import { agorStore, shallow, useStoreWithEqualityFn } from '../store/agorStore';
+import {
+  agorStore,
+  GLOBALLY_HYDRATED_COLLECTIONS,
+  shallow,
+  useStoreWithEqualityFn,
+} from '../store/agorStore';
 import { markBoardPartitionLoaded } from '../store/boardPartitions';
 import type { LoadLifetime } from '../store/loadLifetime';
 import {
@@ -73,6 +78,7 @@ import {
   untombstoneSession,
 } from '../store/realtimeBatch';
 import {
+  isUnsupportedQueryError,
   MY_SESSIONS_GATED_LIMIT,
   mySessionsQuery,
   startUserScope,
@@ -674,6 +680,9 @@ export function useAgorData(
         // Set when the gated page of MY sessions returned fewer rows than its
         // limit, i.e. it already holds every active session I created.
         let gatedMineComplete = false;
+        // Set when the daemon rejected the gated page's keys or ignored its
+        // `created_by` filter (an older daemon): the user scope starts degraded.
+        let gatedUnsupported = false;
         // The global recent slice: the reconnect resync's full set, the
         // fallback when the user-scoped page is unavailable (an older daemon
         // rejects `created_by` with `$count:false`), and the standalone default.
@@ -714,7 +723,11 @@ export function useAgorData(
                     .find({ query: mySessionsQuery(authenticatedUserId, MY_SESSIONS_GATED_LIMIT) })
                     .then((result) => {
                       const rows = (Array.isArray(result) ? result : result.data) as Session[];
-                      gatedMineComplete = rows.length < MY_SESSIONS_GATED_LIMIT;
+                      // Rows of other users mean the filter was ignored: still
+                      // visible rows for first paint, but no proof of "all mine".
+                      gatedUnsupported = rows.some((s) => s.created_by !== authenticatedUserId);
+                      gatedMineComplete =
+                        !gatedUnsupported && rows.length < MY_SESSIONS_GATED_LIMIT;
                       return rows;
                     })
                     .catch((err) => {
@@ -722,6 +735,7 @@ export function useAgorData(
                         '[useAgorData] my-sessions page failed; using recent slice:',
                         err
                       );
+                      gatedUnsupported = isUnsupportedQueryError(err);
                       return recentSessions();
                     })
                 : recentSessions()
@@ -1108,6 +1122,9 @@ export function useAgorData(
         // The background hydrations kicked off below re-snapshot AFTER this bump,
         // so they're unaffected.
         bumpFirstPaintMergeRevisions();
+        // A silent resync reads every global collection in full: a complete
+        // global snapshot, exactly like the background hydrations' applies.
+        if (silent) agorStore.getState().markGloballyHydrated(GLOBALLY_HYDRATED_COLLECTIONS);
         // The scope and the partition record carry THIS load's lifetime, never
         // whatever authority is current when they run (a remount can swap it).
         const loadLifetime: LoadLifetime = { authorityScope: fetchAuthorityScope, loadEpoch };
@@ -1128,6 +1145,7 @@ export function useAgorData(
             userId: authenticatedUserId,
             lifetime: loadLifetime,
             gatedMineComplete: !silent && gatedMineComplete,
+            unsupported: !silent && gatedUnsupported,
           });
         }
 

@@ -270,7 +270,7 @@ describe('user scope', () => {
     expect(agorStore.getState().absentBranchIds.size).toBe(0);
   });
 
-  it('leaves flags unset when my sessions cannot be read (older daemon)', async () => {
+  it('leaves flags unset when my sessions cannot be read and no global snapshot applied', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { client } = makeClient({
       mine: () => Promise.reject(new Error('400 created_by unsupported')),
@@ -506,6 +506,37 @@ describe('user scope', () => {
     releaseMine();
     await run;
     await vi.waitFor(() => expect(flags().homeBranchesLoaded).toBe(true));
+  });
+
+  it('degrades when the daemon ignores a key, and lets the global snapshots complete the scope', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    agorStore.getState().applyMaps((prev) => ({
+      ...prev,
+      sessionById: new Map([['s-1', session('s-1', 'br-missing')]]),
+    }));
+    // An older validator strips `created_by` and `teammate`: unfiltered rows.
+    const everyone = [branch('br-bob', { created_by: 'bob' } as Partial<Branch>)];
+    const { client } = makeClient({
+      myBranches: () => everyone,
+      teammates: () => everyone,
+      byIds: () => everyone,
+    });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: true });
+    expect(agorStore.getState().userScopeDegraded).toBe(true);
+    // U3 answered rows, but a daemon ignoring keys can't prove teammates.
+    expect(flags().teammatesLoaded).toBe(false);
+    expect(flags().homeBranchesLoaded).toBe(false);
+
+    agorStore.getState().markGloballyHydrated(['sessions', 'branches']);
+    await vi.waitFor(() =>
+      expect(flags()).toEqual({
+        mySessionsLoaded: true,
+        mySessionsTruncated: false,
+        teammatesLoaded: true,
+        homeBranchesLoaded: true,
+      })
+    );
+    expect([...agorStore.getState().absentBranchIds]).toEqual(['br-missing']);
   });
 
   it('keeps flags true while a silent-resync re-run is in flight', async () => {

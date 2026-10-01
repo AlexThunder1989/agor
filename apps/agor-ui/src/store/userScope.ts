@@ -71,6 +71,28 @@ export function mySessionsQuery(userId: string, limit: number) {
   });
 }
 
+/**
+ * The daemon does not support a user-scope read: it rejected the query (400,
+ * an older validator) or answered rows that violate the filter (an older
+ * validator that strips unknown keys and returns an unfiltered result).
+ */
+export class UnsupportedScopeReadError extends Error {
+  constructor(detail: string) {
+    super(`user-scope read unsupported: ${detail}`);
+    this.name = 'UnsupportedScopeReadError';
+  }
+}
+
+/** Whether a read failed because the daemon rejected the query itself (HTTP 400). */
+export function isUnsupportedQueryError(err: unknown): boolean {
+  const error = err as { code?: unknown; name?: unknown } | null;
+  return error?.code === 400 || error?.name === 'BadRequest';
+}
+
+/** Whether the global session and branch snapshots have applied (Steps 1–2 only). */
+const globalSetsComplete = (s: AgorState) =>
+  s.globallyHydrated.has('sessions') && s.globallyHydrated.has('branches');
+
 const rowsOf = <T>(result: unknown): T[] =>
   Array.isArray(result) ? (result as T[]) : ((result as { data?: T[] })?.data ?? []);
 
@@ -125,6 +147,13 @@ interface ScopeRun {
   inflight: number;
   /** Every reference is known: my sessions (U1 or a complete gated page) and my branches (U2) loaded. */
   referencesKnown: boolean;
+  /** The daemon does not support the scope reads; no more of them are sent. */
+  degraded: boolean;
+  /**
+   * A scope read was unsupported or failed: the global snapshots (Steps 1–2)
+   * may complete the flags it left unset (`applyGlobalCompatibility`).
+   */
+  compat: boolean;
   referenceTimer: ReturnType<typeof setTimeout> | null;
   retryTimers: Set<ReturnType<typeof setTimeout>>;
   unsubscribe: (() => void) | null;
@@ -141,13 +170,22 @@ const isCurrent = (run: ScopeRun) => currentRun === run && isLoadLifetimeCurrent
  */
 async function fillRead(
   run: ScopeRun,
-  read: () => Promise<{ branches?: Branch[]; sessions?: Session[] }>
+  read: () => Promise<{ branches?: Branch[]; sessions?: Session[] }>,
+  /** Rows the filter can't have produced mean the daemon ignored the filter. */
+  violatesFilter?: (rows: { branches?: Branch[]; sessions?: Session[] }) => boolean
 ): Promise<{ branches?: Branch[]; sessions?: Session[] } | null> {
   for (let attempt = 0; ; attempt++) {
     const fence = beginPartitionLoad();
     try {
-      const rows = await read();
+      let rows: { branches?: Branch[]; sessions?: Session[] };
+      try {
+        rows = await read();
+      } catch (err) {
+        if (isUnsupportedQueryError(err)) throw new UnsupportedScopeReadError(String(err));
+        throw err;
+      }
       if (!isCurrent(run)) return null;
+      if (violatesFilter?.(rows)) throw new UnsupportedScopeReadError('filter ignored');
       if (wholesaleReplacedSince(fence)) {
         if (attempt < MAX_WHOLESALE_RESTARTS) continue;
         throw new WholesaleReplacementError();
@@ -189,8 +227,46 @@ function missingReferences(s: AgorState, run: ScopeRun): string[] {
   return missing;
 }
 
+/**
+ * Compatibility path while global hydration exists (Steps 1–2; removed with
+ * the global loops in 3.3). Once the global session and branch snapshots have
+ * applied, the store holds every active session and branch the caller can
+ * see, so they complete any flag a degraded or failed scope left unset, and a
+ * referenced branch that is still missing is absent.
+ */
+function applyGlobalCompatibility(run: ScopeRun): void {
+  if (!isCurrent(run) || !run.compat) return;
+  const state = agorStore.getState();
+  if (!globalSetsComplete(state)) return;
+  const unresolved = [...referencedBranchIds(state, run.userId)].filter(
+    (id) => !state.branchById.has(id) && !run.pending.has(id)
+  );
+  updateAbsent(unresolved);
+  for (const id of unresolved) run.failed.delete(id);
+  state.setUserScope({
+    ...(state.mySessionsLoaded ? {} : { mySessionsLoaded: true, mySessionsTruncated: false }),
+    teammatesLoaded: true,
+  });
+  if (run.pending.size === 0) state.setUserScope({ homeBranchesLoaded: true });
+}
+
+/** Stop sending scope reads: the daemon doesn't support them (terminal for the run). */
+function enterDegraded(run: ScopeRun, reason: unknown): void {
+  if (!isCurrent(run)) return;
+  if (!run.degraded) console.warn('[userScope] daemon does not support user-scope reads:', reason);
+  run.degraded = true;
+  run.compat = true;
+  run.queue = [];
+  run.pending.clear();
+  for (const timer of run.retryTimers) clearTimeout(timer);
+  run.retryTimers.clear();
+  agorStore.getState().setUserScope({ userScopeDegraded: true });
+  applyGlobalCompatibility(run);
+}
+
 /** `homeBranchesLoaded` once every reference is known and none is unresolved. */
 function settleHomeBranches(run: ScopeRun): void {
+  applyGlobalCompatibility(run);
   if (!isCurrent(run) || !run.referencesKnown) return;
   if (run.pending.size > 0 || run.failed.size > 0) return;
   if (missingReferences(agorStore.getState(), run).length > 0) return;
@@ -199,6 +275,7 @@ function settleHomeBranches(run: ScopeRun): void {
 
 /** Queue branch ids for id-list reads (deduplicated by `pending`). */
 function queueBranches(run: ScopeRun, ids: Iterable<string>): void {
+  if (run.degraded) return;
   for (const id of ids) {
     if (run.pending.has(id)) continue;
     run.pending.add(id);
@@ -228,13 +305,18 @@ function pumpBranchReads(run: ScopeRun): void {
  */
 async function readBranchChunk(run: ScopeRun, chunk: string[]): Promise<void> {
   try {
-    const rows = await fillRead(run, async () => ({
-      branches: rowsOf<Branch>(
-        await run.client.service('branches').find({
-          query: { branch_id: { $in: chunk }, archived: false, $limit: chunk.length },
-        })
-      ),
-    }));
+    const requested = new Set(chunk);
+    const rows = await fillRead(
+      run,
+      async () => ({
+        branches: rowsOf<Branch>(
+          await run.client.service('branches').find({
+            query: { branch_id: { $in: chunk }, archived: false, $limit: chunk.length },
+          })
+        ),
+      }),
+      ({ branches }) => (branches ?? []).some((branch) => !requested.has(branch.branch_id))
+    );
     if (!rows) return;
     const returned = new Set((rows.branches ?? []).map((branch) => branch.branch_id as string));
     const state = agorStore.getState();
@@ -245,6 +327,10 @@ async function readBranchChunk(run: ScopeRun, chunk: string[]): Promise<void> {
     }
   } catch (err) {
     if (!isCurrent(run)) return;
+    if (err instanceof UnsupportedScopeReadError) {
+      enterDegraded(run, err);
+      return;
+    }
     console.warn('[userScope] referenced branches failed:', err);
     scheduleRetry(run, chunk);
   }
@@ -259,6 +345,7 @@ function scheduleRetry(run: ScopeRun, ids: string[]): void {
       run.pending.delete(id);
       run.failed.add(id);
     }
+    run.compat = true;
     return;
   }
   const timer = setTimeout(
@@ -299,7 +386,8 @@ function subscribeToReferences(run: ScopeRun): void {
     if (
       state.sessionById === prev.sessionById &&
       state.commentById === prev.commentById &&
-      state.branchById === prev.branchById
+      state.branchById === prev.branchById &&
+      state.globallyHydrated === prev.globallyHydrated
     ) {
       return;
     }
@@ -334,7 +422,13 @@ export function stopUserScope(): void {
  */
 export async function startUserScope(
   client: AgorClient,
-  options: { userId: string; lifetime: LoadLifetime; gatedMineComplete: boolean }
+  options: {
+    userId: string;
+    lifetime: LoadLifetime;
+    gatedMineComplete: boolean;
+    /** The gated my-sessions page was rejected as unsupported: start degraded. */
+    unsupported?: boolean;
+  }
 ): Promise<void> {
   if (!isLoadLifetimeCurrent(options.lifetime)) return;
   stopUserScope();
@@ -348,6 +442,8 @@ export async function startUserScope(
     attempts: new Map(),
     inflight: 0,
     referencesKnown: false,
+    degraded: false,
+    compat: false,
     referenceTimer: null,
     retryTimers: new Set(),
     unsubscribe: null,
@@ -360,6 +456,12 @@ export async function startUserScope(
   // are in flight is seen by the subscription, never lost between a scan and
   // a late subscribe.
   subscribeToReferences(run);
+  // An older daemon rejected the gated page's keys; it rejects (or ignores)
+  // every scope read the same way, so send none.
+  if (options.unsupported) {
+    enterDegraded(run, 'the gated my-sessions page was rejected');
+    return;
+  }
   // Absent marks are negatives of the authority that produced them (a grant,
   // reconnect or role change can make a branch visible): revalidate them.
   queueBranches(run, store().absentBranchIds);
@@ -370,13 +472,18 @@ export async function startUserScope(
 
   const u1 = options.gatedMineComplete
     ? Promise.resolve(true)
-    : fillRead(run, async () => ({
-        sessions: rowsOf<Session>(
-          await client
-            .service('sessions')
-            .find({ query: mySessionsQuery(run.userId, MY_SESSIONS_FULL_LIMIT) })
-        ),
-      })).then((rows) => {
+    : fillRead(
+        run,
+        async () => ({
+          sessions: rowsOf<Session>(
+            await client
+              .service('sessions')
+              .find({ query: mySessionsQuery(run.userId, MY_SESSIONS_FULL_LIMIT) })
+          ),
+        }),
+        ({ sessions }) =>
+          (sessions ?? []).some((row) => row.created_by !== run.userId || row.archived)
+      ).then((rows) => {
         if (!rows) return false;
         store().setUserScope({
           mySessionsLoaded: true,
@@ -384,30 +491,49 @@ export async function startUserScope(
         });
         return true;
       });
-  const u2 = fillRead(run, async () => ({
-    branches: rowsOf<Branch>(
-      await client.service('branches').findAll({
-        query: { created_by: run.userId, archived: false, $limit: PAGINATION.DEFAULT_LIMIT },
-      })
-    ),
-  })).then(Boolean);
+  const u2 = fillRead(
+    run,
+    async () => ({
+      branches: rowsOf<Branch>(
+        await client.service('branches').findAll({
+          query: { created_by: run.userId, archived: false, $limit: PAGINATION.DEFAULT_LIMIT },
+        })
+      ),
+    }),
+    ({ branches }) => (branches ?? []).some((row) => row.created_by !== run.userId)
+  ).then(Boolean);
   const u3 = fillRead(run, async () => ({
     branches: rowsOf<Branch>(
       await client.service('branches').find({
         query: { teammate: true, archived: false, $limit: PAGINATION.MAX_TEAMMATE_BRANCHES },
       })
     ),
-  })).then((rows) => {
+  })).then(async (rows) => {
     if (!rows) return false;
+    // U3's rows can't be checked against its filter (the server's teammate
+    // set is a superset of the client's), but a daemon that ignores
+    // `teammate` also ignores U2's `created_by`: trust U3 only once U2 proved
+    // the keys are honoured.
+    const keysHonoured = await u2.catch(() => false);
+    if (!keysHonoured || run.degraded || !isCurrent(run)) return false;
     store().setUserScope({ teammatesLoaded: true });
     return true;
   });
 
   const settled = await Promise.allSettled([u1, u2, u3]);
-  for (const result of settled) {
-    if (result.status === 'rejected') console.warn('[userScope] read failed:', result.reason);
-  }
   if (!isCurrent(run)) return;
+  for (const result of settled) {
+    if (result.status === 'fulfilled') continue;
+    if (result.reason instanceof UnsupportedScopeReadError) enterDegraded(run, result.reason);
+    else console.warn('[userScope] read failed:', result.reason);
+  }
+  if (settled.some((result) => result.status === 'rejected' || !result.value)) {
+    // A flag this run could not set may still be completed by the global
+    // snapshots (Steps 1–2).
+    run.compat = true;
+    applyGlobalCompatibility(run);
+  }
+  if (run.degraded) return;
   // Every reference is known once all of my sessions and my branches are in;
   // teammates (U3) only shrink the id list, so they needn't succeed.
   const ok = (index: number) => settled[index].status === 'fulfilled' && settled[index].value;
