@@ -54,3 +54,17 @@ export function getSessionStatusTone(status: StatusInput): StatusTone {
 
 export const isSessionFailed = (session: Pick<Session, 'status'>): boolean =>
   session.status === SessionStatus.FAILED;
+
+const STATUS_LABELS: Record<SessionStatus, string> = {
+  [SessionStatus.RUNNING]: 'Running',
+  [SessionStatus.AWAITING_PERMISSION]: 'Awaiting permission',
+  [SessionStatus.AWAITING_INPUT]: 'Awaiting input',
+  [SessionStatus.STOPPING]: 'Stopping',
+  [SessionStatus.TIMED_OUT]: 'Timed out',
+  [SessionStatus.FAILED]: 'Failed',
+  [SessionStatus.IDLE]: 'Idle',
+  [SessionStatus.COMPLETED]: 'Completed',
+};
+
+export const getSessionStatusLabel = (status: string): string =>
+  STATUS_LABELS[status as SessionStatus] ?? status.replaceAll('_', ' ');
