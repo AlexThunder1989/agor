@@ -157,6 +157,18 @@ export function assertSessionArchiveStateUsesDedicatedOperation(data: SessionUpd
   }
 }
 
+/**
+ * `read_shape` marks a lean `sessions.find` row (`SESSION_LIST_ROW_SHAPE`) and is
+ * set only by that read projection. It is never stored, so a write carrying it
+ * could only echo it back on the response and the realtime event, where it
+ * would mark a full row as lean.
+ */
+function assertSessionReadShapeNotWritten(data: object): void {
+  if (Object.hasOwn(data, 'read_shape')) {
+    throw new BadRequest('read_shape is a read projection marker and cannot be written');
+  }
+}
+
 function normalizeCreateMcpServerIds(value: unknown): MCPServerID[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) {
@@ -476,6 +488,7 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
     if (Object.hasOwn(data, 'sdk_home_scope')) {
       throw new BadRequest('sdk_home_scope is server-managed and cannot be set by clients');
     }
+    assertSessionReadShapeNotWritten(data);
     const explicitMcpServerIds = normalizeCreateMcpServerIds(
       (data as { mcpServerIds?: unknown }).mcpServerIds
     );
@@ -1803,6 +1816,7 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
     if (Object.hasOwn(data, 'sdk_home_scope')) {
       throw new BadRequest('sdk_home_scope is immutable and server-managed');
     }
+    assertSessionReadShapeNotWritten(data);
     let replaceAgenticConfig = false;
     if (
       (id === null || Array.isArray(id)) &&
@@ -1968,7 +1982,8 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
    * Note: Last message is NOT included in list operations - only on single GET.
    *
    * `lean: true` is a list-only projection that omits bulky single-session
-   * `custom_context` keys from every row (see `toLeanSessionListRow`). It is not
+   * `custom_context` keys from every row and stamps each row with the
+   * `read_shape` marker (see `toLeanSessionListRow` / `SessionListRow`). It is not
    * a column, so it is removed from the query before any filter sees it, and
    * it never widens visibility: rows come from the same scoped read either way.
    * The result object itself is preserved so its enrichment marker survives.
