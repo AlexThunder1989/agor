@@ -123,7 +123,6 @@ describe('Home selectors on a 7k-session tenant', () => {
     expect(firstBuckets.needsByReason.failed).toBeGreaterThan(0);
 
     // Streaming-style patches to someone else's sessions: new session and map identities.
-    let t = 0;
     const patched = Array.from({ length: 30 }, (_, i) => {
       const id = `s-${i * 19 + 1}`;
       const sessionById = new Map(base.sessionById);
@@ -133,12 +132,14 @@ describe('Home selectors on a 7k-session tenant', () => {
     const bucketTimes: number[] = [];
     const commentHitTimes: number[] = [];
     for (const state of patched) {
-      t = performance.now();
-      expect(buckets(state)).toBe(firstBuckets);
+      let t = performance.now();
+      const nextBuckets = buckets(state);
       bucketTimes.push(performance.now() - t);
+      expect(nextBuckets).toBe(firstBuckets);
       t = performance.now();
-      expect(comments(state)).toBe(firstComments);
+      const nextComments = comments(state);
       commentHitTimes.push(performance.now() - t);
+      expect(nextComments).toBe(firstComments);
     }
 
     // A new comment each time: the comments selector recomputes every thread.
@@ -152,9 +153,10 @@ describe('Home selectors on a 7k-session tenant', () => {
         resolved: false,
       });
       const state = { ...base, commentById };
-      t = performance.now();
-      expect(comments(state)).not.toBe(firstComments);
+      const t = performance.now();
+      const nextComments = comments(state);
       commentTimes.push(performance.now() - t);
+      expect(nextComments).not.toBe(firstComments);
     }
 
     console.info(
