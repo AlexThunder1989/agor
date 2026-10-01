@@ -127,6 +127,8 @@ export interface SessionPageOptions {
   boardId?: string;
   branchId?: BranchID;
   branchIds?: BranchID[];
+  /** Restrict to these session ids (an empty set yields no rows). */
+  sessionIds?: SessionID[];
   /** Restrict to sessions created by this user (a filter, never an access grant). */
   createdBy?: UserID;
   archived?: boolean;
@@ -604,7 +606,7 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
         throw new Error('No-count session queries require a non-negative integer limit');
       }
       const tenantCondition = tenantInventoryCondition(this.db, sessions);
-      if (opts.branchIds?.length === 0)
+      if (opts.branchIds?.length === 0 || opts.sessionIds?.length === 0)
         return opts.includeTotal === false ? { data: [] } : { data: [], total: 0 };
       const baseUrl = await getBaseUrl(this.db);
 
@@ -615,6 +617,8 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
       if (opts.branchId !== undefined) conditions.push(eq(sessions.branch_id, opts.branchId));
       if (opts.branchIds !== undefined)
         conditions.push(inArray(sessions.branch_id, opts.branchIds));
+      if (opts.sessionIds !== undefined)
+        conditions.push(inArray(sessions.session_id, opts.sessionIds));
       if (opts.createdBy !== undefined) conditions.push(eq(sessions.created_by, opts.createdBy));
       if (opts.archived !== undefined) conditions.push(eq(sessions.archived, opts.archived));
       if (opts.visibleToUserId) {

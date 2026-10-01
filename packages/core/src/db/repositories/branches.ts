@@ -24,7 +24,20 @@ import type {
   SessionStatus,
   UUID,
 } from '@agor/core/types';
-import { and, asc, desc, eq, exists, inArray, isNull, like, or, type SQL, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  inArray,
+  isNotNull,
+  isNull,
+  like,
+  or,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 import { getBaseUrl } from '../../config/config-manager';
 import { generateId } from '../../lib/ids';
 import {
@@ -74,6 +87,7 @@ import {
 import {
   minimumBranchAccessCondition,
   sessionBranchAccessCondition,
+  visibleBoardReferenceAccessExists,
   visibleBranchAccessCondition,
   visibleBranchReferenceAccessExists,
 } from './branch-access';
@@ -471,6 +485,8 @@ export class BranchRepository implements BaseRepository<Branch, Partial<Branch>>
     zone_id?: string;
     archived?: boolean;
     branchIds?: BranchID[];
+    /** Restrict to branches created by this user (a filter, never an access grant). */
+    createdBy?: UUID;
     visibleToUserId?: UUID;
     limit?: number;
     offset?: number;
@@ -490,6 +506,7 @@ export class BranchRepository implements BaseRepository<Branch, Partial<Branch>>
     }
     if (opts.archived !== undefined) conditions.push(eq(branches.archived, opts.archived));
     if (opts.branchIds) conditions.push(inArray(branches.branch_id, opts.branchIds));
+    if (opts.createdBy) conditions.push(eq(branches.created_by, opts.createdBy));
     if (opts.visibleToUserId) {
       conditions.push(visibleBranchAccessCondition(this.db, opts.visibleToUserId));
     }
@@ -529,6 +546,38 @@ export class BranchRepository implements BaseRepository<Branch, Partial<Branch>>
     const baseUrl = await getBaseUrl(this.db);
     const rows = await dataQuery.all();
     return { data: (rows as BranchRow[]).map((row) => this.rowToBranch(row, baseUrl)), total };
+  }
+
+  /**
+   * Count active (non-archived) branches per board, for board badges.
+   *
+   * With `visibleToUserId`, only branches the user can view on boards the user
+   * can view are counted (the same predicates as `branches.find` and
+   * `boards.find`), so a count never reveals a private branch or board. Tenancy
+   * is enforced by the same row-level security as every branch read.
+   */
+  async countActiveByBoard(opts: {
+    visibleToUserId?: UUID;
+  }): Promise<Array<{ board_id: BoardID; branch_count: number }>> {
+    const conditions: SQL[] = [eq(branches.archived, false), isNotNull(branches.board_id)];
+    if (opts.visibleToUserId) {
+      conditions.push(visibleBranchAccessCondition(this.db, opts.visibleToUserId));
+      conditions.push(
+        visibleBoardReferenceAccessExists(this.db, opts.visibleToUserId, branches.board_id)
+      );
+    }
+    const rows = await select(this.db, {
+      board_id: branches.board_id,
+      branch_count: sql<number>`count(*)`,
+    })
+      .from(branches)
+      .where(and(...conditions))
+      .groupBy(branches.board_id)
+      .all();
+    return (rows as Array<{ board_id: string; branch_count: number | string }>).map((row) => ({
+      board_id: row.board_id as BoardID,
+      branch_count: Number(row.branch_count),
+    }));
   }
 
   /**

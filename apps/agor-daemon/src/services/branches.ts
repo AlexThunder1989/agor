@@ -154,6 +154,8 @@ export const BRANCH_MATERIALIZATION_INTENT = Symbol('branchMaterializationIntent
  */
 export type BranchParams = QueryParams<{
   branch_id?: BranchID | { $in?: BranchID[] };
+  created_by?: UUID;
+  teammate?: boolean;
   repo_id?: UUID;
   name?: string;
   ref?: string;
@@ -178,6 +180,7 @@ function shouldSqlPageBranchQuery(query?: Record<string, unknown>): boolean {
     'board_id',
     'repo_id',
     'branch_id',
+    'created_by',
     'zone_id',
     '$limit',
     '$skip',
@@ -187,7 +190,7 @@ function shouldSqlPageBranchQuery(query?: Record<string, unknown>): boolean {
   // An empty virtual filter historically goes through the generic adapter;
   // do not turn it into an unrestricted SQL page.
   if (query.zone_id === '') return false;
-  for (const key of ['archived', 'board_id', 'repo_id', 'zone_id']) {
+  for (const key of ['archived', 'board_id', 'repo_id', 'zone_id', 'created_by']) {
     if (query[key] !== undefined && typeof query[key] !== 'boolean' && key === 'archived') {
       return false;
     }
@@ -238,6 +241,25 @@ function parseStartWebhookResult(options: {
     throw new Error('environment start webhook returned invalid result JSON');
   }
   return validateEnvironmentLifecycleResult(decoded);
+}
+
+/**
+ * `branches.find({ teammate: true, archived? , $limit? })`: every teammate
+ * branch the caller can view, through `BranchRepository.findTeammateBranches`.
+ * The marker set is a superset of the client's teammate check (it also matches
+ * branches with an enabled schedule), so clients keep their own filter.
+ */
+function isTeammateBranchQuery(query?: Record<string, unknown>): boolean {
+  if (!query || query.teammate === undefined) return false;
+  if (query.teammate !== true) {
+    throw new BadRequest('teammate only supports true');
+  }
+  const allowed = new Set(['teammate', 'archived', '$limit']);
+  const extra = Object.keys(query).filter((key) => !allowed.has(key));
+  if (extra.length > 0) {
+    throw new BadRequest(`teammate cannot be combined with ${extra.join(', ')}`);
+  }
+  return true;
 }
 
 /**
@@ -1764,6 +1786,23 @@ export class BranchesService extends DrizzleService<Branch, Partial<Branch>, Bra
     }
 
     const query = findParams?.query as Record<string, unknown> | undefined;
+    if (isTeammateBranchQuery(query)) {
+      const requested = typeof query?.$limit === 'number' ? query.$limit : undefined;
+      const limit = Math.min(
+        requested ?? PAGINATION.MAX_TEAMMATE_BRANCHES,
+        PAGINATION.MAX_TEAMMATE_BRANCHES
+      );
+      const data = await this.branchRepo.findTeammateBranches({
+        archived: typeof query?.archived === 'boolean' ? query.archived : undefined,
+        userId: findParams?._agorSqlBranchAccessUserId,
+        minimumPermission: 'view',
+        limit,
+      });
+      const enriched = await this.branchRepo.enrichManyWithZoneInfo(data);
+      // One bounded read: `total` equals the returned rows so a client
+      // `findAll` stops after this page instead of walking offsets.
+      return { total: enriched.length, limit, skip: 0, data: enriched };
+    }
     if (shouldSqlPageBranchQuery(query)) {
       const branchFilter = query?.branch_id;
       const branchIds =
@@ -1781,6 +1820,7 @@ export class BranchesService extends DrizzleService<Branch, Partial<Branch>, Bra
         zone_id: typeof query?.zone_id === 'string' ? query.zone_id : undefined,
         archived: typeof query?.archived === 'boolean' ? query.archived : undefined,
         branchIds,
+        createdBy: typeof query?.created_by === 'string' ? (query.created_by as UUID) : undefined,
         visibleToUserId: findParams?._agorSqlBranchAccessUserId,
         limit,
         offset: skip,

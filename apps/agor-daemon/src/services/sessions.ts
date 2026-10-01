@@ -229,13 +229,23 @@ function shouldSqlPageSessionQuery(query?: Record<string, unknown>, forcePage = 
   const wantsCreatedAt = !!sort && sort.created_at !== undefined;
   const wantsBoard = query.board_id !== undefined;
   const wantsBranch = query.branch_id !== undefined;
-  if (!wantsRecency && !wantsCreatedAt && !wantsBoard && !wantsBranch && !forcePage) return false;
+  const wantsSessions = query.session_id !== undefined;
+  if (
+    !wantsRecency &&
+    !wantsCreatedAt &&
+    !wantsBoard &&
+    !wantsBranch &&
+    !wantsSessions &&
+    !forcePage
+  )
+    return false;
 
   const allowedKeys = new Set([
     'archived',
     'status',
     'board_id',
     'branch_id',
+    'session_id',
     'created_by',
     '$sort',
     '$limit',
@@ -253,6 +263,7 @@ function shouldSqlPageSessionQuery(query?: Record<string, unknown>, forcePage = 
     return false;
   if (wantsBoard && typeof query.board_id !== 'string') return false;
   if (query.created_by !== undefined && typeof query.created_by !== 'string') return false;
+  if (wantsSessions && idFilterValues(query.session_id) === undefined) return false;
   if (wantsBranch) {
     const branchFilter = query.branch_id;
     const validExact = typeof branchFilter === 'string';
@@ -270,6 +281,14 @@ function shouldSqlPageSessionQuery(query?: Record<string, unknown>, forcePage = 
     if (direction !== 1 && direction !== -1) return false;
   }
   return true;
+}
+
+/** A scalar id or `{ $in: [...] }` id-list filter as an id array; undefined if malformed. */
+function idFilterValues(filter: unknown): string[] | undefined {
+  if (typeof filter === 'string') return [filter];
+  const ids =
+    filter !== null && typeof filter === 'object' ? (filter as { $in?: unknown }).$in : undefined;
+  return Array.isArray(ids) && ids.every((id) => typeof id === 'string') ? ids : undefined;
 }
 
 const remoteRelationshipsEnrichedResults = new WeakSet<object>();
@@ -2036,6 +2055,10 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
         boardId: query?.board_id as string | undefined,
         branchId: typeof branchFilter === 'string' ? (branchFilter as BranchID) : undefined,
         branchIds,
+        sessionIds:
+          query?.session_id !== undefined
+            ? (idFilterValues(query.session_id) as SessionID[])
+            : undefined,
         createdBy: query?.created_by as UserID | undefined,
         archived: query?.archived as boolean | undefined,
         sortUpdatedAt: sortSpec?.updated_at,
