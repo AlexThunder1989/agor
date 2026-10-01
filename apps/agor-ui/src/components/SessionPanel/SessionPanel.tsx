@@ -57,6 +57,7 @@ import { useRecenterMap } from '../../contexts/CanvasNavigationContext';
 import { useConnectionDisabled } from '../../contexts/ConnectionContext';
 import { useIsMobileViewport } from '../../hooks/useIsMobileViewport';
 import { ARCHIVE_REFRESH_WARNING, useSessionActions } from '../../hooks/useSessionActions';
+import { useSessionDetails } from '../../hooks/useSessionDetails';
 import { useSessionSearch } from '../../hooks/useSessionSearch';
 import { useSharedReactiveSession } from '../../hooks/useSharedReactiveSession';
 import { useAgorStore } from '../../store/agorStore';
@@ -393,6 +394,9 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
   } = useAppActions();
 
   const { archiveSession } = useSessionActions(client);
+  // Session lists are lean; load this session's slash commands, skills, and
+  // scheduled-run snapshot (also what the settings modal edits).
+  useSessionDetails(client, session);
 
   // Click-to-edit session title, inline in the header — see render below.
   // Draft is seeded from the *explicit* title only (not the description

@@ -50,6 +50,8 @@ import {
   buildById,
   buildSessionMaps,
   buildSessionMcpMap,
+  restoreLeanSessionContext,
+  restoreLeanSessions,
 } from '../store/agorMaps';
 import * as realtime from '../store/agorRealtimeActions';
 import { agorStore, shallow, useStoreWithEqualityFn } from '../store/agorStore';
@@ -601,16 +603,26 @@ export function useAgorData(
         // workspace), so they are NOT fetched in full here: sessions are capped
         // at recent-N, branches are deferred to the board-scoped heavy batch, and
         // BOTH full sets are background-hydrated after the gate opens.
+        //
+        // Every session LIST fetch here is `lean`: heavy server-owned
+        // `custom_context` keys (slash commands, skills, the scheduled-run
+        // snapshot) are withheld and the row is marked `custom_context_omitted`.
+        // On a large workspace that is half the sessions payload and heap, and
+        // only an open session needs them (`useSessionDetails` fetches its full
+        // row). Lists merge through `restoreLeanSessionContext`, so a full row
+        // already in the store (realtime / `get`) is never stripped by a lean
+        // row of the same version. Realtime events and `get` stay full.
         debugTimer?.startFetchPhase();
         const [sessionsList, boardsList, cardTypesList, reposList, usersList] = await Promise.all([
           track(
             'sessions',
             silent
               ? // Reconnect resyncs must fully repopulate every board, so they stay
-                // GLOBAL/full (mirrors the heavy + hydration paths below).
+                // GLOBAL/unbounded (mirrors the heavy + hydration paths below).
                 client.service('sessions').findAll({
                   query: {
                     archived: false,
+                    lean: true,
                     $limit: PAGINATION.DEFAULT_LIMIT,
                     $sort: { updated_at: -1 },
                   },
@@ -625,6 +637,7 @@ export function useAgorData(
                   .find({
                     query: {
                       archived: false,
+                      lean: true,
                       $limit: RECENT_SESSIONS_LIMIT,
                       $count: false,
                       $sort: { updated_at: -1 },
@@ -757,8 +770,8 @@ export function useAgorData(
         // for sessions / board-objects / board-comments; cards filter it
         // server-side). On a real workspace this trims thousands of rows to one
         // board's. Silent reconnect (boardScope undefined) fetches branches
-        // GLOBAL/full to resync; sessions were already fetched full in the silent
-        // light batch above, so the extra board-session fetch is skipped there.
+        // GLOBAL/full to resync; sessions were already fetched unbounded in the
+        // silent light batch above, so the extra board-session fetch is skipped there.
         const [
           branchesList,
           boardSessionsList,
@@ -791,6 +804,7 @@ export function useAgorData(
                 query: {
                   archived: false,
                   board_id: boardScope,
+                  lean: true,
                   $limit: PAGINATION.DEFAULT_LIMIT,
                   $sort: { updated_at: -1 },
                 },
@@ -904,8 +918,6 @@ export function useAgorData(
             firstPaintSessions.set(session.session_id, session);
           }
         }
-        const { sessionById: sessionsById, sessionsByBranch: sessionsByBranchId } =
-          buildSessionMaps([...firstPaintSessions.values()]);
 
         // Branch map for first paint: the board-scoped (or silent-global) set,
         // plus any deep-link-healed branches. The FULL set is hydrated below.
@@ -927,8 +939,9 @@ export function useAgorData(
         // slices are owned by their background setters + realtime handlers.
         agorStore.getState().applyMaps((prev) => ({
           ...prev,
-          sessionById: sessionsById,
-          sessionsByBranch: sessionsByBranchId,
+          // Lean rows restore withheld keys from a same-version full row
+          // already held (e.g. the open session across a silent resync).
+          ...buildSessionMaps(restoreLeanSessions(firstPaintSessions.values(), prev.sessionById)),
           boardById: boardsMap,
           boardObjectById: boardObjectsMap,
           boardObjectsByBoardId: boardObjectsByBoardMap,
@@ -990,6 +1003,7 @@ export function useAgorData(
               client.service('sessions').findAll({
                 query: {
                   archived: false,
+                  lean: true,
                   $limit: PAGINATION.DEFAULT_LIMIT,
                   $sort: { updated_at: -1 },
                 },
@@ -1003,8 +1017,15 @@ export function useAgorData(
                 // rendering — so carry them over rather than dropping them. This
                 // is domain-completion, NOT race reconciliation: the race
                 // correctness comes entirely from the quiet-window guarantee.
+                // Lean rows keep a same-version full row's withheld keys (see
+                // `restoreLeanSessionContext`).
                 const sessions = new Map<string, Session>();
-                for (const session of allSessions) sessions.set(session.session_id, session);
+                for (const session of allSessions) {
+                  sessions.set(
+                    session.session_id,
+                    restoreLeanSessionContext(session, prev.sessionById.get(session.session_id))
+                  );
+                }
                 for (const [id, session] of prev.sessionById) {
                   if (session.archived && !sessions.has(id)) sessions.set(id, session);
                 }

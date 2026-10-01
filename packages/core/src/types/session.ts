@@ -610,6 +610,47 @@ export interface Session {
     source_branch_id: BranchID;
     target_branch_id: BranchID;
   };
+
+  /**
+   * Set only on rows from a `lean: true` sessions list: the heavy
+   * `custom_context` keys this row has but the projection withheld. Absent
+   * means the row is complete. Never persisted; `sessions.get` and realtime
+   * events always carry the full row. See {@link SESSION_LEAN_OMITTED_CONTEXT_KEYS}.
+   */
+  custom_context_omitted?: SessionLeanOmittedContextKey[];
+}
+
+/**
+ * Server-owned `custom_context` keys a lean sessions list (`lean: true`)
+ * withholds. Only an open session needs them (composer autocomplete, the
+ * settings JSON editor, zone-trigger templates); on a large workspace they are
+ * half of the full list payload. `gateway_source` stays: branch cards use it.
+ */
+export const SESSION_LEAN_OMITTED_CONTEXT_KEYS = [
+  'slash_commands',
+  'skills',
+  'scheduled_run',
+] as const;
+
+export type SessionLeanOmittedContextKey = (typeof SESSION_LEAN_OMITTED_CONTEXT_KEYS)[number];
+
+/** Whether a lean list projection withheld part of this row's `custom_context`. */
+export function isLeanSession(session: Pick<Session, 'custom_context_omitted'>): boolean {
+  return (session.custom_context_omitted?.length ?? 0) > 0;
+}
+
+/**
+ * Apply the lean list projection to a full row in memory. The SQL page path
+ * projects in the database instead; both report exactly the keys they dropped.
+ */
+export function projectLeanSession<T extends Partial<Session>>(session: T): T {
+  const context = session.custom_context;
+  if (!context || typeof context !== 'object' || Array.isArray(context)) return session;
+  const omitted = SESSION_LEAN_OMITTED_CONTEXT_KEYS.filter((key) => Object.hasOwn(context, key));
+  if (omitted.length === 0) return session;
+  const leanContext: Record<string, unknown> = { ...context };
+  for (const key of omitted) delete leanContext[key];
+  return { ...session, custom_context: leanContext, custom_context_omitted: omitted };
 }
 
 export const SCHEDULER_INITIALIZATION_STAGES = [
@@ -656,7 +697,11 @@ export type CreateSessionInput = Omit<
 /** Session patch semantics: omit/undefined preserves, string sets, null clears. */
 export type SessionUpdate = Omit<
   Partial<Session>,
-  'sdk_session_id' | 'sdk_home_scope' | 'usage_summary' | 'mcp_defaults_skipped'
+  | 'sdk_session_id'
+  | 'sdk_home_scope'
+  | 'usage_summary'
+  | 'mcp_defaults_skipped'
+  | 'custom_context_omitted'
 > & {
   sdk_session_id?: string | null;
 };

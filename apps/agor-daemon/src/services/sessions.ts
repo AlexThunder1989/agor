@@ -77,6 +77,7 @@ import {
   classifyBranchFilesystemReadiness,
   isAgenticToolDefaultConfigurationReference,
   isSessionExecuting,
+  projectLeanSession,
   SessionStatus,
   USER_DEFAULT_AGENTIC_CONFIGURATION,
 } from '@agor/core/types';
@@ -186,6 +187,8 @@ export type SessionParams = QueryParams<{
   include_usage?: boolean | 'true' | 'false';
   include_last_message?: boolean | 'true' | 'false'; // Opt-in last message enrichment
   last_message_truncation_length?: number; // Default: 500 chars, min: 50, max: 10000
+  /** List-only projection: withhold heavy `custom_context` keys (see `find`). */
+  lean?: boolean;
   /** Marks a `remove` as the delete half of a "switch tool" swap (see `remove`). */
   _swapReplace?: boolean;
 }> &
@@ -1963,8 +1966,35 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
   /**
    * Override find to include durable remote relationships in list results.
    * Note: Last message is NOT included in list operations - only on single GET.
+   *
+   * `lean: true` withholds the heavy server-owned `custom_context` keys
+   * (`SESSION_LEAN_OMITTED_CONTEXT_KEYS`) and marks each affected row with
+   * `custom_context_omitted`. It is a projection flag, not a session column, so
+   * it is stripped before any path sees the query (the generic `filterData`
+   * would otherwise treat it as an equality filter and empty the result). The
+   * RBAC/tenant scoping, pushdown routing, and pagination are identical with or
+   * without it; `get` and realtime events always return full rows.
    */
   async find(params?: SessionParams): Promise<Paginated<Session> | Session[]> {
+    const query = params?.query as Record<string, unknown> | undefined;
+    if (query?.lean === undefined) return this.findSessions(params, false);
+    const { lean: leanFlag, ...listQuery } = query;
+    const lean = leanFlag === true;
+    const result = await this.findSessions({ ...params, query: listQuery } as SessionParams, lean);
+    if (!lean) return result;
+    // The SQL page path already projected; this covers the generic paths
+    // (and is a no-op on rows that no longer carry the omitted keys).
+    return markRemoteRelationshipsEnrichedResult(
+      Array.isArray(result)
+        ? result.map(projectLeanSession)
+        : { ...result, data: result.data.map(projectLeanSession) }
+    );
+  }
+
+  private async findSessions(
+    params: SessionParams | undefined,
+    lean: boolean
+  ): Promise<Paginated<Session> | Session[]> {
     // SQL-pushdown path for the recency-sorted / board-scoped list queries the
     // first-paint loader issues. The before-hook stamps a marker here so the
     // same SQL path can compose branch visibility into the query.
@@ -2018,6 +2048,7 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
         limit,
         skip,
         visibleToUserId: params?._agorSqlSessionAccessUserId,
+        lean,
       });
       const enriched = await this.enrichRemoteRelationships(data);
       if (query?.$count === false) return markRemoteRelationshipsEnrichedResult(enriched);

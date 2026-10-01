@@ -193,6 +193,45 @@ describe('ZoneTriggerModal action snapshot', () => {
     expect(renderTemplateMock).toHaveBeenCalledTimes(2);
   });
 
+  it('renders against the full row when the selected store session is lean', async () => {
+    renderTemplateMock.mockImplementation(async (_client, _template, context) => {
+      const session = context?.session as { context?: Record<string, unknown> } | undefined;
+      return `Commands: ${JSON.stringify(session?.context?.slash_commands)}`;
+    });
+    const leanSession = {
+      ...makeSession('s-lean', 'completed', '2026-06-20T00:00:00.000Z', 'Lean session'),
+      custom_context: {},
+      custom_context_omitted: ['slash_commands'],
+    } as unknown as Session;
+    const get = vi.fn().mockResolvedValue({
+      ...leanSession,
+      custom_context: { slash_commands: ['review'] },
+      custom_context_omitted: undefined,
+    });
+    const client = { service: () => ({ get }) } as unknown as AgorClient;
+
+    render(
+      <ZoneTriggerModal
+        actionId={1}
+        open
+        onCancel={() => {}}
+        client={client}
+        branch={undefined}
+        sessions={[leanSession]}
+        zoneName="Review"
+        trigger={{ template: 'Template', behavior: 'show_picker' }}
+        availableAgents={[]}
+        mcpServerById={new Map()}
+        onExecute={async () => {}}
+      />
+    );
+
+    const prompt = screen.getByRole('textbox', { name: 'Prompt (editable)' });
+    await waitFor(() => expect(prompt).toHaveValue('Commands: ["review"]'));
+    expect(get).toHaveBeenCalledWith('s-lean');
+    expect(renderTemplateMock).toHaveBeenCalledTimes(1);
+  });
+
   it('starts a clean render exactly once for a new zone action or reopened action', async () => {
     const zoneA = deferred<string>();
     const zoneB = deferred<string>();

@@ -17,6 +17,7 @@ import { MessagesRepository } from './messages';
 import { RepoRepository } from './repos';
 import { ScheduleRepository } from './schedules';
 import { SessionRepository } from './sessions';
+import { exerciseLeanSessionPage } from './sessions.lean-test-helpers';
 import { TaskRepository } from './tasks';
 import { UsersRepository } from './users';
 
@@ -646,6 +647,12 @@ describe('SessionRepository.findAll', () => {
       ).toEqual({ data: page.data });
     }
   );
+});
+
+describe('SessionRepository.findPage lean projection', () => {
+  dbTest('withholds heavy custom_context keys in SQL and marks the rows', async ({ db }) => {
+    await exerciseLeanSessionPage(db);
+  });
 });
 
 describe('SessionRepository.findPage ordering', () => {

@@ -46,6 +46,7 @@ import {
   applySessionPatchToMaps,
   removeBoardObjectFromMaps,
   replaceIfChanged,
+  restoreSessionDetailsInMaps,
   upsertBoardObjectInMaps,
 } from './agorMaps';
 import { type AgorState, agorStore } from './agorStore';
@@ -97,6 +98,13 @@ export function sessionPatched(session: Session) {
   // reducer returns `prev` untouched on a no-op patch so references stay stable.
   bumpRevision('sessions');
   applyMaps((prev) => applySessionPatchToMaps(prev, session));
+}
+
+// Not a socket handler: an on-demand `sessions.get` result for a lean stored
+// row (see `useSessionDetails`). Fills only the withheld keys of the same
+// version, so no revision bump (see `restoreSessionDetailsInMaps`).
+export function sessionDetailsLoaded(session: Session) {
+  applyMaps((prev) => restoreSessionDetailsInMaps(prev, session));
 }
 
 export function sessionRemoved(session: Session) {

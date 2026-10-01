@@ -10,15 +10,17 @@ import type {
   SchedulerInitializationStage,
   Session,
   SessionID,
+  SessionLeanOmittedContextKey,
   SessionUpdate,
   UUID,
 } from '@agor/core/types';
-import { SessionStatus } from '@agor/core/types';
+import { SESSION_LEAN_OMITTED_CONTEXT_KEYS, SessionStatus } from '@agor/core/types';
 import {
   and,
   asc,
   desc,
   eq,
+  getTableColumns,
   gt,
   inArray,
   isNotNull,
@@ -132,6 +134,8 @@ export interface SessionPageOptions {
   limit?: number;
   skip?: number;
   visibleToUserId?: UUID;
+  /** Withhold {@link SESSION_LEAN_OMITTED_CONTEXT_KEYS} in SQL (list payload projection). */
+  lean?: boolean;
 }
 
 /**
@@ -139,6 +143,46 @@ export interface SessionPageOptions {
  */
 export class SessionRepository implements BaseRepository<Session, Partial<Session>> {
   constructor(private db: Database) {}
+
+  /**
+   * Page-row selection. Lean keeps every column (including hidden tenant
+   * identity) but removes the heavy `custom_context` keys inside `data` in SQL,
+   * and reports which of them the row had as a comma-separated `lean_omitted`.
+   * Uses the column decoder: SQLite returns JSON text; PostgreSQL returns JSONB.
+   * Non-object `custom_context` is left alone. The keys are fixed constants, so
+   * they are inlined as literals (PostgreSQL's `jsonb - unknown` is ambiguous).
+   */
+  private pageSelection(lean?: boolean) {
+    const board = { board_id: branches.board_id };
+    if (!lean) return { sessions, branches: board };
+    const keys = SESSION_LEAN_OMITTED_CONTEXT_KEYS;
+    const literal = (value: string) => sql.raw(`'${value}'`);
+    let data: ReturnType<typeof sql>;
+    let present: (key: string) => ReturnType<typeof sql>;
+    if (isPostgresDatabase(this.db)) {
+      const context = sql`(${sessions.data} -> 'custom_context')`;
+      const stripped = sql.join([context, ...keys.map(literal)], sql.raw(' - '));
+      data = sql`CASE WHEN jsonb_typeof(${context}) = 'object'
+        THEN jsonb_set(${sessions.data}, '{custom_context}', ${stripped}) ELSE ${sessions.data} END`;
+      present = (key) => sql`(${context} -> ${literal(key)}) IS NOT NULL`;
+    } else {
+      data = sql`json_remove(${sessions.data}, ${sql.join(
+        keys.map((key) => literal(`$.custom_context.${key}`)),
+        sql.raw(', ')
+      )})`;
+      present = (key) =>
+        sql`json_type(${sessions.data}, ${literal(`$.custom_context.${key}`)}) IS NOT NULL`;
+    }
+    const omitted = sql.join(
+      keys.map((key) => sql`CASE WHEN ${present(key)} THEN ${literal(`${key},`)} ELSE '' END`),
+      sql.raw(' || ')
+    );
+    return {
+      sessions: { ...getTableColumns(sessions), data: data.mapWith(sessions.data) },
+      branches: board,
+      lean_omitted: omitted.mapWith(String),
+    };
+  }
 
   /**
    * Convert database row to Session type.
@@ -634,7 +678,7 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
 
       // Page of rows, recency-sorted in SQL on the real `updated_at` column.
       // biome-ignore lint/suspicious/noExplicitAny: Conditional query builder shape differs with the RBAC join
-      let dataQuery: any = select(this.db, { sessions, branches: { board_id: branches.board_id } })
+      let dataQuery: any = select(this.db, this.pageSelection(opts.lean))
         .from(sessions)
         .leftJoin(branches, eq(sessions.branch_id, branches.branch_id));
       if (whereClause) dataQuery = dataQuery.where(whereClause);
@@ -660,9 +704,18 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
 
       const results = await dataQuery.all();
       const data = results.map(
-        (result: { sessions: SessionRow; branches?: { board_id?: string } | null }) => {
+        (result: {
+          sessions: SessionRow;
+          branches?: { board_id?: string } | null;
+          lean_omitted?: string | null;
+        }) => {
           const boardId = (result.branches?.board_id ?? null) as UUID | null;
-          return this.rowToSession(result.sessions, boardId, baseUrl);
+          const session = this.rowToSession(result.sessions, boardId, baseUrl);
+          const omitted = (result.lean_omitted ?? '')
+            .split(',')
+            .filter(Boolean) as SessionLeanOmittedContextKey[];
+          if (omitted.length > 0) session.custom_context_omitted = omitted;
+          return session;
         }
       );
 
@@ -897,6 +950,8 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
         // This prevents partial updates from losing existing nested fields.
         // Strategy: Objects = deep merge, Arrays = replace, Primitives = replace
         const { sdk_session_id: sdkSessionIdUpdate, ...genericUpdates } = updates;
+        // A lean-list marker echoed back by a client is a read projection, not state.
+        delete (genericUpdates as Partial<Session>).custom_context_omitted;
         const merged = deepMerge(current, genericUpdates);
         if (sdkSessionIdUpdate === null) {
           delete merged.sdk_session_id;

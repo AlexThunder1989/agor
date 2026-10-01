@@ -467,3 +467,111 @@ describe('SessionsService.find — recency sort + pagination (SQL pushdown)', ()
     expect(ids(result)).toEqual([s1, s3].sort());
   });
 });
+
+describe('SessionsService.find — lean projection', () => {
+  const heavyContext = {
+    teamName: 'Backend',
+    slash_commands: ['review'],
+    skills: ['pdf'],
+    scheduled_run: { rendered_prompt: 'x'.repeat(2048), run_index: 1 },
+  };
+  const leanContext = { teamName: 'Backend' };
+  const omitted = ['slash_commands', 'skills', 'scheduled_run'];
+
+  function rows(result: Awaited<ReturnType<SessionsService['find']>>): Session[] {
+    return Array.isArray(result) ? result : result.data;
+  }
+
+  dbTest(
+    'keeps SQL authorization, pagination, and totals through transport validation',
+    async ({ db }) => {
+      const user = await new UsersRepository(db).create({
+        user_id: generateId(),
+        email: `lean-${generateId()}@example.invalid`,
+        role: 'member',
+      });
+      const visibleBranch = await createBranchOnBoard(db, null, user.user_id);
+      const hiddenBranch = await createBranchOnBoard(db, null);
+      await createSession(db, visibleBranch, { custom_context: heavyContext });
+      await createSession(db, visibleBranch, { custom_context: heavyContext });
+      await createSession(db, hiddenBranch, { custom_context: heavyContext });
+      const app = feathers<{ sessions: SessionsService }>();
+      app.use('sessions', createService(db));
+      app.service('sessions').hooks({
+        before: {
+          all: [typedValidateQuery(sessionQueryValidator)],
+          find: [scopeFindToAccessibleSessionsSql()],
+        },
+      });
+      for (const provider of ['socketio', 'rest']) {
+        const query = { $limit: 1, $sort: { updated_at: -1 } };
+        const full = await app.service('sessions').find({ provider, user, query });
+        const lean = await app.service('sessions').find({
+          provider,
+          user,
+          query: { ...query, lean: provider === 'rest' ? 'true' : true },
+        });
+        if (Array.isArray(full) || Array.isArray(lean)) throw new Error('Expected pagination');
+        expect(lean.total).toBe(2);
+        expect(lean.total).toBe(full.total);
+        expect(lean.data.map((s) => s.session_id)).toEqual(full.data.map((s) => s.session_id));
+        expect(full.data[0].custom_context).toEqual(heavyContext);
+        expect(full.data[0].custom_context_omitted).toBeUndefined();
+        expect(lean.data[0].custom_context).toEqual(leanContext);
+        expect(lean.data[0].custom_context_omitted).toEqual(omitted);
+        // Remote-relationship enrichment still marks the projected result.
+        expect(lean.data[0]).toEqual({
+          ...full.data[0],
+          custom_context: leanContext,
+          custom_context_omitted: omitted,
+        });
+        expect(
+          rows(
+            await app.service('sessions').find({
+              provider,
+              user,
+              query: { ...query, lean: true, $count: false, branch_id: hiddenBranch },
+            })
+          )
+        ).toEqual([]);
+      }
+    }
+  );
+
+  dbTest('projects the generic paths and never treats lean as a filter', async ({ db }) => {
+    const service = createService(db);
+    const board = await createBoard(db);
+    const branch = await createBranchOnBoard(db, board);
+    const heavy = await createSession(db, branch, { custom_context: heavyContext });
+    const plain = await createSession(db, branch, { custom_context: { teamName: 'Plain' } });
+
+    for (const query of [
+      // board_id + operator → findByBoard + generic pipeline
+      { board_id: board, session_id: { $in: [heavy, plain] }, $limit: 10 },
+      // no recency/board/branch → DrizzleService generic find
+      { status: SessionStatus.IDLE, $limit: 10 },
+      // SQL page path
+      { branch_id: branch, $sort: { created_at: 1 }, $limit: 10 },
+    ]) {
+      const lean = rows(await service.find({ query: { ...query, lean: true } as never }));
+      expect(lean.map((s) => s.session_id).sort()).toEqual([heavy, plain].sort());
+      const leanHeavy = lean.find((s) => s.session_id === heavy)!;
+      const leanPlain = lean.find((s) => s.session_id === plain)!;
+      expect(leanHeavy.custom_context).toEqual(leanContext);
+      expect(leanHeavy.custom_context_omitted).toEqual(omitted);
+      expect(leanPlain.custom_context).toEqual({ teamName: 'Plain' });
+      expect(leanPlain.custom_context_omitted).toBeUndefined();
+
+      const explicitFull = rows(await service.find({ query: { ...query, lean: false } as never }));
+      expect(explicitFull.map((s) => s.session_id).sort()).toEqual([heavy, plain].sort());
+      expect(explicitFull.find((s) => s.session_id === heavy)!.custom_context).toEqual(
+        heavyContext
+      );
+    }
+
+    // `get` is always the full row, even if a caller passes the list flag.
+    const single = await service.get(heavy, { query: { lean: true } as never });
+    expect(single.custom_context).toEqual(heavyContext);
+    expect(single.custom_context_omitted).toBeUndefined();
+  });
+});

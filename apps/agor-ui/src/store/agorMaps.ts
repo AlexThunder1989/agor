@@ -8,19 +8,20 @@
  * Nothing here touches React or the store; these are reference-preserving
  * immutable updaters (incl. `buildSessionMaps`).
  */
-import type {
-  Artifact,
-  Board,
-  BoardComment,
-  BoardEntityObject,
-  Branch,
-  CardType,
-  CardWithType,
-  GatewayChannel,
-  MCPServer,
-  Repo,
-  Session,
-  User,
+import {
+  type Artifact,
+  type Board,
+  type BoardComment,
+  type BoardEntityObject,
+  type Branch,
+  type CardType,
+  type CardWithType,
+  type GatewayChannel,
+  isLeanSession,
+  type MCPServer,
+  type Repo,
+  type Session,
+  type User,
 } from '@agor-live/client';
 import { shallowEqualEntity } from '../utils/shallowEqual';
 
@@ -609,6 +610,71 @@ export function preserveSessionRelationshipFields(session: Session, existing?: S
     ...(remoteRelationships !== undefined && { remote_relationships: remoteRelationships }),
     ...(remoteSurrogate !== undefined && { remote_surrogate: remoteSurrogate }),
   };
+}
+
+/**
+ * Lean list rows (`isLeanSession`) withhold heavy `custom_context` keys that
+ * only an open session needs. When `source` is the FULL row at the SAME version
+ * (`last_updated`; every `custom_context` write advances it), copy those keys
+ * onto the lean row and drop the marker. Any other pairing returns `lean`
+ * unchanged: a different version means the row changed since, so the lean row
+ * wins and an open consumer re-fetches it (`useSessionDetails`).
+ *
+ * Used in both directions: a lean list/hydration apply over a full stored row
+ * (a full row is never clobbered by a lean one), and a fetched full row filling
+ * in a lean stored row.
+ */
+export function restoreLeanSessionContext(lean: Session, source: Session | undefined): Session {
+  if (!isLeanSession(lean) || !source || isLeanSession(source)) return lean;
+  if (source.session_id !== lean.session_id || source.last_updated !== lean.last_updated) {
+    return lean;
+  }
+  const sourceContext: Record<string, unknown> = source.custom_context ?? {};
+  const custom_context: Record<string, unknown> = { ...lean.custom_context };
+  for (const key of lean.custom_context_omitted ?? []) {
+    // A same-version full row must hold every omitted key; if not, stay lean.
+    if (!Object.hasOwn(sourceContext, key)) return lean;
+    custom_context[key] = sourceContext[key];
+  }
+  const { custom_context_omitted: _omitted, ...rest } = lean;
+  return { ...rest, custom_context };
+}
+
+/** Apply {@link restoreLeanSessionContext} to a fetched list against the live map. */
+export function restoreLeanSessions(
+  sessions: Iterable<Session>,
+  prevById: Map<string, Session>
+): Session[] {
+  return Array.from(sessions, (session) =>
+    restoreLeanSessionContext(session, prevById.get(session.session_id))
+  );
+}
+
+/**
+ * Fill a lean stored row from a fetched full row of the same version. Only the
+ * withheld keys change, so this is not a live write: it bumps no revision, and
+ * a racing lean hydration of that version restores the same keys on apply.
+ */
+export function restoreSessionDetailsInMaps(prev: DataMaps, full: Session): DataMaps {
+  const current = prev.sessionById.get(full.session_id);
+  if (!current) return prev;
+  const restored = restoreLeanSessionContext(current, full);
+  if (restored === current) return prev;
+  const sessionById = new Map(prev.sessionById);
+  sessionById.set(restored.session_id, restored);
+  let sessionsByBranch = prev.sessionsByBranch;
+  const bucket = prev.sessionsByBranch.get(current.branch_id);
+  // Remote surrogates keep their own projection; swap only the canonical row.
+  const index =
+    bucket?.findIndex((row) => row.session_id === current.session_id && !row.remote_surrogate) ??
+    -1;
+  if (bucket && index >= 0) {
+    const nextBucket = bucket.slice();
+    nextBucket[index] = restored;
+    sessionsByBranch = new Map(prev.sessionsByBranch);
+    sessionsByBranch.set(current.branch_id, nextBucket);
+  }
+  return { ...prev, sessionById, sessionsByBranch };
 }
 
 export function createRemoteSurrogateSession(

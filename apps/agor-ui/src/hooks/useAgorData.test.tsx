@@ -871,6 +871,7 @@ describe('useAgorData — skip-apply-on-race hydration', () => {
     expect(fetchArguments('sessions', 'find')).toContainEqual({
       query: {
         archived: false,
+        lean: true,
         $limit: 50,
         $count: false,
         $sort: { updated_at: -1 },
@@ -1283,6 +1284,105 @@ describe('useAgorData — lean boards list + objects hydration', () => {
     } finally {
       window.history.pushState({}, '', '/');
     }
+  });
+});
+
+/**
+ * Session lists are fetched `lean` (heavy `custom_context` keys withheld, row
+ * marked `custom_context_omitted`). The store must never let a lean row strip a
+ * same-version full row, and must take a lean row of a newer version.
+ */
+describe('useAgorData — lean session lists', () => {
+  const V1 = '2026-01-01T00:00:00.000Z';
+  const V2 = '2026-01-02T00:00:00.000Z';
+  const fullContext = { teamName: 'Backend', slash_commands: ['review'], skills: ['pdf'] };
+  const leanRow = (id: string, version: string) =>
+    makeSession({
+      session_id: id,
+      last_updated: version,
+      custom_context: { teamName: 'Backend' },
+      custom_context_omitted: ['slash_commands', 'skills'],
+    });
+  const fullRow = (id: string, version: string) =>
+    makeSession({ session_id: id, last_updated: version, custom_context: fullContext });
+
+  it('requests every session list lean and every single read full', async () => {
+    const seed: Record<string, unknown[]> = {
+      'sessions:find': [leanRow('s-1', V1)],
+      'sessions:findAll': [leanRow('s-1', V1)],
+      'branches:findAll': [makeBranch()],
+    };
+    const { client, emitIo, fetchArguments } = makeMockClient(seed);
+    const { result } = renderHook(() => useAgorData(client));
+    await waitForInitialLoad(result);
+    act(() => emitIo('connect'));
+    await waitFor(() => expect(fetchArguments('sessions', 'findAll').length).toBeGreaterThan(1));
+    for (const method of ['find', 'findAll'] as const) {
+      for (const args of fetchArguments('sessions', method)) {
+        expect((args as { query: Record<string, unknown> }).query.lean).toBe(true);
+      }
+    }
+  });
+
+  it('keeps a same-version full row across a lean reconnect resync, but takes a newer lean row', async () => {
+    const seed: Record<string, unknown[]> = {
+      'sessions:find': [leanRow('s-1', V1), leanRow('s-2', V1)],
+      'sessions:findAll': [leanRow('s-1', V1), leanRow('s-2', V1)],
+      'branches:findAll': [makeBranch()],
+    };
+    const { client, emit, emitIo } = makeMockClient(seed);
+    const { result } = renderHook(() => useAgorData(client));
+    await waitForInitialLoad(result);
+    expect(agorStore.getState().sessionById.get('s-1')?.custom_context_omitted).toEqual([
+      'slash_commands',
+      'skills',
+    ]);
+
+    // Realtime events carry full rows; they replace the lean ones.
+    act(() => {
+      emit('sessions', 'patched', fullRow('s-1', V1));
+      emit('sessions', 'patched', fullRow('s-2', V1));
+      flushRealtimeNow(STANDALONE_AUTHORITY_SCOPE);
+    });
+    expect(agorStore.getState().sessionById.get('s-1')?.custom_context).toEqual(fullContext);
+
+    // s-2 changed while disconnected: the resync's lean row is newer.
+    seed['sessions:findAll'] = [leanRow('s-1', V1), leanRow('s-2', V2)];
+    act(() => emitIo('connect'));
+    await waitFor(() => expect(agorStore.getState().sessionById.get('s-2')?.last_updated).toBe(V2));
+    const s1 = agorStore.getState().sessionById.get('s-1');
+    expect(s1?.custom_context).toEqual(fullContext);
+    expect(s1?.custom_context_omitted).toBeUndefined();
+    expect(
+      agorStore
+        .getState()
+        .sessionsByBranch.get('b-1')
+        ?.find((s) => s.session_id === 's-1')
+    ).toBe(s1);
+    const s2 = agorStore.getState().sessionById.get('s-2');
+    expect(s2?.custom_context).toEqual({ teamName: 'Backend' });
+    expect(s2?.custom_context_omitted).toEqual(['slash_commands', 'skills']);
+  });
+
+  it('background hydration does not strip a same-version full row', async () => {
+    const held = deferred();
+    const seed: Record<string, unknown[]> = {
+      'sessions:find': [leanRow('s-1', V1)],
+      'sessions:findAll': [leanRow('s-1', V1)],
+      'branches:findAll': [makeBranch()],
+    };
+    const { client, onFetch } = makeMockClient(seed);
+    onFetch('sessions', 'findAll', () => held.promise);
+    const { result } = renderHook(() => useAgorData(client));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    // A detail fetch fills the open session before the lean hydration lands.
+    const { sessionDetailsLoaded } = await import('../store/agorRealtimeActions');
+    act(() => sessionDetailsLoaded(fullRow('s-1', V1) as never));
+    expect(agorStore.getState().sessionById.get('s-1')?.custom_context).toEqual(fullContext);
+    held.resolve();
+    await flush();
+    expect(agorStore.getState().sessionById.get('s-1')?.custom_context).toEqual(fullContext);
+    expect(agorStore.getState().sessionById.get('s-1')?.custom_context_omitted).toBeUndefined();
   });
 });
 

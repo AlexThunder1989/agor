@@ -21,7 +21,7 @@ import type {
 // zone / session). Shared with the daemon's fire-zone-trigger route and the
 // MCP `agor_branches_set_zone` path so all three render against the same
 // shape.
-import { buildZoneTriggerContext, isAgenticToolName } from '@agor-live/client';
+import { buildZoneTriggerContext, isAgenticToolName, isLeanSession } from '@agor-live/client';
 import { DownOutlined } from '@ant-design/icons';
 import { Alert, Collapse, Form, Input, Modal, Radio, Select, Space, Spin, Typography } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -250,25 +250,32 @@ const ZoneTriggerModalAction = ({
       return;
     }
 
+    const client = initial.client;
     const selectedSessionForCtx =
       mode === 'reuse_existing' && selectedSessionId
         ? branchSessions.find((s) => s.session_id === selectedSessionId)
         : undefined;
-    const context = buildZoneTriggerContext({
-      branch: initial.branch,
-      board: {
-        name: initial.boardName,
-        description: initial.boardDescription,
-        custom_context: initial.boardCustomContext,
-      },
-      zone: { label: initial.zoneName },
-      session: selectedSessionForCtx
-        ? {
-            description: selectedSessionForCtx.description,
-            custom_context: selectedSessionForCtx.custom_context,
-          }
-        : undefined,
-    });
+    const renderForSession = (sessionForCtx: Session | undefined) =>
+      renderTemplate(
+        client,
+        initial.trigger.template,
+        buildZoneTriggerContext({
+          branch: initial.branch,
+          board: {
+            name: initial.boardName,
+            description: initial.boardDescription,
+            custom_context: initial.boardCustomContext,
+          },
+          zone: { label: initial.zoneName },
+          session: sessionForCtx
+            ? {
+                description: sessionForCtx.description,
+                custom_context: sessionForCtx.custom_context,
+              }
+            : undefined,
+        }),
+        'raw'
+      );
 
     let request = templateRenderRequestRef.current;
     if (!request || request.target !== templateTarget) {
@@ -276,7 +283,14 @@ const ZoneTriggerModalAction = ({
       request = {
         target: templateTarget,
         editRevision: templateEditRevisionRef.current,
-        promise: renderTemplate(initial.client, initial.trigger.template, context, 'raw'),
+        // Store session rows are lean: templates may read any session
+        // `custom_context` key, so render against the full row.
+        promise:
+          selectedSessionForCtx && isLeanSession(selectedSessionForCtx)
+            ? (client.service('sessions').get(selectedSessionForCtx.session_id) as Promise<Session>)
+                .catch(() => selectedSessionForCtx)
+                .then(renderForSession)
+            : renderForSession(selectedSessionForCtx),
       };
       templateRenderRequestRef.current = request;
       setTemplateState({ target: templateTarget, value: '', isRendering: true });
