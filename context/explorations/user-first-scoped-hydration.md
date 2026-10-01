@@ -10,9 +10,9 @@ Status: design, revision 3 (2026-10-01), with Kamil's decisions applied (see bel
 > - **Q4 — fork ancestors are not fetched.** U4 and its tests/scenario are dropped. A retry forked from **someone else's** session no longer clears a failure; this is an accepted, documented limitation (§3.3, and a code comment near `startedByUserLineage`). `mySessionsLoaded` is set after U1.
 > - **Lean dependency:** PR #2887 replaces #2946 (abandoned). §11 is rewritten for #2887.
 
-- **Base:** the agent-first Home stack, #2905 → #2906 → #2901 → #2907 (branch `home-agent-first-4-teammates`, tip `6f8f538b`), not `main`.
+- **Base:** `main`, which now contains the agent-first Home stack (#2905 → #2906 → #2901 → #2907) and lean PR #2887. The analysis below was done on the stack tip `6f8f538b`.
 - **Delivery:** one branch and one PR, reviewable commit by commit.
-- **Implementation status:** the docs commit, 1.1 and 1.2 exist and are being rebased onto the stack tip. The previous revision's 1.3 (edits to the old Home sections) is abandoned.
+- **Implementation status:** Step 1 (1.1–1.5) is implemented and rebased onto `main`. Session list reads go through `sessionListQuery` and are lean. The previous revision's 1.3 (edits to the old Home sections) is abandoned.
 
 Paths are repo-relative: `UI` = `apps/agor-ui/src`, `D` = `apps/agor-daemon/src`, `core` = `packages/core/src`. `UI` line numbers refer to the stack tip. Daemon and core line numbers refer to `main`; the stack changes only `core/types/user.ts` there.
 
@@ -563,7 +563,7 @@ Sandbox baselines: heap 121 MB after GC (340 MB pre-GC); blocking global session
 
 ## 11. Interaction with lean PR #2887 (and neighbours)
 
-**Status (r3 decisions, 2026-10-01):** #2946 is abandoned; Kamil will merge #2887 (`aminghadersohi`, from a fork) after review. This branch is not rebased onto #2887 yet; the base stays `home-agent-first-4-teammates`.
+**Status (2026-10-01):** #2946 is abandoned. #2887 is merged and this branch is rebased onto it. The gated my-200, U1 and partition reads send `lean: true` through `sessionListQuery`. On `/s/`, #2887's barrier still holds the global sets until the opened transcript is ready; the user scope is started outside it, after first paint, so Home and the teammate surfaces never wait for a transcript (implication 4).
 
 **What #2887 does** (verified against `pull/2887/head` @ `08ecacba`)
 
