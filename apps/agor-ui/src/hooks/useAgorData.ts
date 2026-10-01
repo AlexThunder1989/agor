@@ -1038,13 +1038,7 @@ export function useAgorData(
         // The background hydrations kicked off below re-snapshot AFTER this bump,
         // so they're unaffected.
         bumpFirstPaintMergeRevisions();
-        if (silent) {
-          // A silent resync just applied the full active session and branch sets.
-          agorStore.getState().markHydrated('sessionsHydrated');
-          agorStore.getState().markHydrated('branchesHydrated');
-        } else {
-          markBoardPartitionLoaded(boardScope);
-        }
+        if (!silent) markBoardPartitionLoaded(boardScope);
         debugTimer?.endIndexing();
         debugFinishStatus = 'success';
 
@@ -1119,7 +1113,6 @@ export function useAgorData(
                   );
                   return { ...prev, sessionById, sessionsByBranch };
                 });
-                agorStore.getState().markHydrated('sessionsHydrated');
               }
             );
             void runAuthorityHydration(
@@ -1138,7 +1131,6 @@ export function useAgorData(
                   ...prev,
                   branchById: buildById(allBranches, 'branch_id', prev.branchById),
                 }));
-                agorStore.getState().markHydrated('branchesHydrated');
               }
             );
           }

@@ -30,7 +30,7 @@ function seed(branches: Branch[], boards: Board[], { hydrated = true } = {}) {
     branchById: new Map(branches.map((b) => [b.branch_id, b])),
     boardById: new Map(boards.map((b) => [b.board_id, b])),
     userById: new Map([['owner-1', { user_id: 'owner-1', name: 'Zoë Owner' } as User]]),
-    branchesHydrated: hydrated,
+    teammatesLoaded: hydrated,
   } as never);
 }
 
@@ -196,7 +196,7 @@ describe('TeammatesDirectory', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Loading teammates…');
     expect(screen.queryByText(/No teammates/)).not.toBeInTheDocument();
 
-    act(() => agorStore.setState({ branchesHydrated: true } as never));
+    act(() => agorStore.setState({ teammatesLoaded: true } as never));
     expect(screen.getByRole('status')).toHaveTextContent('Loading teammates…');
     await waitFor(() => expect(grant).toBeDefined());
     await act(async () =>

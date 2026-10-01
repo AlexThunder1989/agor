@@ -34,7 +34,7 @@ export const HomeTeammatesSection = memo(function HomeTeammatesSection({
     retry: retrySharing,
     retrying: sharingRetrying,
   } = useSharedTeammates(client, currentUser);
-  const hydrated = useAgorStore((s) => s.branchesHydrated);
+  const hydrated = useAgorStore((s) => s.teammatesLoaded);
   const [offset, setOffset] = useState(0);
   const shown = useMemo(
     () =>

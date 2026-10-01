@@ -37,7 +37,7 @@ export const TeammatesDirectory = memo(function TeammatesDirectory({
   // The status region mounts blank (keeping its line) and gains its text after, since readers may skip text a live region starts with.
   const [announce, setAnnounce] = useState(false);
   useEffect(() => setAnnounce(true), []);
-  const hydrated = useAgorStore((s) => s.branchesHydrated);
+  const hydrated = useAgorStore((s) => s.teammatesLoaded);
   const {
     teammates,
     settled: sharingSettled,

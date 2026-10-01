@@ -1299,8 +1299,8 @@ describe('useAgorData — lean boards list + objects hydration', () => {
   });
 });
 
-describe('useAgorData — session and branch hydration flags', () => {
-  it('marks both flags again once the silent resync after an identity change lands', async () => {
+describe('useAgorData — user-scope flags', () => {
+  it('reset on an identity change and recover once the silent resync re-runs the scope', async () => {
     const seed: Record<string, unknown[]> = {
       'sessions:find': [makeSession()],
       'sessions:findAll': [makeSession()],
@@ -1319,26 +1319,25 @@ describe('useAgorData — session and branch hydration flags', () => {
       { initialProps: { userId: 'user-a', generation: 1 } }
     );
     await waitForInitialLoad(result);
-    await flush();
-    expect(agorStore.getState().sessionsHydrated).toBe(true);
-    expect(agorStore.getState().branchesHydrated).toBe(true);
+    const scopeLoaded = () => {
+      const s = agorStore.getState();
+      return [s.mySessionsLoaded, s.homeBranchesLoaded, s.teammatesLoaded];
+    };
+    await waitFor(() => expect(scopeLoaded()).toEqual([true, true, true]));
 
     // Hold the resync's full session fetch so the reset flags can be observed first.
     const calls = fetchCount('sessions', 'findAll');
     onFetch('sessions', 'findAll', (call) => (call > calls ? gate.promise : undefined));
     rerender({ userId: 'user-b', generation: 2 });
     await flush();
-    expect(agorStore.getState().sessionsHydrated).toBe(false);
-    expect(agorStore.getState().branchesHydrated).toBe(false);
+    expect(scopeLoaded()).toEqual([false, false, false]);
 
     await act(async () => {
       gate.resolve();
       await gate.promise;
     });
-    await flush();
+    await waitFor(() => expect(scopeLoaded()).toEqual([true, true, true]));
     expect(agorStore.getState().sessionById.has('s-1')).toBe(true);
-    expect(agorStore.getState().sessionsHydrated).toBe(true);
-    expect(agorStore.getState().branchesHydrated).toBe(true);
   });
 });
 
@@ -1457,7 +1456,11 @@ describe('useAgorData — opened session transcript priority', () => {
 
   it('holds the global hydration until the opened transcript is ready', async () => {
     const session = makeSession({ session_id: OPEN_ID });
-    const { client, fetchCount } = makeMockClient({ 'sessions:find': [session] });
+    const other = makeSession({ session_id: 's-global-only' });
+    const { client, fetchCount } = makeMockClient({
+      'sessions:find': [session],
+      'sessions:findAll': [session, other],
+    });
     const prefetch = deferredPrefetch();
 
     const { result } = renderHook(() => useAgorData(client, { directSessionId: OPEN_SHORT }));
@@ -1467,17 +1470,13 @@ describe('useAgorData — opened session transcript priority', () => {
     expect(fetchCount('sessions', 'findAll')).toBe(0);
     expect(fetchCount('branches', 'findAll')).toBe(0);
     expect(fetchCount('boards', 'findAll')).toBe(1); // the gated lean list only
-    expect(agorStore.getState().sessionsHydrated).toBe(false);
-    expect(agorStore.getState().branchesHydrated).toBe(false);
+    expect(agorStore.getState().sessionById.has('s-global-only')).toBe(false);
 
     await act(async () => prefetch.resolve());
     await waitFor(() => expect(fetchCount('sessions', 'findAll')).toBe(1));
     expect(fetchCount('branches', 'findAll')).toBe(1);
     expect(fetchCount('boards', 'findAll')).toBe(2);
-    await waitFor(() => {
-      expect(agorStore.getState().sessionsHydrated).toBe(true);
-      expect(agorStore.getState().branchesHydrated).toBe(true);
-    });
+    await waitFor(() => expect(agorStore.getState().sessionById.has('s-global-only')).toBe(true));
   });
 
   it('skips the deferred hydration and releases the prefetch on unmount', async () => {

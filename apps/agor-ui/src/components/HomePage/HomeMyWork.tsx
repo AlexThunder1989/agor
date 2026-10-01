@@ -22,6 +22,7 @@ import {
   useStoreWithEqualityFn,
 } from '../../store/agorStore';
 import { makeBoardSelector } from '../../store/selectors';
+import { boardIdForSession } from '../../utils/boardIdForSession';
 import { MOBILE_TOUCH_TARGET } from '../../utils/deviceDetection';
 import { sameName, teammateLabel } from '../../utils/teammateLabels';
 import { BoardTile, getBoardEmoji } from '../BoardTile';
@@ -119,7 +120,7 @@ const NO_HOMES: never[] = [];
 const makeHomesSelector = (sessions: Session[]) => (s: AgorState) =>
   sessions.flatMap((session) => {
     const branch = s.branchById.get(session.branch_id);
-    return [branch, s.boardById.get(session.branch_board_id ?? branch?.board_id ?? '')];
+    return [branch, s.boardById.get(boardIdForSession(session, s.branchById) ?? '')];
   });
 
 /** Board → branch or teammate → sessions, in the order the sessions arrive. */

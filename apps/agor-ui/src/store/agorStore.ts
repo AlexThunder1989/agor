@@ -39,11 +39,7 @@ enableMapSet();
 export type ItemCounts = Partial<Record<InitialLoadItemKey, number>>;
 
 /** Background-hydrated collections that gate UI reads on their first apply. */
-export type GatedHydrationFlag =
-  | 'sessionsHydrated'
-  | 'branchesHydrated'
-  | 'mcpServersHydrated'
-  | 'gatewayChannelsHydrated';
+export type GatedHydrationFlag = 'mcpServersHydrated' | 'gatewayChannelsHydrated';
 
 /**
  * Loading state of one board partition: that board's branches, sessions,
@@ -107,10 +103,6 @@ interface AgorMeta {
   loadingStage: InitialLoadingStage;
   error: string | null;
   itemCounts: ItemCounts;
-  /** Set once the full active-session set replaces the recent first-paint slice. */
-  sessionsHydrated: boolean;
-  /** Set once the full active-branch set lands (Home starts with none). */
-  branchesHydrated: boolean;
   /** Set once the background mcp-servers hydration first applies (empty result included). */
   mcpServersHydrated: boolean;
   /** Set once the background gateway-channels hydration first applies (empty result included). */
@@ -241,8 +233,6 @@ const INITIAL_META: AgorMetaWithUserScope = {
   loadingStage: 'idle',
   error: null,
   itemCounts: {},
-  sessionsHydrated: false,
-  branchesHydrated: false,
   mcpServersHydrated: false,
   gatewayChannelsHydrated: false,
   agenticToolSettingsByName: new Map(),
@@ -273,8 +263,6 @@ export const agorStore = createStore<AgorState>()(
       set({
         ...EMPTY_MAPS,
         deletedMcpServerIds: new Set(),
-        sessionsHydrated: false,
-        branchesHydrated: false,
         agenticToolSettingsByName: new Map(),
         agenticToolSettingsHydrated: false,
         // Readiness describes the maps being cleared, so it resets with them.

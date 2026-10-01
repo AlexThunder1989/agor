@@ -115,7 +115,9 @@ function greeting(date = new Date()) {
   return hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
 }
 
-const selectHydrated = (s: AgorState) => s.sessionsHydrated && s.branchesHydrated;
+// Counts wait for the user scope: all of my sessions and every branch they or
+// my comment threads reference (never for the whole workspace).
+const selectHydrated = (s: AgorState) => s.mySessionsLoaded && s.homeBranchesLoaded;
 
 /** Onboarding steps the caller can perform, subscribed only while the card can still show. */
 const HomeOnboarding: React.FC<{
@@ -471,6 +473,7 @@ export const HomePage = memo(function HomePage({
       </div>
       <HomeRecentBoards
         recentBoardIds={visitedBoardIds.length ? visitedBoardIds : buckets.boardIds}
+        userId={userId}
         onBoardClick={onBoardClick}
         onAllBoards={allBoards}
       />
