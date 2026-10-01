@@ -1133,19 +1133,24 @@ export function useAgorData(
         // teammate I can view, and the branches my sessions and comment
         // threads reference. Started BEFORE the background global hydrations
         // so its small reads aren't queued behind multi-megabyte snapshots.
-        // On a session route it is NOT held behind the opened transcript like
-        // the global sets below: Home and the teammate surfaces must not wait
-        // for a transcript. Starting after first paint keeps it behind the
-        // transcript's stream/get/tasks reads (sent with the board-scoped
-        // batch); only its messages page, which needs the tasks response, can
-        // follow these small reads. Re-run fill-only on every silent resync so
-        // the scope recovers anything missed while disconnected.
+        // On a session route only its bulk U1 read is held behind the opened
+        // transcript like the global sets below: Home and the teammate
+        // surfaces must not wait for a transcript. Starting after first paint
+        // keeps the small reads behind the transcript's stream/get/tasks reads
+        // (sent with the board-scoped batch); only its messages page, which
+        // needs the tasks response, can follow them. Re-run fill-only on every
+        // silent resync so the scope recovers anything missed while
+        // disconnected.
         if (authenticatedUserId) {
           void startUserScope(client, {
             userId: authenticatedUserId,
             lifetime: loadLifetime,
             gatedMineComplete: !silent && gatedMineComplete,
             unsupported: !silent && gatedUnsupported,
+            // On a session route only the bulk U1 read waits for the opened
+            // transcript (up to 10,000 rows could queue ahead of its first
+            // messages page); Home has no transcript, and small reads stay early.
+            deferBulkRead: openedTranscriptReady ?? undefined,
           });
         }
 

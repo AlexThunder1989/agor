@@ -431,6 +431,12 @@ export async function startUserScope(
     gatedMineComplete: boolean;
     /** The gated my-sessions page was rejected as unsupported: start degraded. */
     unsupported?: boolean;
+    /**
+     * Hold the bulk U1 read until this settles: on a session route, the opened
+     * transcript (#2887's transcript-first barrier). The small reads (U2, U3,
+     * referenced branches) never wait for it.
+     */
+    deferBulkRead?: Promise<void>;
   }
 ): Promise<void> {
   if (!isLoadLifetimeCurrent(options.lifetime)) return;
@@ -477,13 +483,17 @@ export async function startUserScope(
     ? Promise.resolve(true)
     : fillRead(
         run,
-        async () => ({
-          sessions: rowsOf<Session>(
-            await client
-              .service('sessions')
-              .find({ query: mySessionsQuery(run.userId, MY_SESSIONS_FULL_LIMIT) })
-          ),
-        }),
+        async () => {
+          await options.deferBulkRead;
+          if (!isCurrent(run)) return {};
+          return {
+            sessions: rowsOf<Session>(
+              await client
+                .service('sessions')
+                .find({ query: mySessionsQuery(run.userId, MY_SESSIONS_FULL_LIMIT) })
+            ),
+          };
+        },
         ({ sessions }) =>
           (sessions ?? []).some((row) => row.created_by !== run.userId || row.archived)
       ).then((rows) => {

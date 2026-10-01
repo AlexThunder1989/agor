@@ -1510,6 +1510,38 @@ describe('useAgorData — opened session transcript priority', () => {
     await waitFor(() => expect(fetchCount('sessions', 'findAll')).toBe(1));
   });
 
+  it('holds only the bulk U1 read behind the opened transcript', async () => {
+    // A full gated page (200 of mine), so the scope needs U1.
+    const page = Array.from({ length: 200 }, (_, i) =>
+      makeSession({
+        session_id: i === 0 ? OPEN_ID : `s-mine-${i}`,
+        created_by: 'user-me',
+      })
+    );
+    const { client, fetchArguments } = makeMockClient({ 'sessions:find': page });
+    const prefetch = deferredPrefetch();
+    const u1Sent = () =>
+      fetchArguments('sessions', 'find').some(
+        (args) => (args as { query: { $limit?: number } }).query.$limit === 10000
+      );
+
+    const { result } = renderHook(() =>
+      useAgorData(client, {
+        authenticatedUserId: 'user-me',
+        authenticatedUserRole: 'member',
+        authGeneration: 1,
+        connectionReady: true,
+        directSessionId: OPEN_SHORT,
+      })
+    );
+    await waitForInitialLoad(result);
+    await waitFor(() => expect(agorStore.getState().teammatesLoaded).toBe(true));
+    expect(u1Sent()).toBe(false);
+
+    await act(async () => prefetch.resolve());
+    await waitFor(() => expect(u1Sent()).toBe(true));
+  });
+
   it('starts the user scope without waiting for the opened transcript', async () => {
     const session = makeSession({ session_id: OPEN_ID, created_by: 'user-me' });
     const { client, fetchArguments, fetchCount } = makeMockClient({ 'sessions:find': [session] });
