@@ -48,10 +48,21 @@
 }
 
 .island[data-scrolled="true"] {
+  --pill-w: 660px;
   --open-w: 780px;
   top: 14px;
-  width: 660px;
+  width: var(--pill-w);
   border-radius: 30px;
+}
+
+/* The pill widens when a menu opens. Keep the bar row at the pill's width
+ * and centered, so the triggers hold still on screen as the island grows
+ * around them; otherwise the row slides left under the cursor, hovers the
+ * next item, closes the menu, and loops open/closed. (Border-box: the inner
+ * width is the pill's minus its 1px borders.) */
+.island[data-scrolled="true"] .bar {
+  width: calc(var(--pill-w) - 2px);
+  margin-inline: auto;
 }
 
 .island[data-open="true"] {
@@ -450,6 +461,12 @@
 }
 
 @media (max-width: 899px) {
+  /* Phones never widen on open (menus live in the sheet): bar fills the pill. */
+  .island[data-scrolled="true"] .bar {
+    width: auto;
+    margin-inline: 0;
+  }
+
   .island,
   .island[data-scrolled="true"],
   .island[data-open="true"] {
