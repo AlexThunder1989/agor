@@ -34,6 +34,7 @@ import { AppActionsProvider } from '../../contexts/AppActionsContext';
 import { useRegisterBoardSwitcher } from '../../contexts/CanvasNavigationContext';
 import type { NewSessionConfig, SessionCreationResult } from '../../domain/sessionCreation';
 import { useAppNavigation } from '../../hooks/useAppNavigation';
+import { useBoardPartition } from '../../hooks/useBoardPartition';
 import { useBoardTitle } from '../../hooks/useBoardTitle';
 import { useEventStream } from '../../hooks/useEventStream';
 import { useFaviconStatus } from '../../hooks/useFaviconStatus';
@@ -1192,7 +1193,14 @@ export const App: React.FC<AppProps> = ({
   const primaryTeammateRepo = useAgorStore(
     useMemo(() => makeRepoSelector(primaryTeammateRepoId), [primaryTeammateRepoId])
   );
-  const primaryTeammateInaccessible = Boolean(primaryTeammateId && !primaryTeammateBranch);
+  // Load the displayed board's partition when it is not complete yet. Until it
+  // is, a missing teammate branch means "not loaded", not "no access" (I1).
+  const { boardReady } = useBoardPartition(client, isHomeSurface ? null : currentBoardId, {
+    canUseMemberWorkspaceServices: hasMinimumRole(user?.role, ROLES.MEMBER),
+  });
+  const primaryTeammateInaccessible = Boolean(
+    primaryTeammateId && !primaryTeammateBranch && boardReady
+  );
 
   // Preserve the historical board-switch behavior now that the panel itself
   // no longer pushes a default tab into controlled parent state on mount.
@@ -1489,6 +1497,7 @@ export const App: React.FC<AppProps> = ({
                   primaryTeammateBranch={primaryTeammateBranch}
                   primaryTeammateRepo={primaryTeammateRepo}
                   primaryTeammateInaccessible={primaryTeammateInaccessible}
+                  boardReady={boardReady}
                   currentUserId={user?.user_id}
                   selectedSessionId={effectiveSelectedSessionId}
                   onSessionClick={handleSessionClick}

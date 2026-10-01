@@ -54,6 +54,7 @@ import {
 } from '../store/agorMaps';
 import * as realtime from '../store/agorRealtimeActions';
 import { agorStore, shallow, useStoreWithEqualityFn } from '../store/agorStore';
+import { markBoardPartitionLoaded } from '../store/boardPartitions';
 import {
   type OpenedTranscriptPrefetch,
   prefetchOpenedTranscript,
@@ -993,6 +994,8 @@ export function useAgorData(
           // A silent resync just applied the full active session and branch sets.
           agorStore.getState().markHydrated('sessionsHydrated');
           agorStore.getState().markHydrated('branchesHydrated');
+        } else {
+          markBoardPartitionLoaded(boardScope);
         }
         debugTimer?.endIndexing();
         debugFinishStatus = 'success';

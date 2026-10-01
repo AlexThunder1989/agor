@@ -664,3 +664,109 @@ export function findSessionInBranchBuckets(
   }
   return undefined;
 }
+
+/** One board's partition as fetched by `loadBoardPartition`. */
+export interface BoardPartitionSnapshot {
+  boardId: string;
+  branches: readonly Branch[];
+  sessions: readonly Session[];
+  /** `null` when the caller may not read board objects (global viewers). */
+  boardObjects: readonly BoardEntityObject[] | null;
+  comments: readonly BoardComment[];
+  cards: readonly CardWithType[];
+  /** Full board record (objects / custom_css); `null` keeps the lean row. */
+  board: Board | null;
+}
+
+/** Collections the partition fence consults. */
+export type PartitionCollection =
+  | 'sessions'
+  | 'branches'
+  | 'boards'
+  | 'boardObjects'
+  | 'cards'
+  | 'comments';
+
+/** Whether a live event wrote `id` in `collection` since the load started. */
+export type PartitionTouched = (collection: PartitionCollection, id: string) => boolean;
+
+/**
+ * Fill-only merge of a board partition snapshot (invariant I2: a load never
+ * overwrites a live row).
+ *
+ * - A snapshot row is inserted only when its id is ABSENT from the store and
+ *   no live event touched it since the load started. Present rows are kept
+ *   current by realtime events and are never overwritten. A touched absent row
+ *   was removed/archived/evicted, or its newer patch is queued and will flush.
+ * - A session, board object or comment whose branch was touched since the load
+ *   started and is now absent from `branchById` is skipped: its branch was
+ *   archived or deleted while the load was in flight.
+ * - The full board record replaces the lean one unless `boards:<id>` was
+ *   touched.
+ *
+ * Returns `prev` unchanged when nothing was filled. Never bumps revisions, so a
+ * fill cannot make a concurrent global hydration discard its snapshot.
+ */
+export function applyBoardPartition(
+  prev: DataMaps,
+  snapshot: BoardPartitionSnapshot,
+  touched: PartitionTouched
+): DataMaps {
+  let maps = prev;
+
+  let branchById = maps.branchById;
+  for (const branch of snapshot.branches) {
+    if (branch.archived || branchById.has(branch.branch_id)) continue;
+    if (touched('branches', branch.branch_id)) continue;
+    if (branchById === maps.branchById) branchById = new Map(branchById);
+    branchById.set(branch.branch_id, branch);
+  }
+  if (branchById !== maps.branchById) maps = { ...maps, branchById };
+
+  const onRemovedBranch = (branchId: string | null | undefined) =>
+    !!branchId && !maps.branchById.has(branchId) && touched('branches', branchId);
+
+  // Insert remote-create sources after their targets so the surrogate
+  // projection in `applySessionPatchToMaps` can find the target bucket.
+  const sessions = [...snapshot.sessions].sort(
+    (a, b) =>
+      Number(!!a.remote_relationships?.as_source?.length) -
+      Number(!!b.remote_relationships?.as_source?.length)
+  );
+  for (const session of sessions) {
+    if (session.archived || maps.sessionById.has(session.session_id)) continue;
+    if (touched('sessions', session.session_id) || onRemovedBranch(session.branch_id)) continue;
+    maps = applySessionPatchToMaps(maps, session);
+  }
+
+  for (const boardObject of snapshot.boardObjects ?? []) {
+    if (maps.boardObjectById.has(boardObject.object_id)) continue;
+    if (touched('boardObjects', boardObject.object_id) || onRemovedBranch(boardObject.branch_id))
+      continue;
+    maps = upsertBoardObjectInMaps(maps, boardObject, 'create');
+  }
+
+  let commentById = maps.commentById;
+  for (const comment of snapshot.comments) {
+    if (commentById.has(comment.comment_id)) continue;
+    if (touched('comments', comment.comment_id) || onRemovedBranch(comment.branch_id)) continue;
+    if (commentById === maps.commentById) commentById = new Map(commentById);
+    commentById.set(comment.comment_id, comment);
+  }
+  if (commentById !== maps.commentById) maps = { ...maps, commentById };
+
+  let cardById = maps.cardById;
+  for (const card of snapshot.cards) {
+    if (cardById.has(card.card_id) || touched('cards', card.card_id)) continue;
+    if (cardById === maps.cardById) cardById = new Map(cardById);
+    cardById.set(card.card_id, card);
+  }
+  if (cardById !== maps.cardById) maps = { ...maps, cardById };
+
+  if (snapshot.board && !touched('boards', snapshot.board.board_id)) {
+    const boardById = replaceIfChanged(maps.boardById, snapshot.board.board_id, snapshot.board);
+    if (boardById !== maps.boardById) maps = { ...maps, boardById };
+  }
+
+  return maps;
+}

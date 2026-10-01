@@ -45,6 +45,36 @@ export type GatedHydrationFlag =
   | 'mcpServersHydrated'
   | 'gatewayChannelsHydrated';
 
+/**
+ * Loading state of one board partition: that board's branches, sessions,
+ * board objects, cards, comments and full board record. Presence of rows in a
+ * map never implies completeness; only `loaded` does (see `boardPartitions.ts`).
+ */
+export type BoardPartitionStatus = 'loading' | 'loaded' | 'error';
+export interface BoardPartitionState {
+  status: BoardPartitionStatus;
+  /** Authority scope the load ran under; a load never applies across scopes. */
+  authorityScope: string;
+  error?: string;
+}
+
+/** Collections whose GLOBAL snapshot makes every board complete once applied. */
+export type GloballyHydratedCollection =
+  | 'sessions'
+  | 'branches'
+  | 'boardObjects'
+  | 'cards'
+  | 'comments'
+  | 'boards';
+export const GLOBALLY_HYDRATED_COLLECTIONS: readonly GloballyHydratedCollection[] = [
+  'sessions',
+  'branches',
+  'boardObjects',
+  'cards',
+  'comments',
+  'boards',
+];
+
 /** Load/meta fields that ride alongside the data maps. */
 interface AgorMeta {
   /** Deletion fences for late MCP attachment responses/events in this authority lifetime. */
@@ -64,6 +94,10 @@ interface AgorMeta {
   agenticToolSettingsByName: Map<TenantAgenticToolName, TenantAgenticToolSettings>;
   /** Set once the background agentic-tool-settings hydration first applies (empty result included). */
   agenticToolSettingsHydrated: boolean;
+  /** Per-board partition loading state (see `boardPartitions.ts`). */
+  boardPartitions: Map<string, BoardPartitionState>;
+  /** Collections whose global snapshot has applied at least once. */
+  globallyHydrated: Set<GloballyHydratedCollection>;
 }
 
 /** Store actions: foundational primitives + named branch lifecycle cascades. */
@@ -116,6 +150,12 @@ interface AgorActions {
    * all-no-op reducer leaves the outer state object untouched.
    */
   applyMaps: (updater: (prev: DataMaps) => DataMaps) => void;
+  /** Set (or clear, with `null`) one board's partition state. */
+  setBoardPartition: (boardId: string, state: BoardPartitionState | null) => void;
+  /** Forget every board partition (authority transitions). */
+  resetBoardPartitions: () => void;
+  /** Record that a global snapshot of these collections has applied. */
+  markGloballyHydrated: (collections: readonly string[]) => void;
   /** Mirror archive visibility while retaining the persisted board placement. */
   evictArchivedBranch: (branchId: string) => void;
   /** Atomically mirror every normalized FK cascade/SET NULL from a hard delete. */
@@ -123,6 +163,10 @@ interface AgorActions {
 }
 
 export type AgorState = DataMaps & AgorMeta & AgorActions;
+
+function shallowEqualPartition(a: BoardPartitionState, b: BoardPartitionState): boolean {
+  return a.status === b.status && a.authorityScope === b.authorityScope && a.error === b.error;
+}
 
 function evictBranchAndSessions(draft: Draft<AgorState>, branchId: string): Set<string> {
   if (draft.branchById.has(branchId)) draft.branchById.delete(branchId);
@@ -174,6 +218,8 @@ const INITIAL_META: AgorMeta = {
   gatewayChannelsHydrated: false,
   agenticToolSettingsByName: new Map(),
   agenticToolSettingsHydrated: false,
+  boardPartitions: new Map(),
+  globallyHydrated: new Set(),
 };
 
 export const agorStore = createStore<AgorState>()(
@@ -181,7 +227,13 @@ export const agorStore = createStore<AgorState>()(
     ...EMPTY_MAPS,
     ...INITIAL_META,
 
-    reset: () => set({ ...EMPTY_MAPS, ...INITIAL_META }),
+    reset: () =>
+      set({
+        ...EMPTY_MAPS,
+        ...INITIAL_META,
+        boardPartitions: new Map(),
+        globallyHydrated: new Set(),
+      }),
 
     // Also clear the tenant-specific tool-settings map AND its hydration flag:
     // both are meta (not in EMPTY_MAPS), so without this they'd persist across a
@@ -195,6 +247,9 @@ export const agorStore = createStore<AgorState>()(
         branchesHydrated: false,
         agenticToolSettingsByName: new Map(),
         agenticToolSettingsHydrated: false,
+        // Readiness describes the maps being cleared, so it resets with them.
+        boardPartitions: new Map(),
+        globallyHydrated: new Set(),
       }),
 
     // Meta setters mirror `useState`'s bail-out: a write equal to the current
@@ -231,6 +286,29 @@ export const agorStore = createStore<AgorState>()(
       // Intentionally leaves `agenticToolSettingsHydrated` untouched: a partial
       // update never establishes the complete set, so it can't flip the gate.
       set({ agenticToolSettingsByName: next });
+    },
+
+    setBoardPartition: (boardId, state) => {
+      const current = get().boardPartitions;
+      const existing = current.get(boardId);
+      if (state === null ? !existing : existing && shallowEqualPartition(existing, state)) return;
+      const next = new Map(current);
+      if (state === null) next.delete(boardId);
+      else next.set(boardId, state);
+      set({ boardPartitions: next });
+    },
+    resetBoardPartitions: () => {
+      if (get().boardPartitions.size > 0) set({ boardPartitions: new Map() });
+    },
+    markGloballyHydrated: (collections) => {
+      const current = get().globallyHydrated;
+      const additions = collections.filter(
+        (c): c is GloballyHydratedCollection =>
+          (GLOBALLY_HYDRATED_COLLECTIONS as readonly string[]).includes(c) &&
+          !current.has(c as GloballyHydratedCollection)
+      );
+      if (additions.length === 0) return;
+      set({ globallyHydrated: new Set([...current, ...additions]) });
     },
 
     setMap: (key, value) => {

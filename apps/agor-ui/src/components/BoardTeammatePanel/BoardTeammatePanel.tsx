@@ -53,6 +53,12 @@ interface BoardTeammatePanelProps {
   primaryTeammateBranch?: Branch;
   primaryTeammateRepo?: Repo;
   primaryTeammateInaccessible: boolean;
+  /**
+   * Whether the board's partition is complete. Until it is, an absent teammate
+   * branch or empty session list means "not loaded yet", so both tabs show a
+   * skeleton instead of empty/inaccessible states. Defaults to ready.
+   */
+  boardReady?: boolean;
   currentUserId?: string;
   selectedSessionId?: string | null;
   onSessionClick: (sessionId: string) => void;
@@ -90,6 +96,7 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
   primaryTeammateBranch,
   primaryTeammateRepo,
   primaryTeammateInaccessible,
+  boardReady = true,
   currentUserId,
   selectedSessionId,
   onSessionClick,
@@ -263,7 +270,20 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
     [primaryTeammateBranch, sessionsByBranch]
   );
 
+  const boardLoadingSkeleton = (
+    <div style={{ padding: 16 }} data-testid="board-partition-skeleton">
+      <Space orientation="vertical" size={8} style={{ width: '100%' }}>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          Loading board…
+        </Typography.Text>
+        <Skeleton active paragraph={{ rows: 4 }} title={false} />
+      </Space>
+    </div>
+  );
+
   const teammateContent = (() => {
+    if (!boardReady) return boardLoadingSkeleton;
+
     if (primaryTeammateBranch && primaryTeammateRepo) {
       const teammateConfig = getTeammateConfig(primaryTeammateBranch);
       const teammateDescription = primaryTeammateBranch.notes?.trim();
@@ -474,7 +494,9 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
             label: 'Sessions',
             children: board ? (
               <div style={{ height: 'calc(100vh - 112px)', overflow: 'auto' }}>
-                {sessionDetailsHydrated ? (
+                {!boardReady ? (
+                  boardLoadingSkeleton
+                ) : sessionDetailsHydrated ? (
                   <BoardSessionList
                     board={board}
                     currentBoardId={board.board_id}

@@ -90,6 +90,7 @@ import type { CardNodeData } from '../CardNode';
 import CardNode from '../CardNode';
 import { MarkdownRenderer } from '../MarkdownRenderer/MarkdownRenderer';
 import SessionCard from '../SessionCard';
+import { BoardPartitionStatus } from './BoardPartitionStatus';
 import { AppNode } from './canvas/AppNodeLazy';
 import { ArtifactNode } from './canvas/ArtifactNodeLazy';
 import { CommentNode, ZoneNode } from './canvas/BoardObjectNodes';
@@ -2807,6 +2808,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
         )}
 
         {scopedCustomCss && <style>{scopedCustomCss}</style>}
+        <BoardPartitionStatus boardId={board?.board_id} />
         <div
           ref={reactFlowWrapperRef}
           className={boardCssClass || undefined}
