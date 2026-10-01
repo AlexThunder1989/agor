@@ -282,7 +282,8 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
   );
 
   const teammateContent = (() => {
-    if (!boardReady) return boardLoadingSkeleton;
+    // No board (or one that doesn't exist): nothing is loading.
+    if (board && !boardReady) return boardLoadingSkeleton;
 
     if (primaryTeammateBranch && primaryTeammateRepo) {
       const teammateConfig = getTeammateConfig(primaryTeammateBranch);

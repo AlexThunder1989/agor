@@ -21,16 +21,20 @@ export function useBoardPartition(
   boardId: string | null | undefined,
   options: { canUseMemberWorkspaceServices: boolean }
 ): { boardReady: boolean; status: 'loading' | 'loaded' | 'error' | undefined } {
-  const boardReady = useAgorStore(useMemo(() => makeBoardReadySelector(boardId), [boardId]));
+  const partitionReady = useAgorStore(useMemo(() => makeBoardReadySelector(boardId), [boardId]));
   const partition = useAgorStore(useMemo(() => makeBoardPartitionSelector(boardId), [boardId]));
   const status = partition?.status;
   const boardKnown = useAgorStore((s) => (boardId ? s.boardById.has(boardId) : false));
   const firstPaintSettled = useAgorStore((s) => !s.loading);
   const { canUseMemberWorkspaceServices } = options;
+  // Nothing to load without a board, or for one that doesn't exist (boards
+  // are global and gated, so after first paint an unknown id never resolves):
+  // ready, like `BoardPartitionStatus` — never "Loading board…" forever.
+  const boardReady = partitionReady || !boardId || (firstPaintSettled && !boardKnown);
 
   useEffect(() => {
     if (!client || !boardId || !boardKnown || !firstPaintSettled) return;
-    if (boardReady) return;
+    if (partitionReady) return;
     // An entry from another authority or load lifetime can never settle: it
     // counts as unloaded (authority transitions also forget every entry).
     const current = agorStore.getState().boardPartitions.get(boardId);
@@ -39,7 +43,7 @@ export function useBoardPartition(
   }, [
     boardId,
     boardKnown,
-    boardReady,
+    partitionReady,
     canUseMemberWorkspaceServices,
     client,
     firstPaintSettled,

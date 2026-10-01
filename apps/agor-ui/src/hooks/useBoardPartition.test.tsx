@@ -71,4 +71,16 @@ describe('useBoardPartition', () => {
     await waitFor(() => expect(result.current.boardReady).toBe(true));
     stale.releaseAll();
   });
+
+  it('is ready without a board, and for a board that does not exist', () => {
+    const { client } = makeClient();
+    const none = renderHook(() =>
+      useBoardPartition(client, null, { canUseMemberWorkspaceServices: true })
+    );
+    expect(none.result.current.boardReady).toBe(true);
+    const unknown = renderHook(() =>
+      useBoardPartition(client, 'does-not-exist', { canUseMemberWorkspaceServices: true })
+    );
+    expect(unknown.result.current.boardReady).toBe(true);
+  });
 });
