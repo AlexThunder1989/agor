@@ -423,6 +423,8 @@ export const App: React.FC<AppProps> = ({
   const [createDialogDefaultTab, setCreateDialogDefaultTab] = useState<
     'branch' | 'teammate' | 'board' | 'repository'
   >('teammate');
+  // Board a new teammate joins as primary (set from its empty Teammate tab); null creates a fresh board.
+  const [teammateTargetBoardId, setTeammateTargetBoardId] = useState<string | null>(null);
   const [newBranchDefaultPosition, setNewBranchDefaultPosition] = useState<{
     x: number;
     y: number;
@@ -543,6 +545,9 @@ export const App: React.FC<AppProps> = ({
 
   const currentBoard = useAgorStore(
     useMemo(() => makeBoardSelector(currentBoardId), [currentBoardId])
+  );
+  const teammateTargetBoard = useAgorStore(
+    useMemo(() => makeBoardSelector(teammateTargetBoardId), [teammateTargetBoardId])
   );
   const isHomeSurface = isRootHomePath && !hasExplicitEntityTarget;
   const headerBoardId = isHomeSurface ? '' : currentBoardId;
@@ -752,6 +757,14 @@ export const App: React.FC<AppProps> = ({
     (branchId: string) => navigation.goToBranch(branchId),
     [navigation]
   );
+
+  const handleCreateBoardTeammate = useCallback(() => {
+    if (!currentBoardId) return;
+    setTeammateTargetBoardId(currentBoardId);
+    setNewBranchDefaultPosition(null);
+    setCreateDialogDefaultTab('teammate');
+    setCreateDialogOpen(true);
+  }, [currentBoardId]);
 
   const handleHomeOpenCreateDialog = useCallback(
     (tab?: 'branch' | 'teammate' | 'board' | 'repository', boardId?: string) => {
@@ -1050,6 +1063,16 @@ export const App: React.FC<AppProps> = ({
         branchName: result.branchName,
         sourceBranch: result.sourceBranch,
         sourceRemoteUrl: result.sourceRemoteUrl,
+        ...(teammateTargetBoardId
+          ? {
+              boardId: teammateTargetBoardId,
+              keepExistingPrimary: true,
+              // An existing board with branches already has its own layout; skip the welcome note.
+              welcomeNote: ![...agorStore.getState().branchById.values()].some(
+                (branch) => branch.board_id === teammateTargetBoardId
+              ),
+            }
+          : {}),
       },
       { client, repoById: agorStore.getState().repoById, onCreateBranch, onUpdateBranch }
     );
@@ -1521,6 +1544,7 @@ export const App: React.FC<AppProps> = ({
                   hoveredCommentId={hoveredCommentId}
                   selectedCommentId={selectedCommentId}
                   onCollapse={handleTeammateCollapse}
+                  onCreateTeammate={handleCreateBoardTeammate}
                   deferSessionDetails={homeExitPanelDetailsDeferred}
                   onDeferredDetailsHydrated={handleDeferredDetailsHydrated}
                 />
@@ -1851,8 +1875,12 @@ export const App: React.FC<AppProps> = ({
             setCreateDialogOpen(false);
             setCreateDialogDefaultTab('teammate');
             setNewBranchDefaultPosition(null);
+            setTeammateTargetBoardId(null);
           }}
           defaultTab={createDialogDefaultTab}
+          teammateTargetBoardName={
+            teammateTargetBoardId ? (teammateTargetBoard?.name ?? 'this board') : undefined
+          }
           currentBoardId={currentBoardId}
           defaultPosition={newBranchDefaultPosition || undefined}
           onCreateBranch={handleCreateBranch}

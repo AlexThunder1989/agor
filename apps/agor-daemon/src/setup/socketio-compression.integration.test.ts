@@ -4,7 +4,7 @@ import type { Socket as NetSocket } from 'node:net';
 import { type AgorClient, createClient } from '@agor/core/api';
 import { feathers, feathersExpress, socketio } from '@agor/core/feathers';
 import { afterEach, describe, expect, it } from 'vitest';
-import { SOCKET_IO_PER_MESSAGE_DEFLATE } from './socketio.js';
+import { createSocketIOConfig, SOCKET_IO_PER_MESSAGE_DEFLATE } from './socketio.js';
 
 function waitForSocketConnect(socketClient: AgorClient): Promise<void> {
   if (socketClient.io.connected) return Promise.resolve();
@@ -73,14 +73,18 @@ describe('Socket.IO WebSocket compression', () => {
     }
   });
 
-  async function listen(serverOptions: object, snapshot: unknown[] = []) {
+  type ServerOptions = object | ((app: ReturnType<typeof feathersExpress>) => object);
+
+  async function listen(serverOptions: ServerOptions, snapshot: unknown[] = []) {
     const app = feathersExpress(feathers());
     app.use('snapshots', {
       async find() {
         return snapshot;
       },
     });
-    app.configure(socketio(serverOptions));
+    app.configure(
+      socketio(typeof serverOptions === 'function' ? serverOptions(app) : serverOptions)
+    );
 
     server = await new Promise<Server>((resolve) => {
       const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
@@ -90,7 +94,7 @@ describe('Socket.IO WebSocket compression', () => {
     return { server, port: address.port };
   }
 
-  async function bytesToFetchSnapshot(serverOptions: object) {
+  async function bytesToFetchSnapshot(serverOptions: ServerOptions) {
     const snapshot = listSnapshot(2_000);
     const { server, port } = await listen(serverOptions, snapshot);
     const tcpSockets: NetSocket[] = [];
@@ -103,8 +107,46 @@ describe('Socket.IO WebSocket compression', () => {
     const before = written();
     const rows = (await client.service('snapshots').find()) as unknown[];
     expect(rows).toHaveLength(snapshot.length);
-    return { wire: written() - before, json: JSON.stringify(snapshot).length };
+    // What the client's `ws` transport negotiated in the upgrade handshake.
+    const transport = client.io.io.engine.transport as unknown as {
+      ws?: { extensions?: string };
+    };
+    return {
+      wire: written() - before,
+      json: JSON.stringify(snapshot).length,
+      extensions: transport.ws?.extensions ?? '',
+    };
   }
+
+  // The daemon's real server options (no auth callback is needed to observe
+  // the WebSocket handshake), with `daemon.websocket_compression` on or off.
+  const daemonServerOptions =
+    (websocketCompression?: boolean) => (app: ReturnType<typeof feathersExpress>) => ({
+      ...createSocketIOConfig(app as never, {
+        corsOrigin: true,
+        credentialsAllowed: false,
+        ...(websocketCompression === undefined ? {} : { websocketCompression }),
+      }).serverOptions,
+      transports: ['websocket'],
+    });
+
+  it('negotiates permessage-deflate by default and when the switch is on', async () => {
+    for (const setting of [undefined, true]) {
+      const { wire, json, extensions } = await bytesToFetchSnapshot(daemonServerOptions(setting));
+      expect(extensions).toContain('permessage-deflate');
+      expect(wire).toBeLessThan(json / 4);
+      client?.io.close();
+      await new Promise<void>((resolve) => server?.close(() => resolve()));
+      server = undefined;
+    }
+  });
+
+  it('negotiates no compression when daemon.websocket_compression is false', async () => {
+    const { wire, json, extensions } = await bytesToFetchSnapshot(daemonServerOptions(false));
+
+    expect(extensions).not.toContain('permessage-deflate');
+    expect(wire).toBeGreaterThanOrEqual(json);
+  });
 
   it('compresses large responses on the wire and leaves them intact for the client', async () => {
     const { wire, json } = await bytesToFetchSnapshot({
@@ -154,5 +196,20 @@ describe('Socket.IO WebSocket compression', () => {
     const result = await upgrade(port, undefined);
 
     expect(result).toEqual({ status: 101, extensions: undefined });
+  });
+
+  it('answers the plain (Firefox) offer per daemon.websocket_compression', async () => {
+    const on = await listen(daemonServerOptions(true));
+    expect((await upgrade(on.port, 'permessage-deflate')).extensions).toMatch(
+      /^permessage-deflate\b/
+    );
+    await new Promise<void>((resolve) => server?.close(() => resolve()));
+    server = undefined;
+
+    const off = await listen(daemonServerOptions(false));
+    expect(await upgrade(off.port, 'permessage-deflate')).toEqual({
+      status: 101,
+      extensions: undefined,
+    });
   });
 });
