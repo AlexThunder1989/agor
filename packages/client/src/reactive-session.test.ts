@@ -217,6 +217,26 @@ function createMockClient(opts: MockClientOptions) {
   };
 }
 
+interface FetchInternals {
+  messageFetches: Map<number, number>;
+  taskFetches: Map<number, number>;
+  messageMutations: unknown[];
+  taskMutations: unknown[];
+  queueInflight: Promise<void> | null;
+  leanSyncInflight: Promise<void> | null;
+  resyncInflight: Promise<void> | null;
+}
+
+function expectNoStrandedFetches(internals: FetchInternals) {
+  expect(internals.messageFetches.size).toBe(0);
+  expect(internals.taskFetches.size).toBe(0);
+  expect(internals.messageMutations).toHaveLength(0);
+  expect(internals.taskMutations).toHaveLength(0);
+  expect(internals.queueInflight).toBeNull();
+  expect(internals.leanSyncInflight).toBeNull();
+  expect(internals.resyncInflight).toBeNull();
+}
+
 async function bootstrapHandle(opts: MockClientOptions, taskHydration: TaskHydrationMode) {
   const { client, messageFindAll } = createMockClient(opts);
   const handle = new ReactiveSessionHandle(client, SESSION_ID, { taskHydration });
@@ -2016,6 +2036,60 @@ describe('lean transcript POC hydration', () => {
     expect(handle.state.tasks).toEqual([]);
     expect(handle.state.loadedTaskIds.has('task-023')).toBe(false);
   });
+
+  it('retires journals and single-flight markers stranded by a disconnect mid-sync', async () => {
+    const opts: MockClientOptions = history();
+    const mock = createMockClient(opts);
+    const handle = new ReactiveSessionHandle(mock.client, SESSION_ID, { taskHydration: 'lean' });
+    await handle.ready();
+    // Twenty reached Tasks: a resync refreshes the ten outside the latest page one by one.
+    await handle.loadOlderTasks();
+    const internals = handle as unknown as FetchInternals;
+    // Without an ack deadline, Socket.IO drops the callback of a request that
+    // was in flight at disconnect; the awaiting call never settles.
+    const taskGet = vi.mocked(mock.client.service('tasks').get);
+    const answer = taskGet.getMockImplementation()!;
+    let settleStranded: (() => void) | undefined;
+    taskGet.mockImplementationOnce(
+      (id: string) =>
+        new Promise((resolve) => {
+          settleStranded = () => resolve(answer(id));
+        })
+    );
+    const stranded = handle.resync();
+    await vi.waitFor(() => expect(settleStranded).toBeDefined());
+    expect(internals.taskFetches.size).toBe(1);
+    expect(internals.messageFetches.size).toBe(1);
+
+    mock.fireIo('disconnect');
+    expectNoStrandedFetches(internals);
+
+    opts.tasks.push(makeTask('task-024', TaskStatus.COMPLETED));
+    mock.fireIo('connect');
+    await vi.waitFor(() =>
+      expect(handle.state.tasks.some((task) => task.task_id === 'task-024')).toBe(true)
+    );
+    expect(handle.state.tasks).toHaveLength(21);
+    expect(handle.state.error).toBeNull();
+
+    // Executor heartbeats and message patches keep arriving on the new connection.
+    const running = makeTask('task-024', TaskStatus.RUNNING);
+    const message = makeMessage('task-024', 0);
+    for (let beat = 0; beat < 50; beat++) {
+      mock.emitServiceEvent('tasks', 'patched', running);
+      mock.emitServiceEvent('messages', 'patched', message);
+    }
+    expectNoStrandedFetches(internals);
+
+    // A stranded request that settles after the reconnect is discarded.
+    settleStranded!();
+    await stranded;
+    expect(handle.state.tasks).toHaveLength(21);
+    expect(handle.getTask('task-024')?.status).toBe(TaskStatus.RUNNING);
+    expect(handle.state.error).toBeNull();
+    expectNoStrandedFetches(internals);
+    handle.dispose();
+  });
 });
 
 it('retains consecutive tool activity across partial persistence, duplicate events and reconciliation', async () => {
@@ -2527,5 +2601,156 @@ describe.each(['lean', 'lazy'] as const)('stream lifecycle (%s)', (taskHydration
     f.handle.dispose();
     expect(Reflect.get(f.handle, 'streamTaskIndex')).toBeUndefined();
     expect(Reflect.get(f.handle, 'retiredStreamTasks').size).toBe(0);
+  });
+});
+
+describe('lazy resync stranded by a disconnect', () => {
+  it('stops journaling, reconnects without waiting on it, and discards its late snapshot', async () => {
+    const opts: MockClientOptions = {
+      tasks: [makeTask('task-1', TaskStatus.COMPLETED), makeTask('task-2', TaskStatus.COMPLETED)],
+      messagesByTask: {
+        'task-1': [makeMessage('task-1', 0)],
+        'task-2': [makeMessage('task-2', 0)],
+      },
+    };
+    const mock = createMockClient(opts);
+    const handle = new ReactiveSessionHandle(mock.client, SESSION_ID, { taskHydration: 'lazy' });
+    await handle.ready();
+    const internals = handle as unknown as FetchInternals;
+
+    opts.deferTaskMessageFetch = 'task-2';
+    const stranded = handle.resync();
+    await vi.waitFor(() => expect(internals.messageFetches.size).toBe(1));
+    mock.fireIo('disconnect');
+    expectNoStrandedFetches(internals);
+
+    opts.deferTaskMessageFetch = undefined;
+    const newer = makeMessage('task-2', 1);
+    opts.messagesByTask['task-2'] = [...opts.messagesByTask['task-2'], newer];
+    mock.fireIo('connect');
+    await vi.waitFor(() => expect(handle.getTaskMessages('task-2')).toHaveLength(2));
+    for (let beat = 0; beat < 50; beat++) {
+      mock.emitServiceEvent('tasks', 'patched', makeTask('task-2', TaskStatus.RUNNING));
+      mock.emitServiceEvent('messages', 'patched', newer);
+    }
+    expectNoStrandedFetches(internals);
+
+    mock.releaseMessageFetch();
+    await stranded;
+    expect(handle.getTaskMessages('task-2').map((message) => message.message_id)).toEqual([
+      'task-2-msg-0',
+      newer.message_id,
+    ]);
+    expect(handle.state.error).toBeNull();
+    handle.dispose();
+  });
+});
+
+describe('bootstrap stranded by a disconnect', () => {
+  it.each(['lazy', 'eager'] as const)(
+    '%s: starts no hydration after abandonment and leaves no fetch token behind',
+    async (taskHydration) => {
+      const opts: MockClientOptions = {
+        tasks: [makeTask('task-1', TaskStatus.COMPLETED), makeTask('task-2', TaskStatus.COMPLETED)],
+        messagesByTask: {
+          'task-1': [makeMessage('task-1', 0)],
+          'task-2': [makeMessage('task-2', 0)],
+        },
+      };
+      const mock = createMockClient(opts);
+      // Session and Task reads resolve; the queue read is still in flight when
+      // the socket drops and then rejects with the transport.
+      const queueFind = vi.mocked(mock.client.service(`/sessions/${SESSION_ID}/tasks/queue`).find);
+      let rejectQueue: (() => void) | undefined;
+      queueFind.mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectQueue = () => reject(new Error('socket has been disconnected'));
+          })
+      );
+      const handle = new ReactiveSessionHandle(mock.client, SESSION_ID, { taskHydration });
+      const internals = handle as unknown as FetchInternals;
+      await vi.waitFor(() => expect(rejectQueue).toBeDefined());
+      expect(mock.taskFindAll).toHaveBeenCalledTimes(1);
+
+      mock.fireIo('disconnect');
+      rejectQueue!();
+      await vi.waitFor(() => expect(handle.state.loading).toBe(false));
+      expect(mock.messageFindAll).not.toHaveBeenCalled();
+      expectNoStrandedFetches(internals);
+
+      const newer = makeMessage('task-2', 1);
+      opts.messagesByTask['task-2'] = [...opts.messagesByTask['task-2'], newer];
+      mock.fireIo('connect');
+      await vi.waitFor(() => expect(handle.getTaskMessages('task-2')).toHaveLength(2));
+      for (let beat = 0; beat < 50; beat++) {
+        mock.emitServiceEvent('tasks', 'patched', makeTask('task-2', TaskStatus.RUNNING));
+        mock.emitServiceEvent('messages', 'patched', newer);
+      }
+      expectNoStrandedFetches(internals);
+      expect(handle.state.tasks.map((task) => task.task_id)).toEqual(['task-1', 'task-2']);
+      expect(handle.isTaskLoaded('task-2')).toBe(true);
+      expect(handle.state.error).toBeNull();
+      handle.dispose();
+    }
+  );
+});
+
+describe('disconnect cleanup alongside terminal stream settlement', () => {
+  it('keeps retired thinking attribution across a stranded resync and reconnect', async () => {
+    const opts: MockClientOptions = {
+      tasks: [makeTask('task-1', TaskStatus.RUNNING)],
+      messagesByTask: { 'task-1': [makeMessage('task-1', 0)] },
+    };
+    const mock = createMockClient(opts);
+    const handle = new ReactiveSessionHandle(mock.client, SESSION_ID, { taskHydration: 'lazy' });
+    await handle.ready();
+    const internals = handle as unknown as FetchInternals;
+    const retired = () => Reflect.get(handle, 'retiredStreamTasks') as Map<string, string>;
+    const thought = { message_id: 'thought', session_id: SESSION_ID, task_id: 'task-1' };
+    mock.emitServiceEvent('messages', 'thinking:start', {
+      ...thought,
+      timestamp: new Date().toISOString(),
+    });
+    mock.emitServiceEvent('messages', 'thinking:chunk', { ...thought, chunk: 'Considering' });
+    expect(handle.getStreamingMessage('thought')?.isThinking).toBe(true);
+
+    // The terminal boundary retires the payload-free thinking stream.
+    opts.tasks = [makeTask('task-1', TaskStatus.COMPLETED)];
+    mock.emitServiceEvent('tasks', 'patched', opts.tasks[0]);
+    expect(handle.getStreamingMessage('thought')).toBeUndefined();
+    expect(retired().get('thought')).toBe('task-1');
+
+    opts.deferTaskMessageFetch = 'task-1';
+    const stranded = handle.resync();
+    await vi.waitFor(() => expect(internals.messageFetches.size).toBe(1));
+    mock.fireIo('disconnect');
+    expectNoStrandedFetches(internals);
+    // Disconnect is not disposal: the bounded attribution window survives.
+    expect(retired().get('thought')).toBe('task-1');
+
+    opts.deferTaskMessageFetch = undefined;
+    mock.fireIo('connect');
+    await vi.waitFor(() => expect(internals.resyncInflight).toBeNull());
+    for (let beat = 0; beat < 50; beat++) {
+      mock.emitServiceEvent('tasks', 'patched', opts.tasks[0]);
+      mock.emitServiceEvent('messages', 'thinking:chunk', { ...thought, chunk: 'late' });
+    }
+    expectNoStrandedFetches(internals);
+    expect(handle.getStreamingMessage('thought')).toBeUndefined();
+
+    mock.emitServiceEvent('messages', 'streaming:error', { ...thought, error: 'late failure' });
+    expect(handle.getStreamingMessage('thought')).toMatchObject({
+      task_id: 'task-1',
+      error: 'late failure',
+      isStreaming: false,
+      isThinking: false,
+    });
+
+    mock.releaseMessageFetch();
+    await stranded;
+    expect(handle.getStreamingMessage('thought')?.error).toBe('late failure');
+    expect(handle.state.error).toBeNull();
+    handle.dispose();
   });
 });

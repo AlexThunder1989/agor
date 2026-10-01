@@ -417,7 +417,8 @@ export class ReactiveSessionHandle {
       if (
         this.disposed ||
         this.stateSnapshot.terminal ||
-        generation !== this.leanConnectionGeneration
+        generation !== this.leanConnectionGeneration ||
+        !this.messageFetches.has(fetchToken)
       )
         return [];
       let committed = snapshot;
@@ -531,6 +532,25 @@ export class ReactiveSessionHandle {
       }
     }
     return next;
+  }
+
+  /**
+   * A request written to a dropped transport may settle late or never. Retire
+   * every snapshot begun on it: a leaked token would otherwise journal every
+   * later realtime event forever, and a leaked single-flight marker would make
+   * each reconnect wait on the dead request. Paths that settle afterwards see
+   * their token gone and discard the snapshot; the reconnect resync refetches.
+   */
+  private abandonInflightFetches(): void {
+    this.messageFetches.clear();
+    this.streamingAtMessageFetch.clear();
+    this.messageMutations.length = 0;
+    this.taskFetches.clear();
+    this.taskMutations.length = 0;
+    this.queueInflight = null;
+    this.leanSyncInflight = null;
+    this.resyncInflight = null;
+    this.detailInflight.clear();
   }
 
   private cancelMessageFetch(fetchToken: number): void {
@@ -694,14 +714,19 @@ export class ReactiveSessionHandle {
     let settledInvalidation = -1;
     const promise = Promise.resolve()
       .then(async () => {
-        while (!this.disposed && !this.stateSnapshot.terminal && this.stateSnapshot.connected) {
+        // A disconnect retires this loop; a reconnect starts its own.
+        const retired = () =>
+          this.disposed ||
+          this.stateSnapshot.terminal ||
+          !this.stateSnapshot.connected ||
+          this.queueInflight !== promise;
+        while (!retired()) {
           const invalidation = this.queueInvalidation;
           try {
             const result = (await this.client
               .service(`/sessions/${this.sessionId}/tasks/queue`)
               .find()) as QueueFindResult;
-            if (this.disposed || this.stateSnapshot.terminal || !this.stateSnapshot.connected)
-              return;
+            if (retired()) return;
             // A request-order counter alone is insufficient: even the newest
             // request can have read before a cancellation/reorder observed live.
             // Discard it and read again after ALL observed invalidations.
@@ -718,8 +743,7 @@ export class ReactiveSessionHandle {
               error: previousError !== null && prev.error === previousError ? null : prev.error,
             }));
           } catch (error) {
-            if (this.disposed || this.stateSnapshot.terminal || !this.stateSnapshot.connected)
-              return;
+            if (retired()) return;
             if (invalidation !== this.queueInvalidation) continue;
             // Keep confirmed rows on a transient failure. The shared hook's
             // auth/visibility recovery and socket reconnect retry the read.
@@ -737,7 +761,8 @@ export class ReactiveSessionHandle {
         }
       })
       .finally(() => {
-        if (this.queueInflight === promise) this.queueInflight = null;
+        if (this.queueInflight !== promise) return;
+        this.queueInflight = null;
         // An event can also land between the async loop settling and this
         // promise's cleanup microtask. Do not lose that final invalidation.
         if (
@@ -1191,6 +1216,7 @@ export class ReactiveSessionHandle {
       // The fetched row's id is canonical even when we asked by short id — the
       // authoritative source for event matching.
       if (session?.session_id) this.canonicalSessionId = session.session_id;
+      if (!this.taskFetches.has(taskFetchToken)) return this.endAbandonedBootstrap();
 
       // Use journaled Tasks to choose the lazy target, but do not close the
       // journal yet. It stays live through every slower bootstrap request and
@@ -1235,6 +1261,7 @@ export class ReactiveSessionHandle {
         }
       }
 
+      if (!this.taskFetches.has(taskFetchToken)) return this.endAbandonedBootstrap();
       this.updateState((prev) =>
         this.commitBootstrapState({
           previous: prev,
@@ -1247,11 +1274,7 @@ export class ReactiveSessionHandle {
           lazyMessageSnapshot,
         })
       );
-      this.cancelTaskFetch(taskFetchToken);
-      if (messageFetchToken !== null) this.cancelMessageFetch(messageFetchToken);
     } catch (error) {
-      this.cancelTaskFetch(taskFetchToken);
-      if (messageFetchToken !== null) this.cancelMessageFetch(messageFetchToken);
       // Mirror doResync()'s terminal classification — a 403/404 on the
       // initial mount is just as "doomed to retry" as on reconnect, and
       // without this the UI's auto-retry loop would keep poking a deleted/
@@ -1265,7 +1288,15 @@ export class ReactiveSessionHandle {
         error: error instanceof Error ? error.message : 'Failed to bootstrap reactive session',
         terminal: prev.terminal || terminal,
       }));
+    } finally {
+      this.cancelTaskFetch(taskFetchToken);
+      if (messageFetchToken !== null) this.cancelMessageFetch(messageFetchToken);
     }
+  }
+
+  /** Disconnected mid-bootstrap: the reconnect resync owns the data. */
+  private endAbandonedBootstrap(): void {
+    this.updateState((prev) => ({ ...prev, loading: false }));
   }
 
   private attachListeners(): void {
@@ -1289,6 +1320,7 @@ export class ReactiveSessionHandle {
       if (this.disposed) return;
       this.queueInvalidation += 1;
       if (this.options.taskHydration === 'lean') this.leanConnectionGeneration += 1;
+      this.abandonInflightFetches();
       this.updateState((prev) => ({ ...prev, connected: false }));
     };
     this.client.io.on('connect', onSocketConnect);
@@ -1850,6 +1882,7 @@ export class ReactiveSessionHandle {
 
       // The fetched row's id is canonical even when we asked by short id.
       if (session?.session_id) this.canonicalSessionId = session.session_id;
+      if (this.disposed || !this.taskFetches.has(taskFetchToken)) return;
 
       const provisionalTasks = this.reconcileTaskFetch(taskFetchToken, taskSnapshot);
       let eagerMessageSnapshot: Message[] | null = null;
@@ -1883,11 +1916,7 @@ export class ReactiveSessionHandle {
         }
       }
 
-      if (this.disposed) {
-        this.cancelTaskFetch(taskFetchToken);
-        if (messageFetchToken !== null) this.cancelMessageFetch(messageFetchToken);
-        return;
-      }
+      if (this.disposed || !this.taskFetches.has(taskFetchToken)) return;
       this.updateState((prev) => {
         const sessionChanged = this.sessionMutationSequence > sessionFetchSequence;
         if (sessionChanged && prev.session === null && prev.terminal) return prev;
@@ -1963,12 +1992,9 @@ export class ReactiveSessionHandle {
           lastSyncedAt: new Date().toISOString(),
         };
       });
-      this.cancelTaskFetch(taskFetchToken);
-      if (messageFetchToken !== null) this.cancelMessageFetch(messageFetchToken);
     } catch (error) {
-      this.cancelTaskFetch(taskFetchToken);
-      if (messageFetchToken !== null) this.cancelMessageFetch(messageFetchToken);
-      if (this.disposed) return;
+      // An abandoned resync failed with its transport; the reconnect retries.
+      if (this.disposed || !this.taskFetches.has(taskFetchToken)) return;
       const status = errorStatusCode(error);
       // 403 (forbidden) and 404 (not found) mean this session is gone
       // from the user's perspective — retrying will keep failing. Mark
@@ -1981,6 +2007,9 @@ export class ReactiveSessionHandle {
         error: error instanceof Error ? error.message : 'Failed to resync reactive session',
         terminal: prev.terminal || terminal,
       }));
+    } finally {
+      this.cancelTaskFetch(taskFetchToken);
+      if (messageFetchToken !== null) this.cancelMessageFetch(messageFetchToken);
     }
   }
 }
