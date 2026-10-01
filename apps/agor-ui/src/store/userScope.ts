@@ -479,31 +479,8 @@ export async function startUserScope(
   // snapshots instead of queuing behind them on a slow socket.
   checkReferences(run);
 
-  const u1 = options.gatedMineComplete
-    ? Promise.resolve(true)
-    : fillRead(
-        run,
-        async () => {
-          await options.deferBulkRead;
-          if (!isCurrent(run)) return {};
-          return {
-            sessions: rowsOf<Session>(
-              await client
-                .service('sessions')
-                .find({ query: mySessionsQuery(run.userId, MY_SESSIONS_FULL_LIMIT) })
-            ),
-          };
-        },
-        ({ sessions }) =>
-          (sessions ?? []).some((row) => row.created_by !== run.userId || row.archived)
-      ).then((rows) => {
-        if (!rows) return false;
-        store().setUserScope({
-          mySessionsLoaded: true,
-          mySessionsTruncated: (rows.sessions?.length ?? 0) >= MY_SESSIONS_FULL_LIMIT,
-        });
-        return true;
-      });
+  // Small reads first (U2, U3), then the bulk U1: on a slow socket the
+  // teammate and branch answers then don't queue behind thousands of rows.
   const u2 = fillRead(
     run,
     async () => ({
@@ -539,6 +516,36 @@ export async function startUserScope(
     });
     return true;
   });
+
+  const u1 = options.gatedMineComplete
+    ? Promise.resolve(true)
+    : fillRead(
+        run,
+        async () => {
+          // Await only a real barrier: even `await undefined` would send U1 a
+          // microtask late, behind the global snapshots started right after.
+          if (options.deferBulkRead) {
+            await options.deferBulkRead;
+            if (!isCurrent(run)) return {};
+          }
+          return {
+            sessions: rowsOf<Session>(
+              await client
+                .service('sessions')
+                .find({ query: mySessionsQuery(run.userId, MY_SESSIONS_FULL_LIMIT) })
+            ),
+          };
+        },
+        ({ sessions }) =>
+          (sessions ?? []).some((row) => row.created_by !== run.userId || row.archived)
+      ).then((rows) => {
+        if (!rows) return false;
+        store().setUserScope({
+          mySessionsLoaded: true,
+          mySessionsTruncated: (rows.sessions?.length ?? 0) >= MY_SESSIONS_FULL_LIMIT,
+        });
+        return true;
+      });
 
   const settled = await Promise.allSettled([u1, u2, u3]);
   if (!isCurrent(run)) return;

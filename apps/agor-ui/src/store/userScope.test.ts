@@ -520,8 +520,10 @@ describe('user scope', () => {
       lifetime: lifetime(),
       gatedMineComplete: false,
     });
+    // Both are sent synchronously, before anything the caller starts next
+    // (the global snapshots).
     const order = () => calls.map((c) => (c.query.branch_id ? 'ids' : c.service));
-    await vi.waitFor(() => expect(order()).toContain('sessions'));
+    expect(order()).toContain('sessions');
     expect(order().indexOf('ids')).toBeGreaterThanOrEqual(0);
     expect(order().indexOf('ids')).toBeLessThan(order().indexOf('sessions'));
     await vi.waitFor(() => expect(agorStore.getState().branchById.has('br-early')).toBe(true));
