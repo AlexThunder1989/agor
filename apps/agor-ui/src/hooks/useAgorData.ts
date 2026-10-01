@@ -38,19 +38,23 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  beginPartitionLoad,
   bumpFirstPaintMergeRevisions,
   bumpRevision,
   cancelAllHydrations,
   cancelAndFailAllHydrations,
+  endPartitionLoad,
   getHydrationCancellationEpoch,
   resetHydrationRevisions,
   runHydration,
+  touchedIdsSince,
 } from '../store/agorHydration';
 import {
   buildBoardObjectMaps,
   buildById,
   buildSessionMaps,
   buildSessionMcpMap,
+  keepLiveWrites,
 } from '../store/agorMaps';
 import * as realtime from '../store/agorRealtimeActions';
 import { agorStore, shallow, useStoreWithEqualityFn } from '../store/agorStore';
@@ -544,6 +548,11 @@ export function useAgorData(
           : null;
       let debugFinishStatus: 'success' | 'error' | null = null;
       let debugFinishError: unknown;
+      // Per-id touched fence for the wholesale first-paint/resync apply below:
+      // realtime events keep landing while this load is in flight, and the
+      // apply must keep them (a created row, a patch, a removal) rather than
+      // replace them with the older snapshot. Released in `finally`.
+      const firstPaintFence = beginPartitionLoad();
 
       try {
         if (!silent) {
@@ -983,18 +992,42 @@ export function useAgorData(
         // background full-hydration pass so the two index builds stay identical)
         // Deferred (Home) board-object and card slices are left untouched by
         // the apply below; their background hydrations own them.
+        // Queued streaming patches are live writes too: apply them now so the
+        // touched overlay below sees them in the store, not only in the queue.
+        flushRealtimeNow(fetchAuthorityScope);
+        const live = agorStore.getState();
+        const touchedSinceLoad = (collection: Parameters<typeof touchedIdsSince>[0]) =>
+          touchedIdsSince(collection, firstPaintFence.startRevisions[collection]);
+        // A branch touched during the load and absent now was archived or
+        // removed meanwhile: rows on it are dropped with it.
+        const removedBranchIds = new Set(
+          touchedSinceLoad('branches').filter((id) => !live.branchById.has(id))
+        );
         const annotationMaps = deferAnnotations
           ? {}
           : (() => {
               const cardsMap = new Map<string, CardWithType>();
               for (const card of cardsList ?? []) cardsMap.set(card.card_id, card);
-              return { ...buildBoardObjectMaps(boardObjectsList ?? []), cardById: cardsMap };
+              keepLiveWrites(cardsMap, live.cardById, touchedSinceLoad('cards'));
+              const boardObjectsById = new Map(
+                (boardObjectsList ?? []).map((object) => [object.object_id, object])
+              );
+              keepLiveWrites(
+                boardObjectsById,
+                live.boardObjectById,
+                touchedSinceLoad('boardObjects')
+              );
+              const boardObjects = [...boardObjectsById.values()].filter(
+                (object) => !object.branch_id || !removedBranchIds.has(object.branch_id)
+              );
+              return { ...buildBoardObjectMaps(boardObjects), cardById: cardsMap };
             })();
         // Build comment Map for efficient lookups (always the global set)
         const commentsMap = new Map<string, BoardComment>();
         for (const comment of commentsList) {
           commentsMap.set(comment.comment_id, comment);
         }
+        keepLiveWrites(commentsMap, live.commentById, touchedSinceLoad('comments'));
 
         // Replace the displayed board's LEAN row with its FULL record so the
         // visible canvas paints zones/text/markdown at first paint (no flash).
@@ -1002,6 +1035,7 @@ export function useAgorData(
         if (displayedBoardFull) {
           boardsMap.set(displayedBoardFull.board_id, displayedBoardFull);
         }
+        keepLiveWrites(boardsMap, live.boardById, touchedSinceLoad('boards'));
 
         // Merge the recent session slice with the board-scoped sessions (dedup by
         // id) for first paint, then build both session lookups (incl. remote
@@ -1014,6 +1048,22 @@ export function useAgorData(
           if (!firstPaintSessions.has(session.session_id)) {
             firstPaintSessions.set(session.session_id, session);
           }
+        }
+        const touchedSessionIds = touchedSinceLoad('sessions');
+        keepLiveWrites(firstPaintSessions, live.sessionById, touchedSessionIds);
+        for (const [id, session] of firstPaintSessions) {
+          if (removedBranchIds.has(session.branch_id)) firstPaintSessions.delete(id);
+        }
+        // The gated page proves "all of mine" only if no session of mine was
+        // created or removed while it was in flight; otherwise U1 runs.
+        if (gatedMineComplete) {
+          const gatedPage = new Set(sessionsList.map((session) => session.session_id));
+          gatedMineComplete = !touchedSessionIds.some((id) => {
+            const row = live.sessionById.get(id);
+            return row
+              ? row.created_by === authenticatedUserId && !gatedPage.has(id)
+              : gatedPage.has(id);
+          });
         }
         const { sessionById: sessionsById, sessionsByBranch: sessionsByBranchId } =
           buildSessionMaps([...firstPaintSessions.values()]);
@@ -1029,6 +1079,7 @@ export function useAgorData(
             branchesMap.set(branch.branch_id, branch);
           }
         }
+        keepLiveWrites(branchesMap, live.branchById, touchedSinceLoad('branches'));
 
         // Merge the essential slices in one atomic update. We spread `prev`
         // (rather than replacing the whole object) so the BACKGROUND-managed
@@ -1278,6 +1329,7 @@ export function useAgorData(
         }
         return true;
       } finally {
+        endPartitionLoad();
         if (!silent && authorityIsCurrent()) {
           agorStore.getState().setLoading(false);
           agorStore.getState().setLoadingStage('idle');

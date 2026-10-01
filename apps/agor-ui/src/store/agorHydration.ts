@@ -183,6 +183,18 @@ export const touchedSince = (
   startRevision: number
 ): boolean => (touchedIds.get(collection)?.get(id) ?? Number.NEGATIVE_INFINITY) > startRevision;
 
+/** Every id a live event wrote in `collection` after the given start revision. */
+export const touchedIdsSince = (
+  collection: HydratedCollection,
+  startRevision: number
+): string[] => {
+  const ids: string[] = [];
+  for (const [id, revision] of touchedIds.get(collection) ?? []) {
+    if (revision > startRevision) ids.push(id);
+  }
+  return ids;
+};
+
 export interface PartitionLoadFence {
   /** Per-collection revisions captured when the load started. */
   startRevisions: Record<HydratedCollection, number>;

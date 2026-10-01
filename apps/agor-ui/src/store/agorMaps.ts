@@ -684,6 +684,26 @@ export type PartitionCollection = 'sessions' | 'branches' | 'boards' | 'boardObj
 export type PartitionTouched = (collection: PartitionCollection, id: string) => boolean;
 
 /**
+ * Keep live writes over a wholesale replacement (the first-paint and silent
+ * resync apply in `useAgorData`): every id a live event touched since the load
+ * began keeps its current store row, or its absence (a live remove, archive or
+ * eviction), instead of the snapshot's row. Mutates and returns `snapshot`,
+ * which must be a map the caller owns.
+ */
+export function keepLiveWrites<T>(
+  snapshot: Map<string, T>,
+  live: ReadonlyMap<string, T>,
+  touchedIds: Iterable<string>
+): Map<string, T> {
+  for (const id of touchedIds) {
+    const row = live.get(id);
+    if (row) snapshot.set(id, row);
+    else snapshot.delete(id);
+  }
+  return snapshot;
+}
+
+/**
  * Fill-only merge of branch and session rows (invariant I2: a load never
  * overwrites a live row). Shared by board partitions and the user-scope reads.
  *

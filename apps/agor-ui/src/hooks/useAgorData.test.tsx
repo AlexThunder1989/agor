@@ -1613,6 +1613,74 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
     }
   });
 
+  it('keeps a session created during first paint and never skips U1 on that raced page', async () => {
+    window.history.pushState({}, '', '/');
+    const gated = makeSession({ session_id: 's-old', created_by: 'user-me' });
+    const { client, emit, onFetch, fetchArguments } = makeMockClient({
+      'sessions:find': [gated],
+    });
+    const comments = deferred();
+    onFetch('board-comments', 'findAll', (call) => (call === 1 ? comments.promise : undefined));
+    onFetch('sessions', 'findAll', never);
+    const { result } = renderHook(() => useAgorData(client, authority));
+    await waitFor(() => expect(fetchArguments('board-comments', 'findAll')).toHaveLength(1));
+
+    // My new session arrives live while the gated comments are still pending,
+    // and someone removes a session the gated page still holds.
+    const created = makeSession({ session_id: 's-new', created_by: 'user-me' });
+    act(() => emit('sessions', 'created', created));
+    await act(async () => {
+      comments.resolve();
+      await comments.promise;
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const state = agorStore.getState();
+    expect(state.sessionById.get('s-new')).toBe(created);
+    expect(
+      state.sessionsByBranch
+        .get('b-1')
+        ?.map((s) => s.session_id)
+        .sort()
+    ).toEqual(['s-new', 's-old']);
+    // One gated row < 200, but the page raced a create of mine: U1 still runs.
+    await waitFor(() =>
+      expect(
+        fetchArguments('sessions', 'find').some(
+          (args) => (args as { query: { $limit?: number } }).query.$limit === 10000
+        )
+      ).toBe(true)
+    );
+  });
+
+  it('keeps a live removal and a live comment over the first-paint snapshot', async () => {
+    window.history.pushState({}, '', '/');
+    const doomed = makeSession({ session_id: 's-doomed', created_by: 'user-me' });
+    const seed: Record<string, unknown[]> = { 'sessions:find': [doomed], 'board-comments': [] };
+    const { client, emit, onFetch } = makeMockClient(seed);
+    const comments = deferred();
+    onFetch('board-comments', 'findAll', (call) => (call === 1 ? comments.promise : undefined));
+    onFetch('sessions', 'findAll', never);
+    const { result } = renderHook(() => useAgorData(client, authority));
+    await waitFor(() => expect(result.current.initialLoadItems.length).toBeGreaterThan(0));
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    const comment = { comment_id: 'c-live', board_id: 'board-1', content: 'hi' };
+    // The server no longer has it either (the raced page makes U1 read again).
+    seed['sessions:find'] = [];
+    act(() => {
+      emit('sessions', 'removed', doomed);
+      emit('board-comments', 'created', comment);
+    });
+    await act(async () => {
+      comments.resolve();
+      await comments.promise;
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(agorStore.getState().sessionById.has('s-doomed')).toBe(false);
+    expect(agorStore.getState().commentById.has('c-live')).toBe(true);
+  });
+
   it("never applies a load that outlived its mount into the next user's store", async () => {
     window.history.pushState({}, '', '/');
     const seed: Record<string, unknown[]> = {
