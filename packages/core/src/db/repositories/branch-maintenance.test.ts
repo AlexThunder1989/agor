@@ -1,8 +1,10 @@
+import { eq } from 'drizzle-orm';
 import { afterEach, expect, vi } from 'vitest';
 import { generateId } from '../../lib/ids';
 import type { UserID } from '../../types';
 import { lockBranchForAdmission } from '../branch-admission';
-import { runDatabaseTransaction } from '../database-wrapper';
+import { runDatabaseTransaction, select, update } from '../database-wrapper';
+import { branches } from '../schema';
 import { ownedDbTest } from '../test-helpers';
 import {
   BranchMaintenanceDiscoveryRepository,
@@ -76,6 +78,9 @@ test('known unfinished tasks prevent claiming maintenance without changing branc
   });
   await expect(
     new BranchMaintenanceRepository(db).claim(branch.branch_id, 'delete')
+  ).rejects.toThrow('unfinished tasks');
+  await expect(
+    new BranchMaintenanceRepository(db).claim(branch.branch_id, 'metadata_archive')
   ).rejects.toThrow('unfinished tasks');
   expect(
     (await new BranchRepository(db).findById(branch.branch_id))?.deletion_status
@@ -244,6 +249,9 @@ test('materialization and taskless writes exclude permanent deletion through the
   const maintenance = new BranchMaintenanceRepository(db);
   await branches.update(branch.branch_id, { filesystem_status: 'creating' });
   await expect(maintenance.claim(branch.branch_id, 'delete')).rejects.toThrow('materialization');
+  await expect(maintenance.claim(branch.branch_id, 'metadata_archive')).rejects.toThrow(
+    'materialization'
+  );
   await branches.update(branch.branch_id, { filesystem_status: 'ready' });
   const { claim } = await maintenance.claim(branch.branch_id, 'workspace_write');
   await expect(maintenance.claim(branch.branch_id, 'delete')).rejects.toThrow();
@@ -271,4 +279,89 @@ test('maintenance discovery returns only deleting routing identities and honors 
   await maintenance.fail(claim, 'Fixture settled before dispatch');
   expect(await discovery.findDeletingRefs({ tenantId: 'default' })).toEqual([]);
   await expect(discovery.findDeletingRefs({})).rejects.toThrow('PostgreSQL');
+});
+
+for (const retire of [false, true]) {
+  test(`startup releases an interrupted ${retire ? 'teammate retirement' : 'metadata archive'} claim`, async ({
+    db,
+  }) => {
+    const { branch, user } = await seedEnvironmentCommandBranch(db);
+    const repo = new BranchRepository(db);
+    const maintenance = new BranchMaintenanceRepository(db);
+    if (retire)
+      await repo.update(branch.branch_id, {
+        custom_context: { teammate: { kind: 'teammate', displayName: 'Fixture' } },
+      });
+    const { claim } = retire
+      ? await maintenance.claimForTeammateRetirement(branch.branch_id, user.user_id, async () => {})
+      : await maintenance.claim(branch.branch_id, 'metadata_archive', user.user_id);
+    expect((await repo.findById(branch.branch_id))?.archived).toBe(retire);
+    expect(await maintenance.reconcileInterruptedMetadataArchives()).toEqual({
+      scanned: 1,
+      released: 1,
+    });
+    expect(await maintenance.reconcileInterruptedMetadataArchives()).toEqual({
+      scanned: 0,
+      released: 0,
+    });
+    expect(await repo.findById(branch.branch_id)).toMatchObject({
+      archived: retire,
+      path: branch.path,
+      filesystem_status: 'ready',
+    });
+    const row = await select(db)
+      .from(branches)
+      .where(eq(branches.branch_id, branch.branch_id))
+      .one();
+    expect(row?.data.maintenance).toBeUndefined();
+    await expect(maintenance.beginExecution(claim)).rejects.toThrow();
+    expect((await maintenance.claim(branch.branch_id, 'cleanup')).acquired).toBe(true);
+  });
+}
+
+for (const kind of ['delete', 'cleanup', 'workspace_write', 'metadata_archive'] as const) {
+  test(`startup retains ${kind} ownership when not safely reclaimable`, async ({ db }) => {
+    const { branch } = await seedEnvironmentCommandBranch(db);
+    const maintenance = new BranchMaintenanceRepository(db);
+    const { claim } = await maintenance.claim(branch.branch_id, kind);
+    if (kind === 'metadata_archive') {
+      // Defensive corruption guard: even this executor-ineligible kind must
+      // never release an unexpected invocation identity.
+      const row = (await select(db)
+        .from(branches)
+        .where(eq(branches.branch_id, branch.branch_id))
+        .one())!;
+      await update(db, branches)
+        .set({
+          data: {
+            ...row.data,
+            maintenance: { ...claim, execution_id: generateId() },
+          },
+        })
+        .where(eq(branches.branch_id, branch.branch_id))
+        .run();
+    }
+    expect((await maintenance.reconcileInterruptedMetadataArchives()).released).toBe(0);
+    const row = await select(db)
+      .from(branches)
+      .where(eq(branches.branch_id, branch.branch_id))
+      .one();
+    expect(row?.data.maintenance?.operation_id).toBe(claim.operation_id);
+  });
+}
+
+test('startup never releases a metadata claim behind a deletion fence', async ({ db }) => {
+  const { branch } = await seedEnvironmentCommandBranch(db);
+  const maintenance = new BranchMaintenanceRepository(db);
+  const { claim } = await maintenance.claim(branch.branch_id, 'metadata_archive');
+  await update(db, branches)
+    .set({ deletion_status: 'deletion_failed' })
+    .where(eq(branches.branch_id, branch.branch_id))
+    .run();
+  expect(await maintenance.reconcileInterruptedMetadataArchives()).toEqual({
+    scanned: 1,
+    released: 0,
+  });
+  const row = await select(db).from(branches).where(eq(branches.branch_id, branch.branch_id)).one();
+  expect(row?.data.maintenance?.operation_id).toBe(claim.operation_id);
 });

@@ -387,6 +387,48 @@ export class BranchMaintenanceRepository {
     });
   }
 
+  /**
+   * Standalone startup only, before accepting requests, in the trusted tenant
+   * scope. Never run this on a shared replica: another daemon may own a live
+   * metadata archive. Only this kind provably cannot launch an executor; other
+   * maintenance and every deletion fence must retain their ownership.
+   */
+  async reconcileInterruptedMetadataArchives(): Promise<{ scanned: number; released: number }> {
+    const summary = { scanned: 0, released: 0 };
+    let after = '';
+    for (;;) {
+      const candidates = await select(this.db)
+        .from(branches)
+        .where(sql`${branches.branch_id} > ${after}
+          AND ${branches.data} -> 'maintenance' ->> 'kind' = 'metadata_archive'`)
+        .orderBy(branches.branch_id)
+        .limit(BRANCH_MAINTENANCE_DISCOVERY_PAGE_SIZE)
+        .all();
+      for (const candidate of candidates) {
+        summary.scanned++;
+        const released = await this.locked(candidate.branch_id, async (tx, row) => {
+          const claim = row.data.maintenance;
+          if (
+            claim?.kind !== 'metadata_archive' ||
+            claim.execution_id ||
+            row.deletion_status ||
+            claim.operation_id !== candidate.data.maintenance?.operation_id ||
+            claim.generation !== candidate.data.maintenance?.generation
+          )
+            return false;
+          await update(tx, branches)
+            .set({ data: { ...row.data, maintenance: undefined } })
+            .where(eq(branches.branch_id, row.branch_id))
+            .run();
+          return true;
+        });
+        if (released) summary.released++;
+      }
+      if (candidates.length < BRANCH_MAINTENANCE_DISCOVERY_PAGE_SIZE) return summary;
+      after = candidates[candidates.length - 1].branch_id;
+    }
+  }
+
   /** Only the contained-executor owner may call this after verified settlement. */
   async settleExecution(claim: BranchMaintenanceClaim, executionId: UUID): Promise<void> {
     await this.locked(claim.branch_id, async (tx, row) => {

@@ -227,6 +227,9 @@ it.skipIf(!url || process.env.AGOR_DB_DIALECT !== 'postgresql')(
         return { branch, claim };
       });
       await runWithTenantDatabaseScope(db, tenantB, async (scoped) => {
+        expect(
+          await new BranchMaintenanceRepository(scoped).reconcileInterruptedMetadataArchives()
+        ).toEqual({ scanned: 0, released: 0 });
         await expect(
           new BranchMaintenanceRepository(scoped).claim(branch.branch_id, 'metadata_archive')
         ).rejects.toThrow('not found');
@@ -238,9 +241,28 @@ it.skipIf(!url || process.env.AGOR_DB_DIALECT !== 'postgresql')(
         expect(await new BranchRepository(scoped).findById(branch.branch_id)).toMatchObject({
           archived: false,
         });
+        const maintenance = new BranchMaintenanceRepository(scoped);
+        expect(await maintenance.reconcileInterruptedMetadataArchives()).toEqual({
+          scanned: 1,
+          released: 1,
+        });
+        const { claim: recovered } = await maintenance.claim(
+          branch.branch_id,
+          'metadata_archive',
+          claim.requested_by
+        );
         const workspace = new BranchWorkspaceOperationRepository(scoped);
-        await workspace.archiveMetadata(claim);
-        await workspace.finishPreserve(claim);
+        // Recovery releases ownership, not archival metadata. Explicit retry
+        // prepares a fresh operation before completing the archive.
+        const operation = (await new BranchRepository(scoped).findById(branch.branch_id))!
+          .workspace_operation!;
+        await workspace.prepare(
+          recovered,
+          { ...operation, operation_id: recovered.operation_id },
+          { repo_id: branch.repo_id, path: branch.path, repo_path: '/fixture' }
+        );
+        await workspace.archiveMetadata(recovered);
+        await workspace.finishPreserve(recovered);
         expect(await new BranchRepository(scoped).findById(branch.branch_id)).toMatchObject({
           archived: true,
           filesystem_status: 'ready',
