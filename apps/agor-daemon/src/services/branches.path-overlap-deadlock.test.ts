@@ -71,6 +71,42 @@ beforeEach(() => {
   vi.mocked(spawnExecutor).mockReset();
 });
 
+for (const retire of [false, true]) {
+  test(`ordinary ${retire ? 'teammate retirement' : 'Archive → Leave untouched'} closes terminals`, async ({
+    db,
+  }) => {
+    const { branch, user } = await seedEnvironmentCommandBranch(db);
+    if (retire) {
+      await new BranchRepository(db).update(branch.branch_id, {
+        custom_context: { teammate: { kind: 'teammate', displayName: 'Fixture' } },
+      });
+    }
+    const app = buildApp();
+    const service = serviceWithMockedGet(db, app);
+    await runWithTenantContext('default', async () => {
+      const params = paramsFor(user);
+      if (retire) await service.retireTeammate(branch.branch_id, params);
+      else {
+        markBranchArchiveDeleteAuthorized(params, branch.branch_id, 'archive');
+        await service.archiveOrDelete(
+          branch.branch_id,
+          {
+            metadataAction: 'archive',
+            filesystemAction: 'preserved',
+          },
+          params
+        );
+      }
+    });
+    expect(app.emit).toHaveBeenCalledWith('terminal:close-branch', {
+      tenantId: 'default',
+      branchId: branch.branch_id,
+    });
+    expect(spawnExecutor).not.toHaveBeenCalled();
+    expect(requestExecutor).not.toHaveBeenCalled();
+  });
+}
+
 for (const status of ['failed', 'cleaned', 'deleted'] as const) {
   test(`metadata-only archive escapes overlapping ${status} rows without filesystem work`, async ({
     db,
@@ -124,7 +160,10 @@ for (const status of ['failed', 'cleaned', 'deleted'] as const) {
     });
     expect(spawnExecutor).not.toHaveBeenCalled();
     expect(requestExecutor).not.toHaveBeenCalled();
-    expect(app.emit).not.toHaveBeenCalledWith('terminal:close-branch', expect.anything());
+    expect(app.emit).toHaveBeenCalledWith('terminal:close-branch', {
+      tenantId: 'default',
+      branchId: branch.branch_id,
+    });
   });
 }
 
@@ -206,12 +245,8 @@ test('a failed sibling retry cannot race an admitted deletion of its shared work
       filesystem_status: 'failed',
     });
     const service = serviceWithMockedGet(db);
-    // Hold the fake deletion worker until the sibling's real retry admission
-    // has committed. The old exemption allows both distinct row locks to win.
-    let removeWorkspace: (() => Promise<void>) | undefined;
-    vi.mocked(spawnExecutor).mockImplementationOnce(() => {
-      removeWorkspace = () => rm(root, { recursive: true, force: true });
-    });
+    // Deletion must be rejected before dispatch, even when the sibling can
+    // independently retry provisioning under its own row lock.
     await runWithTenantContext('default', async () => {
       const params = paramsFor(user);
       markBranchArchiveDeleteAuthorized(params, branch.branch_id, 'delete');
@@ -231,7 +266,6 @@ test('a failed sibling retry cannot race an admitted deletion of its shared work
       const retry = await branches.claimForProvisioning(sibling.branch_id, 'retry-attempt');
       expect(retry.claimed).toBe(true);
       await writeFile(join(root, 'new-workspace.txt'), 'retry content');
-      await removeWorkspace?.();
       expect(await readFile(join(root, 'new-workspace.txt'), 'utf8')).toBe('retry content');
       expect(deletion).toContain('overlaps');
       expect(spawnExecutor).not.toHaveBeenCalled();
