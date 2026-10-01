@@ -6,7 +6,7 @@ import { BoardPartitionStatus } from './BoardPartitionStatus';
 
 const BOARD = 'board-1';
 const setPartition = (status: 'loading' | 'loaded' | 'error') =>
-  agorStore.getState().setBoardPartition(BOARD, { status, authorityScope: 'a' });
+  agorStore.getState().setBoardPartition(BOARD, { status, authorityScope: 'a', loadEpoch: 0 });
 
 describe('BoardPartitionStatus', () => {
   beforeEach(() => agorStore.getState().reset());

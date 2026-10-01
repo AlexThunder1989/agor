@@ -33,7 +33,9 @@ import {
   beginPartitionLoad,
   endPartitionLoad,
   type HydratedCollection,
+  MAX_WHOLESALE_RESTARTS,
   touchedSince,
+  WholesaleReplacementError,
   wholesaleReplacedSince,
 } from './agorHydration';
 import { applyEntityFill } from './agorMaps';
@@ -47,8 +49,6 @@ export const MY_SESSIONS_GATED_LIMIT = 200;
 export const MY_SESSIONS_FULL_LIMIT = PAGINATION.MAX_LIMIT;
 /** Debounce for ensuring branches of newly referenced ids. */
 const REFERENCE_DEBOUNCE_MS = 100;
-/** Restart budget when a wholesale reconnect replacement lands mid-read. */
-const MAX_WHOLESALE_RESTARTS = 3;
 
 /** The newest-first query for my active sessions. */
 export function mySessionsQuery(userId: string, limit: number) {
@@ -112,7 +112,11 @@ const pendingBranchIds = new Set<string>();
 
 const isCurrent = (run: ScopeRun) => currentRun === run && isLoadLifetimeCurrent(run.lifetime);
 
-/** Read rows and fill-merge them; false when the run went stale. Read errors propagate. */
+/**
+ * Read rows and fill-merge them; null when the run went stale. Read errors
+ * propagate, and so does a read whose every attempt spanned a wholesale
+ * replacement (`WholesaleReplacementError`): its snapshot is never applied.
+ */
 async function fillRead(
   run: ScopeRun,
   read: () => Promise<{ branches?: Branch[]; sessions?: Session[] }>
@@ -122,7 +126,10 @@ async function fillRead(
     try {
       const rows = await read();
       if (!isCurrent(run)) return null;
-      if (wholesaleReplacedSince(fence) && attempt < MAX_WHOLESALE_RESTARTS) continue;
+      if (wholesaleReplacedSince(fence)) {
+        if (attempt < MAX_WHOLESALE_RESTARTS) continue;
+        throw new WholesaleReplacementError();
+      }
       const touched = (collection: HydratedCollection, id: string) =>
         touchedSince(collection, id, fence.startRevisions[collection]);
       agorStore.getState().applyMaps((prev) => applyEntityFill(prev, rows, touched));

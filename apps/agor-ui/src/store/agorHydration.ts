@@ -209,6 +209,21 @@ export const endPartitionLoad = (): void => {
 export const wholesaleReplacedSince = (fence: PartitionLoadFence): boolean =>
   wholesaleEpoch !== fence.epoch;
 
+/** Restarts a fill-only load gets when wholesale replacements keep landing mid-read. */
+export const MAX_WHOLESALE_RESTARTS = 3;
+
+/**
+ * A fill-only load whose every attempt spanned a wholesale replacement. Its
+ * snapshot is never applied (it could resurrect rows the replacement removed);
+ * the caller surfaces a retryable failure instead.
+ */
+export class WholesaleReplacementError extends Error {
+  constructor() {
+    super('Data was replaced while loading; retry');
+    this.name = 'WholesaleReplacementError';
+  }
+}
+
 /**
  * Current live-write revision for a collection. The session-patch queue stamps
  * each enqueued entry with this (captured right after the synchronous bump) so a

@@ -1326,6 +1326,9 @@ export function useAgorData(
     cancelAllHydrations();
     releaseOpenedTranscriptPrefetch();
     stopUserScope();
+    // Partition loads of the old authority are orphaned by the cancellation;
+    // forget their entries so the displayed board loads again under this one.
+    agorStore.getState().resetBoardPartitions();
     refetchInflightRef.current = null;
     lastSilentFetchFailedRef.current = false;
 

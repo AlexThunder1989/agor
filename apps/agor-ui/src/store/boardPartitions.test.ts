@@ -21,6 +21,7 @@ import { applyBoardPartition, type BoardPartitionSnapshot, EMPTY_MAPS } from './
 import { branchRemoved, cardRemoved, sessionPatched } from './agorRealtimeActions';
 import { agorStore } from './agorStore';
 import {
+  isPartitionStateCurrent,
   loadBoardPartition,
   makeBoardReadySelector,
   markBoardPartitionLoaded,
@@ -304,8 +305,9 @@ describe('loadBoardPartition', () => {
     release();
     await load;
     expect(agorStore.getState().sessionById.size).toBe(0);
-    // The stale load never writes partition state under the new authority.
-    expect(agorStore.getState().boardPartitions.get(BOARD)?.authorityScope).toBe(AUTHORITY);
+    // The stale load never settles its entry under the new authority; it
+    // releases it, so the board loads again instead of staying 'loading'.
+    expect(agorStore.getState().boardPartitions.has(BOARD)).toBe(false);
   });
 
   it('drops the apply when the load is cancelled, even under the same authority', async () => {
@@ -393,6 +395,51 @@ describe('loadBoardPartition', () => {
     await load;
     expect(calls).toBe(2);
     expect([...agorStore.getState().sessionById.keys()]).toEqual(['s-1']);
+  });
+
+  it('releases its loading entry when cancelled, so the board counts as unloaded', async () => {
+    const { client, release } = makePartitionClient({ sessions: [session('s-1', 'br-1')] });
+    const load = loadBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true });
+    const entry = agorStore.getState().boardPartitions.get(BOARD);
+    expect(entry?.status).toBe('loading');
+    cancelAllHydrations();
+    // Another lifetime's entry is not current even before the load settles.
+    expect(isPartitionStateCurrent(entry)).toBe(false);
+    release();
+    await load;
+    expect(agorStore.getState().boardPartitions.has(BOARD)).toBe(false);
+    // A new load under the new lifetime starts instead of deduping into the old one.
+    const again = makePartitionClient({ sessions: [session('s-2', 'br-1')] });
+    const reload = loadBoardPartition(again.client, BOARD, { canUseMemberWorkspaceServices: true });
+    again.release();
+    await reload;
+    expect(ready()).toBe(true);
+    expect(agorStore.getState().sessionById.has('s-2')).toBe(true);
+  });
+
+  it('never applies after the restart budget: records a retryable error instead', async () => {
+    let calls = 0;
+    const client = {
+      service: (name: string) => ({
+        findAll: vi.fn(async () => {
+          if (name === 'sessions') {
+            calls += 1;
+            // Every attempt spans a wholesale replacement.
+            bumpFirstPaintMergeRevisions();
+            return [session(`s-stale-${calls}`, 'br-1')];
+          }
+          return [];
+        }),
+        get: vi.fn(async () => fullBoard()),
+      }),
+    } as unknown as AgorClient;
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await loadBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true });
+    expect(calls).toBe(4);
+    expect(agorStore.getState().sessionById.size).toBe(0);
+    expect(agorStore.getState().boardPartitions.get(BOARD)?.status).toBe('error');
+    retryBoardPartition(BOARD);
+    expect(agorStore.getState().boardPartitions.has(BOARD)).toBe(false);
   });
 
   it('records a failure and lets retry clear it', async () => {

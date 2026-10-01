@@ -23,8 +23,11 @@ import { PAGINATION } from '@agor-live/client';
 import {
   beginPartitionLoad,
   endPartitionLoad,
+  getHydrationCancellationEpoch,
   type HydratedCollection,
+  MAX_WHOLESALE_RESTARTS,
   touchedSince,
+  WholesaleReplacementError,
   wholesaleReplacedSince,
 } from './agorHydration';
 import { applyBoardPartition, type BoardPartitionSnapshot } from './agorMaps';
@@ -35,6 +38,7 @@ import {
   GLOBALLY_HYDRATED_COLLECTIONS,
 } from './agorStore';
 import { captureLoadLifetime, isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
+import { getRealtimeAuthorityScope } from './realtimeBatch';
 import { sessionListQuery } from './sessionListQuery';
 
 /**
@@ -49,6 +53,19 @@ export function makeBoardReadySelector(
     if (s.boardPartitions.get(boardId)?.status === 'loaded') return true;
     return GLOBALLY_HYDRATED_COLLECTIONS.every((c) => s.globallyHydrated.has(c));
   };
+}
+
+/**
+ * A partition entry recorded under another authority or lifetime describes
+ * loads that can no longer settle (or data that may no longer apply): it
+ * counts as unloaded. Authority transitions also forget every entry.
+ */
+export function isPartitionStateCurrent(state: BoardPartitionState | undefined): boolean {
+  return (
+    !!state &&
+    state.authorityScope === getRealtimeAuthorityScope() &&
+    state.loadEpoch === getHydrationCancellationEpoch()
+  );
 }
 
 export function makeBoardPartitionSelector(
@@ -67,9 +84,11 @@ export function markBoardPartitionLoaded(
   lifetime: LoadLifetime
 ): void {
   if (!boardId || !isLoadLifetimeCurrent(lifetime)) return;
-  agorStore
-    .getState()
-    .setBoardPartition(boardId, { status: 'loaded', authorityScope: lifetime.authorityScope });
+  agorStore.getState().setBoardPartition(boardId, {
+    status: 'loaded',
+    authorityScope: lifetime.authorityScope,
+    loadEpoch: lifetime.loadEpoch,
+  });
 }
 
 /** Forget a failed partition so `useBoardPartition` loads it again. */
@@ -79,9 +98,7 @@ export function retryBoardPartition(boardId: string): void {
 }
 
 const inflight = new Map<string, Promise<void>>();
-
-/** Restart budget when a wholesale reconnect replacement lands mid-load. */
-const MAX_WHOLESALE_RESTARTS = 3;
+let loadSequence = 0;
 
 async function fetchBoardPartition(
   client: AgorClient,
@@ -127,7 +144,12 @@ async function fetchBoardPartition(
 
 /**
  * Load one board's partition and fill-merge it into the store. Deduplicated per
- * (authority, board); resolves once applied, dropped, or failed.
+ * (authority, lifetime, board); resolves once applied, dropped, or failed.
+ *
+ * The `loading` entry is owned by this load (`loadId`). A load that is
+ * cancelled (lifetime ended) or superseded releases its entry instead of
+ * leaving the board stuck in `loading`. A load whose every attempt spans a
+ * wholesale replacement never applies: it records a retryable error.
  */
 export function loadBoardPartition(
   client: AgorClient,
@@ -137,15 +159,17 @@ export function loadBoardPartition(
   // Captured before the first await, like every load (see `loadLifetime`).
   const lifetime = captureLoadLifetime();
   if (!lifetime) return Promise.resolve();
-  const { authorityScope } = lifetime;
-  const key = `${authorityScope}\u0000${lifetime.loadEpoch}\u0000${boardId}`;
+  const { authorityScope, loadEpoch } = lifetime;
+  const key = `${authorityScope}\u0000${loadEpoch}\u0000${boardId}`;
   const existing = inflight.get(key);
   if (existing) return existing;
 
-  const isCurrent = () => isLoadLifetimeCurrent(lifetime);
+  const loadId = ++loadSequence;
   const store = () => agorStore.getState();
+  const owns = () => store().boardPartitions.get(boardId)?.loadId === loadId;
+  const isCurrent = () => isLoadLifetimeCurrent(lifetime) && owns();
   const run = async () => {
-    store().setBoardPartition(boardId, { status: 'loading', authorityScope });
+    store().setBoardPartition(boardId, { status: 'loading', authorityScope, loadEpoch, loadId });
     for (let attempt = 0; ; attempt++) {
       const fence = beginPartitionLoad();
       try {
@@ -155,11 +179,16 @@ export function loadBoardPartition(
           options.canUseMemberWorkspaceServices
         );
         if (!isCurrent()) return;
-        if (wholesaleReplacedSince(fence) && attempt < MAX_WHOLESALE_RESTARTS) continue;
+        if (wholesaleReplacedSince(fence)) {
+          // Never apply across a replacement: the snapshot could resurrect
+          // rows it removed. Restart, then surface a retryable error.
+          if (attempt < MAX_WHOLESALE_RESTARTS) continue;
+          throw new WholesaleReplacementError();
+        }
         const touched = (collection: HydratedCollection, id: string) =>
           touchedSince(collection, id, fence.startRevisions[collection]);
         store().applyMaps((prev) => applyBoardPartition(prev, snapshot, touched));
-        store().setBoardPartition(boardId, { status: 'loaded', authorityScope });
+        store().setBoardPartition(boardId, { status: 'loaded', authorityScope, loadEpoch });
         return;
       } catch (err) {
         if (!isCurrent()) return;
@@ -167,6 +196,7 @@ export function loadBoardPartition(
         store().setBoardPartition(boardId, {
           status: 'error',
           authorityScope,
+          loadEpoch,
           error: err instanceof Error ? err.message : String(err),
         });
         return;
@@ -177,6 +207,9 @@ export function loadBoardPartition(
   };
   const promise = run().finally(() => {
     inflight.delete(key);
+    // Cancelled or dropped while still loading: release the entry so the
+    // board counts as unloaded and the next mount/authority loads it again.
+    if (owns()) store().setBoardPartition(boardId, null);
   });
   inflight.set(key, promise);
   return promise;

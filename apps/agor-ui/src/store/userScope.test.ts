@@ -1,6 +1,10 @@
 import type { AgorClient, BoardComment, Branch, Session } from '@agor-live/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cancelAllHydrations, resetHydrationRevisions } from './agorHydration';
+import {
+  bumpFirstPaintMergeRevisions,
+  cancelAllHydrations,
+  resetHydrationRevisions,
+} from './agorHydration';
 import { sessionCreated } from './agorRealtimeActions';
 import { agorStore } from './agorStore';
 import { captureLoadLifetime } from './loadLifetime';
@@ -352,6 +356,22 @@ describe('user scope', () => {
       teammatesLoaded: false,
       homeBranchesLoaded: false,
     });
+  });
+
+  it('never applies a read whose every attempt spanned a wholesale replacement', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let reads = 0;
+    const { client } = makeClient({
+      mine: () => {
+        reads += 1;
+        bumpFirstPaintMergeRevisions(); // a reconnect resync lands mid-read, every time
+        return [session(`s-stale-${reads}`, 'br-1')];
+      },
+    });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: false });
+    expect(reads).toBe(4);
+    expect(agorStore.getState().sessionById.size).toBe(0);
+    expect(flags().mySessionsLoaded).toBe(false);
   });
 
   it('keeps flags true while a silent-resync re-run is in flight', async () => {

@@ -51,6 +51,10 @@ export interface BoardPartitionState {
   status: BoardPartitionStatus;
   /** Authority scope the load ran under; a load never applies across scopes. */
   authorityScope: string;
+  /** Hydration cancellation epoch of that load; another epoch counts as unloaded. */
+  loadEpoch: number;
+  /** The load that owns a `loading` entry; only its owner may settle or release it. */
+  loadId?: number;
   error?: string;
 }
 
@@ -172,7 +176,7 @@ interface AgorActions {
   setBoardPartition: (boardId: string, state: BoardPartitionState | null) => void;
   /** Merge user-scope flags; a no-op when nothing changes. */
   setUserScope: (partial: Partial<UserScopeMeta>) => void;
-  /** Forget every board partition (authority transitions). */
+  /** Forget every board partition (authority transitions orphan their loads). */
   resetBoardPartitions: () => void;
   /** Record that a global snapshot of these collections has applied. */
   markGloballyHydrated: (collections: readonly string[]) => void;
@@ -185,7 +189,13 @@ interface AgorActions {
 export type AgorState = DataMaps & AgorMetaWithUserScope & AgorActions;
 
 function shallowEqualPartition(a: BoardPartitionState, b: BoardPartitionState): boolean {
-  return a.status === b.status && a.authorityScope === b.authorityScope && a.error === b.error;
+  return (
+    a.status === b.status &&
+    a.authorityScope === b.authorityScope &&
+    a.loadEpoch === b.loadEpoch &&
+    a.loadId === b.loadId &&
+    a.error === b.error
+  );
 }
 
 function evictBranchAndSessions(draft: Draft<AgorState>, branchId: string): Set<string> {

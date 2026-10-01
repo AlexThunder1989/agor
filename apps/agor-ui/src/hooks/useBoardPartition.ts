@@ -2,6 +2,7 @@ import type { AgorClient } from '@agor-live/client';
 import { useEffect, useMemo } from 'react';
 import { agorStore, useAgorStore } from '../store/agorStore';
 import {
+  isPartitionStateCurrent,
   loadBoardPartition,
   makeBoardPartitionSelector,
   makeBoardReadySelector,
@@ -29,7 +30,11 @@ export function useBoardPartition(
 
   useEffect(() => {
     if (!client || !boardId || !boardKnown || !firstPaintSettled) return;
-    if (boardReady || status === 'loading' || status === 'error') return;
+    if (boardReady) return;
+    // An entry from another authority or load lifetime can never settle: it
+    // counts as unloaded (authority transitions also forget every entry).
+    const current = agorStore.getState().boardPartitions.get(boardId);
+    if (isPartitionStateCurrent(current) && (status === 'loading' || status === 'error')) return;
     void loadBoardPartition(client, boardId, { canUseMemberWorkspaceServices });
   }, [
     boardId,
