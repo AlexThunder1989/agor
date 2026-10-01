@@ -77,6 +77,7 @@ import {
   buildTeammateFirstSessionTitle,
 } from '../../utils/teammateBootstrapPrompt';
 import { createTeammateBranch } from '../../utils/teammateCreation';
+import { isTeammatesRoute } from '../../utils/uiRoutes';
 import { getUserDefaultConfigurationSource } from '../AgenticToolConfigurationPicker/useAgenticConfigurationSources';
 import { AppHeader } from '../AppHeader';
 import type { BoardTeammatePanelTab } from '../BoardTeammatePanel';
@@ -96,6 +97,7 @@ import { SessionPanel } from '../SessionPanel';
 import { PendingToolChoicePanel } from '../SessionPanel/PendingToolChoicePanel';
 import { SessionSettingsModal } from '../SessionSettingsModal';
 import { SettingsModal } from '../SettingsModal';
+import { TeammatesDirectory } from '../TeammatesDirectory';
 import { TerminalModal, WEB_TERMINAL_MIN_ROLE } from '../TerminalModal';
 import { ThemeEditorModal } from '../ThemeEditorModal';
 import {
@@ -405,7 +407,9 @@ export const App: React.FC<AppProps> = ({
   }>();
   // Settings owns the address bar, not the surface behind its modal.
   // Preserve the Home/board background recorded by useSettingsRoute.
-  const isRootHomePath = getShellSurfacePath(location) === '/';
+  const shellSurfacePath = getShellSurfacePath(location);
+  const isTeammatesPath = isTeammatesRoute(shellSurfacePath);
+  const isRootHomePath = shellSurfacePath === '/' || isTeammatesPath;
   const hasExplicitEntityTarget = hasExplicitEntityRouteTarget(routeParams);
   const sessionCanvasRef = useRef<SessionCanvasRef>(null);
   const [newSessionBranchId, setNewSessionBranchId] = useState<string | null>(null);
@@ -1367,6 +1371,8 @@ export const App: React.FC<AppProps> = ({
   // delegates to the latest impl via useStableCallback, so they read current
   // state (selection, panel, board) at call time without re-rendering the header.
   const handleHomeClick = useStableCallback(() => navigation.goHome());
+  const handleSeeAllTeammates = useStableCallback(() => navigation.goToTeammates());
+  const handleTeammatesBack = useStableCallback(() => navigation.goBack());
   const handleEventStreamClick = useStableCallback(() => {
     // If a session is open, close it and reveal the event stream; otherwise
     // toggle the event stream panel.
@@ -1576,7 +1582,15 @@ export const App: React.FC<AppProps> = ({
                   minSize={CANVAS_MIN_SIZE_PERCENT}
                 >
                   <div style={{ position: 'relative', overflow: 'hidden', height: '100%' }}>
-                    {isHomeSurface ? (
+                    {isTeammatesPath ? (
+                      <TeammatesDirectory
+                        client={client}
+                        currentUser={user}
+                        checkAccess={canCreateSessions}
+                        onOpenBoard={handleHomeBoardClick}
+                        onBack={handleTeammatesBack}
+                      />
+                    ) : isHomeSurface ? (
                       <HomePage
                         client={client}
                         currentUser={user}
@@ -1587,6 +1601,7 @@ export const App: React.FC<AppProps> = ({
                         onCreateSession={canCreateSessions ? stableOnCreateSession : undefined}
                         onOpenCreateDialog={handleHomeOpenCreateDialog}
                         onOpenSettings={openSettings}
+                        onSeeAllTeammates={handleSeeAllTeammates}
                       />
                     ) : (
                       <SessionCanvas

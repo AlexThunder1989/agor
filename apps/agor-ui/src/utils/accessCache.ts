@@ -38,25 +38,53 @@ interface ScopedReads {
   known: Map<string, Known>;
 }
 
-const byClient = new WeakMap<object, ScopedReads>();
+let byClient = new WeakMap<object, ScopedReads>();
+const abortError = () => new DOMException('The access read was aborted.', 'AbortError');
+// Slots belong to a generation; a test reset starts a new one, so older releases can't miscount.
+let generation = 0;
 let inFlight = 0;
-const waiting: (() => void)[] = [];
+const waiting: { grant: () => void; drop: () => void }[] = [];
 
+/** A read slot, resolving with the generation it belongs to. */
 const acquire = () => {
   if (inFlight < MAX_IN_FLIGHT) {
     inFlight++;
-    return Promise.resolve();
+    return Promise.resolve(generation);
   }
-  return new Promise<void>((resolve) => waiting.push(resolve));
+  return new Promise<number>((resolve, reject) =>
+    waiting.push({ grant: () => resolve(generation), drop: () => reject(abortError()) })
+  );
 };
 
-const release = () => {
+const release = (slot: number) => {
+  if (slot !== generation) return;
   const next = waiting.shift();
-  if (next) next();
+  if (next) next.grant();
   else inFlight--;
 };
 
-const abortError = () => new DOMException('The access read was aborted.', 'AbortError');
+/** A caller's failed ids carried to a new comma-joined id set: only those still in it. */
+export function failuresStillIn(ids: ReadonlySet<string>, key: string): ReadonlySet<string> {
+  if (ids.size === 0) return ids;
+  const current = new Set(key.split(','));
+  return new Set([...ids].filter((id) => current.has(id)));
+}
+
+/** A caller's failures once `id` answered: the answer replaces its failure. */
+export function withoutFailure<T extends { ids: ReadonlySet<string> }>(failed: T, id: string): T {
+  if (!failed.ids.has(id)) return failed;
+  const ids = new Set(failed.ids);
+  ids.delete(id);
+  return { ...failed, ids };
+}
+
+/** Test-only: forgets every answer, frees every read slot, ignores releases from reads already running and aborts queued ones. */
+export function resetAccessCacheForTests() {
+  byClient = new WeakMap();
+  generation++;
+  inFlight = 0;
+  for (const dropped of waiting.splice(0)) dropped.drop();
+}
 
 /** The signed-in scope answers belong to; a role change re-reads them like a new sign-in. */
 export const accessScope = (
@@ -92,13 +120,13 @@ function startRead(
     started: false,
     cancelled: false,
   };
-  pending.promise = acquire().then(async () => {
+  pending.promise = acquire().then(async (slot) => {
     try {
       if (pending.cancelled || byClient.get(client) !== entry) throw abortError();
       pending.started = true;
       return await read();
     } finally {
-      release();
+      release(slot);
     }
   });
   pending.promise.then(

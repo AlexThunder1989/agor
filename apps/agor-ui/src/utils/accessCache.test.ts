@@ -1,5 +1,11 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ACCESS_TTL_MS, accessScope, peekAccess, readAccess } from './accessCache';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  ACCESS_TTL_MS,
+  accessScope,
+  peekAccess,
+  readAccess,
+  resetAccessCacheForTests,
+} from './accessCache';
 
 const deferred = () => {
   let resolve!: (value: boolean) => void;
@@ -24,6 +30,8 @@ function occupySlots(client: object) {
     },
   };
 }
+
+beforeEach(() => resetAccessCacheForTests());
 
 afterEach(() => {
   vi.useRealTimers();
@@ -91,6 +99,39 @@ describe('readAccess', () => {
     // The abandoned read frees its key: the next caller reads afresh.
     expect(await readAccess(client, 's', 'k', read)).toBe(true);
     expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it('on a test reset aborts queued reads and ignores releases from reads already running', async () => {
+    const client = {};
+    const slots = occupySlots(client);
+    const read = vi.fn(async () => true);
+    const queued = readAccess(client, 's', 'queued', read);
+    // Let the four busy reads start: a reset forgets the scope, so a read not yet started aborts.
+    await flush();
+    resetAccessCacheForTests();
+    await expect(queued).rejects.toMatchObject({ name: 'AbortError' });
+
+    // Four fresh reads fill the new slots; the old reads finishing free none of them.
+    const fresh = occupySlots({});
+    await slots.release();
+    let started = false;
+    const fifth = readAccess({}, 's', 'fifth', async () => {
+      started = true;
+      return true;
+    });
+    await flush();
+    expect(started).toBe(false);
+    await fresh.release();
+    expect(await fifth).toBe(true);
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('forgets cached answers on a test reset', async () => {
+    const client = {};
+    await readAccess(client, 's', 'k', async () => true);
+    expect(peekAccess(client, 's', 'k')).toBe(true);
+    resetAccessCacheForTests();
+    expect(peekAccess(client, 's', 'k')).toBeUndefined();
   });
 
   it('rejects at once when the signal has already aborted', async () => {

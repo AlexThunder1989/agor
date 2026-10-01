@@ -1,8 +1,8 @@
 import type { AgorClient, CapabilityPolicyDraft, User } from '@agor-live/client';
-import { renderHook, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
-import { ACCESS_TTL_MS } from '../utils/accessCache';
-import { useBoardsSharedWithMe } from './useBoardsSharedWithMe';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ACCESS_TTL_MS, resetAccessCacheForTests } from '../utils/accessCache';
+import { useBoardSharing, useBoardsSharedWithMe } from './useBoardsSharedWithMe';
 
 const ME = 'me';
 const superadmin = { user_id: ME, name: 'Kasia', role: 'superadmin' } as User;
@@ -69,6 +69,8 @@ function clientFor(
     },
   } as unknown as AgorClient;
 }
+
+beforeEach(() => resetAccessCacheForTests());
 
 describe('useBoardsSharedWithMe', () => {
   it('resolves superadmin board access through the board policy, not the role', async () => {
@@ -145,6 +147,48 @@ describe('useBoardsSharedWithMe', () => {
     const second = renderHook(() => useBoardsSharedWithMe(client, superadmin, ['b']));
     await waitFor(() => expect(second.result.current('b')).toBe(true));
     expect(find).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a failed board failed through a grown board set, then shows its re-read answer', async () => {
+    const owned = { primary_owner_user_id: ME, board_access: policy('private') };
+    let grant: ((value: unknown) => void) | undefined;
+    const find = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockImplementation((id: string) =>
+        id === 'a' ? new Promise((resolve) => (grant = resolve)) : Promise.resolve(owned)
+      );
+    const client = clientFor({}, find);
+    const { result, rerender } = renderHook(({ ids }) => useBoardSharing(client, superadmin, ids), {
+      initialProps: { ids: ['a'] },
+    });
+    await waitFor(() => expect(result.current.status('a')).toBe('failed'));
+
+    rerender({ ids: ['a', 'b'] });
+    expect(result.current.status('a')).toBe('failed');
+    await waitFor(() => expect(result.current.status('b')).toBe('shared'));
+    expect(result.current.settled).toBe(true);
+    expect(grant).toBeDefined();
+
+    await act(async () => grant?.(owned));
+    expect(result.current.status('a')).toBe('shared');
+    expect(result.current.settled).toBe(true);
+  });
+
+  it('drops a failure for a board that left the set', async () => {
+    const find = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockReturnValue(new Promise(() => {}));
+    const client = clientFor({}, find);
+    const { result, rerender } = renderHook(({ ids }) => useBoardSharing(client, superadmin, ids), {
+      initialProps: { ids: ['a'] },
+    });
+    await waitFor(() => expect(result.current.status('a')).toBe('failed'));
+
+    rerender({ ids: ['b'] });
+    rerender({ ids: ['a', 'b'] });
+    expect(result.current.status('a')).toBe('pending');
   });
 
   it('re-renders when a stale grant’s re-read fails, so it stops showing', async () => {

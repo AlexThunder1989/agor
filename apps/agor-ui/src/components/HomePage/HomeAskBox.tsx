@@ -5,6 +5,8 @@ import type { TextAreaRef } from 'antd/es/input/TextArea';
 import { memo, useMemo, useRef, useState } from 'react';
 import { useConnectionState } from '../../contexts/ConnectionContext';
 import type { NewSessionConfig, SessionCreationResult } from '../../domain/sessionCreation';
+import { useSessionAccess } from '../../hooks/useSessionAccess';
+import { useSharedTeammates } from '../../hooks/useSharedTeammates';
 import { agorStore, shallow, useAgorStore, useStoreWithEqualityFn } from '../../store/agorStore';
 import { makeLatestOwnSessionSelector, makeTeammatesSelector } from '../../store/selectors';
 import { MOBILE_TOUCH_TARGET } from '../../utils/deviceDetection';
@@ -21,7 +23,6 @@ import {
 import { PrimaryTeammatePicker } from '../SettingsModal/PrimaryTeammatePicker';
 import { HomeList, HomePressable } from './HomeRow';
 import { HomeCard, HomeLink, HomeSectionError, HomeSheet, useHomeCompact } from './HomeSection';
-import { useSessionAccess, useSharedTeammates } from './HomeTeammates';
 import { HOME_ASK_TARGET_MAX_WIDTH } from './homeLayout';
 
 // Starters for new users only; returning users get the placeholder.
@@ -63,19 +64,41 @@ function AskTargetSelect({
     useMemo(() => (listed ? makeTeammatesSelector(userId, 'own') : noTeammates), [listed, userId]),
     shallow
   );
-  const shared = useSharedTeammates(client, listed ? currentUser : null);
-  const { access, failed, retry } = useSessionAccess(
+  const {
+    teammates: shared,
+    settled: sharingSettled,
+    failed: sharingFailed,
+    retry: retrySharing,
+    retrying: sharingRetrying,
+  } = useSharedTeammates(client, listed ? currentUser : null);
+  const {
+    access,
+    failedIds,
+    failed: accessFailed,
+    retry: retryAccess,
+    retrying: accessRetrying,
+  } = useSessionAccess(
     listed ? client : null,
     currentUser,
     shared.map((b) => b.branch_id)
   );
+  const checking =
+    !!client &&
+    listed &&
+    (!sharingSettled ||
+      sharingRetrying ||
+      accessRetrying ||
+      shared.some((b) => !(b.branch_id in access) && !failedIds.has(b.branch_id)));
+  const emptyText = checking
+    ? 'Checking which teammates you can ask…'
+    : sharingFailed + accessFailed > 0
+      ? "Couldn't check access for some teammates. Reopen to try again"
+      : 'No teammates you can ask';
   // Reads start on the first open; a later open retries the ones that failed.
-  const emptyText = failed
-    ? "Couldn't check access for some teammates. Reopen to try again"
-    : 'No teammates you can ask';
   const openList = () => {
     setListed(true);
-    if (failed) retry();
+    if (sharingFailed > 0) retrySharing();
+    if (accessFailed > 0) retryAccess();
   };
   const boardById = useAgorStore((s) => s.boardById);
   const repoById = useAgorStore((s) => s.repoById);

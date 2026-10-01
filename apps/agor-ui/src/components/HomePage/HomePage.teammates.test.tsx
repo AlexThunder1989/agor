@@ -52,6 +52,19 @@ describe('HomePage teammates', () => {
     expect(onBoardClick).toHaveBeenCalledWith('b');
   });
 
+  it('opens the directory through the shell’s "See all", and hides the link without one', async () => {
+    seedTeammates();
+    const onSeeAllTeammates = vi.fn();
+    const { unmount } = renderHome({ client: client({}), onSeeAllTeammates });
+    fireEvent.click(await screen.findByRole('button', { name: 'See all 3' }));
+    expect(onSeeAllTeammates).toHaveBeenCalledOnce();
+    unmount();
+
+    renderHome({ client: client({}) });
+    await screen.findByText('Teammate t');
+    expect(screen.queryByRole('button', { name: /^See all \d/ })).not.toBeInTheDocument();
+  });
+
   it('offers a quiet retry when a teammate’s access read fails', async () => {
     seedTeammates();
     let down = true;
@@ -175,6 +188,31 @@ describe('HomePage teammates', () => {
     expect(within(popup).queryByText(/Board primary/)).not.toBeInTheDocument();
   });
 
+  it('says the picker is still checking, not empty, while access reads are out', async () => {
+    seedTeammates();
+    const answers: (() => void)[] = [];
+    const pending = {
+      service: (name: string) =>
+        name === 'branches/:id/effective-access'
+          ? {
+              find: () =>
+                new Promise((resolve) =>
+                  answers.push(() => resolve({ can: 'view', is_owner: false, source: 'others' }))
+                ),
+            }
+          : { getPrimaryTeammate: async () => null, find: async () => [] },
+    } as unknown as AgorClient;
+    renderHome({ client: pending });
+    fireEvent.click(await screen.findByRole('button', { name: 'Pick an assistant' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Ask' });
+    expect(within(sheet).getByText('Checking which teammates you can ask…')).toBeInTheDocument();
+    await waitFor(() => expect(answers).toHaveLength(3));
+    await act(async () => {
+      for (const answer of answers) answer();
+    });
+    expect(await within(sheet).findByText('No teammates you can ask')).toBeInTheDocument();
+  });
+
   it('asks to pick an assistant when there is no primary', async () => {
     seedTeammates();
     const none = {
@@ -236,5 +274,48 @@ describe('HomePage privacy for superadmins', () => {
     expect(await screen.findByRole('button', { name: /can you look/ })).toBeInTheDocument();
     expect(screen.queryByText('Teammate hidden')).not.toBeInTheDocument();
     expect(screen.queryByText(/secret/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the rail and its retry link mounted while a failed policy read is retried', async () => {
+    seed({
+      sessions: [session('idle')],
+      branches: [teammate('open', 'b-shared')],
+      boards: [{ board_id: 'b-shared', name: 'S', archived: false } as Board],
+    });
+    const real = policyClient({ 'b-shared': 'shared' });
+    const answers: { settle: (fail: boolean) => void }[] = [];
+    const flaky = {
+      service: (name: string) => {
+        const service = real.service(name as never) as { find: (p: unknown) => Promise<unknown> };
+        if (name !== 'boards/:id/permissions') return service;
+        return {
+          find: (params: unknown) =>
+            new Promise((resolve, reject) =>
+              answers.push({
+                settle: (fail) =>
+                  fail ? reject(new Error('down')) : service.find(params).then(resolve),
+              })
+            ),
+        };
+      },
+    } as unknown as AgorClient;
+    renderHome({ currentUser: superadmin, client: flaky, onSeeAllTeammates: () => {} });
+    await waitFor(() => expect(answers).toHaveLength(1));
+    await act(async () => answers[0].settle(true));
+    const rail = await screen.findByRole('region', { name: 'AI teammates' });
+    // No "See all 0" beside the failure notice.
+    expect(within(rail).queryByRole('button', { name: /^See all/ })).not.toBeInTheDocument();
+    const retry = within(rail).getByRole('button', { name: 'Try again' });
+    retry.focus();
+
+    fireEvent.click(retry);
+    await waitFor(() => expect(answers).toHaveLength(2));
+    expect(screen.getByRole('region', { name: 'AI teammates' })).toBe(rail);
+    expect(within(rail).getByRole('button', { name: /Try again/ })).toBe(document.activeElement);
+
+    await act(async () => answers[1].settle(false));
+    expect(await within(rail).findByText('Teammate open')).toBeInTheDocument();
+    expect(within(rail).queryByText(/Couldn’t check access/)).not.toBeInTheDocument();
+    expect(within(rail).getByRole('button', { name: 'See all 1' })).toBeInTheDocument();
   });
 });
