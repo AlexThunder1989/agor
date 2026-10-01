@@ -158,6 +158,8 @@ interface ScopeRun {
   compat: boolean;
   referenceTimer: ReturnType<typeof setTimeout> | null;
   retryTimers: Set<ReturnType<typeof setTimeout>>;
+  /** Resolved once no id read is queued or in flight (or the run stops). */
+  drainWaiters: Array<() => void>;
   unsubscribe: (() => void) | null;
 }
 
@@ -310,8 +312,24 @@ function pumpBranchReads(run: ScopeRun): void {
       run.inflight -= 1;
       pumpBranchReads(run);
       settleHomeBranches(run);
+      if (run.inflight === 0 && run.queue.length === 0) releaseDrainWaiters(run);
     });
   }
+}
+
+function releaseDrainWaiters(run: ScopeRun): void {
+  for (const resolve of run.drainWaiters.splice(0)) resolve();
+}
+
+/**
+ * Resolves once no id read is queued or in flight (a scheduled retry doesn't
+ * count), or once the run is no longer current.
+ */
+function idReadsDrained(run: ScopeRun): Promise<void> {
+  if (!isCurrent(run) || (run.inflight === 0 && run.queue.length === 0)) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => run.drainWaiters.push(resolve));
 }
 
 /**
@@ -428,6 +446,7 @@ export function stopUserScope(): void {
   for (const timer of run.retryTimers) clearTimeout(timer);
   run.retryTimers.clear();
   run.queue = [];
+  releaseDrainWaiters(run);
 }
 
 /**
@@ -438,8 +457,9 @@ export function stopUserScope(): void {
  * authority. `gatedMineComplete` says the gated first-paint page already holds
  * all of my active sessions (it returned fewer than `MY_SESSIONS_GATED_LIMIT`
  * rows and raced none of mine), so U1 can be skipped. Resolves when the
- * initial reads finished, failed, or were superseded; the reference
- * subscription and retries keep running until `stopUserScope`.
+ * initial reads and the id reads they triggered settled, failed, or were
+ * superseded; the reference subscription and retries keep running until
+ * `stopUserScope`.
  */
 export async function startUserScope(
   client: AgorClient,
@@ -473,6 +493,7 @@ export async function startUserScope(
     compat: false,
     referenceTimer: null,
     retryTimers: new Set(),
+    drainWaiters: [],
     unsubscribe: null,
   };
   currentRun = run;
@@ -587,4 +608,8 @@ export async function startUserScope(
   run.referencesKnown = true;
   // Immediate catch-up scan (not debounced): references U1 added are queued now.
   checkReferences(run);
+  // Resolve only once those follow-up id reads settle, so a caller holding
+  // the global snapshots for the scope doesn't release them before the
+  // U1-only references are on the wire.
+  await idReadsDrained(run);
 }

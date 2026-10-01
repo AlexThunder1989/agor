@@ -1798,6 +1798,47 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
     expect(agorStore.getState().commentById.has('c-live')).toBe(true);
   });
 
+  it('sends the id reads for branches only U1 references before the global snapshots', async () => {
+    window.history.pushState({}, '', '/');
+    // A full gated page (200 of mine) on b-1, so the scope runs U1. U1 also
+    // returns an older session on b-old: no gated row, U2 or U3 knows it.
+    const page = Array.from({ length: 200 }, (_, i) =>
+      makeSession({ session_id: `s-${i}`, created_by: 'user-me', branch_id: 'b-1' })
+    );
+    const older = makeSession({ session_id: 's-older', created_by: 'user-me', branch_id: 'b-old' });
+    const seed: Record<string, unknown[]> = { 'sessions:find': page };
+    const mock = makeMockClient(seed);
+    // Call 2 of sessions.find is U1 (call 1 is the gated page).
+    mock.onFetch('sessions', 'find', (call) => {
+      if (call === 2) seed['sessions:find'] = [...page, older];
+      return undefined;
+    });
+    const order: string[] = [];
+    const service = mock.client.service;
+    (mock.client as { service: unknown }).service = (name: string) => {
+      const svc = service(name);
+      for (const method of ['find', 'findAll'] as const) {
+        const original = svc[method];
+        svc[method] = vi.fn((args?: { query?: Record<string, unknown> }) => {
+          const ids = (args?.query?.branch_id as { $in?: string[] } | undefined)?.$in;
+          order.push(ids ? `ids:${ids.join(',')}` : `${name}:${method}`);
+          return original(args);
+        });
+      }
+      return svc;
+    };
+    const { result } = renderHook(() => useAgorData(mock.client, authority));
+    await waitForInitialLoad(result);
+    await waitFor(() => expect(order).toContain('sessions:findAll'));
+    const u1OnlyRead = order.findIndex(
+      (entry) => entry.startsWith('ids:') && entry.includes('b-old')
+    );
+    expect(u1OnlyRead).toBeGreaterThanOrEqual(0);
+    expect(u1OnlyRead).toBeLessThan(order.indexOf('sessions:findAll'));
+    expect(u1OnlyRead).toBeLessThan(order.lastIndexOf('branches:findAll'));
+    await waitFor(() => expect(agorStore.getState().homeBranchesLoaded).toBe(true));
+  });
+
   it("never applies a load that outlived its mount into the next user's store", async () => {
     window.history.pushState({}, '', '/');
     const seed: Record<string, unknown[]> = {

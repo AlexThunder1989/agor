@@ -401,15 +401,27 @@ describe('user scope', () => {
     const idGate = new Promise<void>((resolve) => {
       releaseIds = resolve;
     });
-    const { client } = makeClient({
+    const { client, calls } = makeClient({
       mine: () => [session('s-1', 'br-1')],
       byIds: async (ids) => {
         if (ids.includes('br-1')) await idGate;
         return ids.map((id) => branch(id));
       },
     });
-    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: false });
-    // A comment thread on an unloaded branch lands before br-1 resolves.
+    // Resolves only after the id reads drain, so don't await it while br-1 is held.
+    const run = startUserScope(client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: false,
+    });
+    await vi.waitFor(() =>
+      expect(
+        calls.some((c) =>
+          (c.query.branch_id as { $in?: string[] } | undefined)?.$in?.includes('br-1')
+        )
+      ).toBe(true)
+    );
+    // A comment thread on an unloaded branch lands while br-1's read is in flight.
     agorStore
       .getState()
       .setMap(
@@ -419,6 +431,7 @@ describe('user scope', () => {
     await vi.waitFor(() => expect(agorStore.getState().branchById.has('br-late')).toBe(true));
     expect(flags().homeBranchesLoaded).toBe(false);
     releaseIds();
+    await run;
     await vi.waitFor(() => expect(flags().homeBranchesLoaded).toBe(true));
     expect(agorStore.getState().branchById.has('br-1')).toBe(true);
   });
@@ -479,12 +492,17 @@ describe('user scope', () => {
         return ids.map((id) => branch(id));
       },
     });
-    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: false });
+    const run = startUserScope(client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: false,
+    });
     for (let i = 0; i < 20 && !agorStore.getState().homeBranchesLoaded; i++) {
       await vi.waitFor(() => expect(releases.length).toBeGreaterThan(0));
       for (const release of releases.splice(0)) release();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
+    await run;
     expect(flags().homeBranchesLoaded).toBe(true);
     expect(peak).toBe(3);
     expect(calls.filter((c) => c.query.branch_id)).toHaveLength(5);

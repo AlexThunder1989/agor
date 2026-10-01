@@ -138,6 +138,10 @@ export type InitialLoadItemKey = (typeof INITIAL_LOAD_ITEMS)[number]['key'];
 // settings modal / zone trigger).
 const RECENT_SESSIONS_LIMIT = 50;
 
+// Longest the global snapshots wait for the user scope (U1 and its follow-up
+// id reads) before starting anyway; see `hydrateGlobalSets`' start below.
+const GLOBAL_SETS_SCOPE_HOLD_MS = 10_000;
+
 // Items the Home first paint gates on. Board objects and cards are only needed
 // to paint a canvas, so on Home they leave the gate and hydrate globally in the
 // background instead. Comments stay gated on every route: Home's "comments for
@@ -1143,8 +1147,9 @@ export function useAgorData(
         // needs the tasks response, can follow them. Re-run fill-only on every
         // silent resync so the scope recovers anything missed while
         // disconnected.
+        let userScopeSettled: Promise<void> | null = null;
         if (authenticatedUserId) {
-          void startUserScope(client, {
+          userScopeSettled = startUserScope(client, {
             userId: authenticatedUserId,
             lifetime: loadLifetime,
             gatedMineComplete: !silent && gatedMineComplete,
@@ -1323,6 +1328,22 @@ export function useAgorData(
         // start — `authorityIsCurrent` includes the load's epoch.
         if (openedTranscriptReady) {
           void openedTranscriptReady.then(() => {
+            if (!authorityIsCurrent()) return;
+            hydrateGlobalSets();
+          });
+        } else if (userScopeSettled && !silent) {
+          // Elsewhere the global sets wait for the user scope — U1 and the id
+          // reads for the branches only U1 references — so Home's counts
+          // don't queue behind multi-megabyte snapshots on a slow socket.
+          // Bounded: a stalled scope read never withholds the global sets.
+          let holdTimer: ReturnType<typeof setTimeout> | undefined;
+          void Promise.race([
+            userScopeSettled.catch(() => undefined),
+            new Promise<void>((resolve) => {
+              holdTimer = setTimeout(resolve, GLOBAL_SETS_SCOPE_HOLD_MS);
+            }),
+          ]).then(() => {
+            clearTimeout(holdTimer);
             if (!authorityIsCurrent()) return;
             hydrateGlobalSets();
           });
