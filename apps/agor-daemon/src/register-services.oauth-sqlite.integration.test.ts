@@ -125,7 +125,7 @@ function durableAuthorityWithCreate(
 ): NonNullable<RegisterServicesContext['mcpOAuthPendingFlowAuthority']> {
   return {
     create,
-    maintain: vi.fn(),
+    maintain: vi.fn().mockResolvedValue(undefined),
   } as unknown as NonNullable<RegisterServicesContext['mcpOAuthPendingFlowAuthority']>;
 }
 
@@ -2413,7 +2413,7 @@ describe('SQLite saved-row OAuth authority', () => {
     const harness = await createHarness(provider, 'per_user', {
       durableAuthority: {
         invalidateForServer,
-        maintain: vi.fn(),
+        maintain: vi.fn().mockResolvedValue(undefined),
       } as unknown as NonNullable<RegisterServicesContext['mcpOAuthPendingFlowAuthority']>,
       lockGrantConfiguration: vi.fn(async () => undefined),
     });
@@ -2752,7 +2752,7 @@ describe('SQLite saved-row OAuth authority', () => {
         resolve: resolveDynamicClientRegistration,
         lockExactCurrentForAttempt: vi.fn(async () => true),
         invalidateForServer: vi.fn(),
-        maintain: vi.fn(),
+        maintain: vi.fn().mockResolvedValue(undefined),
       } as unknown as NonNullable<RegisterServicesContext['mcpOAuthClientRegistrationAuthority']>,
       lockGrantConfiguration: vi.fn(async () => undefined),
     });
@@ -2828,7 +2828,7 @@ describe('SQLite saved-row OAuth authority', () => {
       resolve,
       lockExactCurrentForAttempt,
       invalidateForServer: vi.fn(),
-      maintain: vi.fn(),
+      maintain: vi.fn().mockResolvedValue(undefined),
     } as unknown as NonNullable<RegisterServicesContext['mcpOAuthClientRegistrationAuthority']>;
     const harness = await createHarness(provider, undefined, {
       catalogEntry,
