@@ -1039,6 +1039,24 @@ export function useAgorData(
         // so they're unaffected.
         bumpFirstPaintMergeRevisions();
         if (!silent) markBoardPartitionLoaded(boardScope);
+        // User scope (design r3 §3): the rest of my sessions, my branches, every
+        // teammate I can view, and the branches my sessions and comment
+        // threads reference. Started BEFORE the background global hydrations
+        // so its small reads aren't queued behind multi-megabyte snapshots.
+        // On a session route it is NOT held behind the opened transcript like
+        // the global sets below: Home and the teammate surfaces must not wait
+        // for a transcript. Starting after first paint keeps it behind the
+        // transcript's stream/get/tasks reads (sent with the board-scoped
+        // batch); only its messages page, which needs the tasks response, can
+        // follow these small reads. Re-run fill-only on every silent resync so
+        // the scope recovers anything missed while disconnected.
+        if (authenticatedUserId) {
+          void startUserScope(client, {
+            userId: authenticatedUserId,
+            gatedMineComplete: !silent && gatedMineComplete,
+          });
+        }
+
         debugTimer?.endIndexing();
         debugFinishStatus = 'success';
 
@@ -1211,17 +1229,6 @@ export function useAgorData(
           });
         } else {
           hydrateGlobalSets();
-        }
-
-        // User scope (design r3 §3): the rest of my sessions, my branches, every
-        // teammate I can view, and the branches my sessions and comment
-        // threads reference. Re-run fill-only on every silent resync so the
-        // scope recovers anything missed while disconnected.
-        if (authenticatedUserId) {
-          void startUserScope(client, {
-            userId: authenticatedUserId,
-            gatedMineComplete: !silent && gatedMineComplete,
-          });
         }
 
         // Silent refetch succeeded — clear the retry flag so future token

@@ -271,7 +271,14 @@ export async function startUserScope(
     return true;
   });
 
-  const settled = await Promise.allSettled([u1, u2, u3]);
+  // When the gated page already holds all of my sessions, every reference is
+  // known now: resolve it alongside U2/U3 instead of after them, so it isn't
+  // queued behind the global snapshots on a slow socket. The pass after U1
+  // below then only covers what is still missing.
+  const early = options.gatedMineComplete
+    ? ensureBranches(run, missingReferences(store(), run.userId))
+    : Promise.resolve(true);
+  const settled = await Promise.allSettled([u1, u2, u3, early]);
   for (const result of settled) {
     if (result.status === 'rejected') console.warn('[userScope] read failed:', result.reason);
   }
@@ -280,6 +287,7 @@ export async function startUserScope(
   // loaded; teammates (U3) only shrink the id list, so they needn't succeed.
   if (settled[0].status !== 'fulfilled' || !settled[0].value) return;
   if (settled[1].status !== 'fulfilled' || !settled[1].value) return;
+  if (settled[3].status !== 'fulfilled' || !settled[3].value) return;
   try {
     const missing = missingReferences(store(), run.userId);
     if (!(await ensureBranches(run, missing))) return;

@@ -180,6 +180,31 @@ describe('user scope', () => {
     expect(flags().homeBranchesLoaded).toBe(true);
   });
 
+  it('resolves references from a complete gated page without waiting for my branches', async () => {
+    agorStore.getState().applyMaps((prev) => ({
+      ...prev,
+      sessionById: new Map([['s-1', session('s-1', 'br-ref')]]),
+    }));
+    let releaseMine!: () => void;
+    const mineGate = new Promise<void>((resolve) => {
+      releaseMine = resolve;
+    });
+    const { client, calls } = makeClient({
+      myBranches: async () => {
+        await mineGate;
+        return [];
+      },
+      byIds: (ids) => ids.map((id) => branch(id)),
+    });
+    const run = startUserScope(client, { userId: ME, gatedMineComplete: true });
+    await vi.waitFor(() => expect(agorStore.getState().branchById.has('br-ref')).toBe(true));
+    expect(calls.some((c) => c.query.branch_id)).toBe(true);
+    expect(flags().homeBranchesLoaded).toBe(false);
+    releaseMine();
+    await run;
+    expect(flags().homeBranchesLoaded).toBe(true);
+  });
+
   it('references the branches of candidate comment threads only', () => {
     agorStore.setState({
       commentById: new Map(
