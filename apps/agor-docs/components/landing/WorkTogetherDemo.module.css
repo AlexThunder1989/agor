@@ -34,11 +34,12 @@
   box-shadow: 0 0 12px #3fd9c4;
 }
 
-/* Scaled design-space board (1200 × 700). */
+/* Scaled design-space board (1200 × 700, settling to 1200 × 440). Height is
+ * set inline from the measured scale; the transition is the settle. */
 .board {
   position: relative;
-  aspect-ratio: 1200 / 700;
   margin-top: 40px;
+  transition: height 0.9s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .stage {
@@ -391,7 +392,6 @@
  * bottom edge. A button, so no arrow (site rule). */
 .stage a.cta {
   position: absolute;
-  top: calc(188px + 50%);
   left: 50%;
   display: flex;
   align-items: center;
@@ -419,8 +419,7 @@
 
 .replay {
   position: absolute;
-  right: 0;
-  bottom: 0;
+  left: 50%;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -431,7 +430,9 @@
   color: #5f7d7a;
   font: inherit;
   font-size: 14px;
+  white-space: nowrap;
   cursor: pointer;
+  transform: translateX(-50%);
 }
 
 .replay:hover {
@@ -489,5 +490,11 @@
     color: #3fd9c4;
     font-weight: 600;
     text-decoration: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board {
+    transition: none;
   }
 }

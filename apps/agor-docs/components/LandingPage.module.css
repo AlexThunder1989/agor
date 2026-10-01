@@ -13,6 +13,10 @@
 }
 
 .landingShell {
+  /* Animated sections resize (e.g. the Work together demo settling), and the
+   * browser's scroll anchoring would then scroll the page to compensate,
+   * jumping the content the reader is looking at. Opt the marketing pages out. */
+  overflow-anchor: none;
   /* Marketing type system — fonts loaded via next/font in app/layout.tsx */
   --font-display-stack: var(--font-display), "Space Grotesk", system-ui, sans-serif;
   --font-body-stack: var(--font-body), "Hanken Grotesk", system-ui, sans-serif;

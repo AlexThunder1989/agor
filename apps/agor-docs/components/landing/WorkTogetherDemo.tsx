@@ -28,14 +28,24 @@ import styles from './WorkTogetherDemo.module.css';
  */
 
 const END = 13;
+// The timeline is authored at 1×; play it 20% slower so cursors and typing
+// read at a human pace (13s of scene ≈ 16s on screen).
+const PLAYBACK_RATE = 0.8;
 // Design-space board, scaled to fit its container.
 const BOARD_W = 1200;
 const BOARD_H = 700;
+// Once the cards have settled (and the clicks are done), the board eases down
+// to fit them, with the CTA just below the cards and Play again under it, so
+// the section doesn't leave dead space (the harness strip moves into view).
+const SETTLE_AT = 11.2;
+const BOARD_H_SETTLED = 440;
+const CTA_Y = 336;
+const REPLAY_Y = 404;
 
 const USERS = [
-  { label: 'Maya · PM', color: '#f5a3c7', name: 'Maya' },
-  { label: 'Ari · Eng', color: '#6fdcf0', name: 'Ari' },
-  { label: 'Sam · QA', color: '#f2d27a', name: 'Sam' },
+  { label: 'Maya', color: '#f5a3c7', name: 'Maya' },
+  { label: 'Ari', color: '#6fdcf0', name: 'Ari' },
+  { label: 'Sam', color: '#f2d27a', name: 'Sam' },
 ];
 
 const CARDS = [
@@ -157,18 +167,47 @@ function scene(T: number) {
     };
   });
 
+  // Cursor path between waypoints. A right-handed mouse pivots around the
+  // wrist/elbow, below and right of the cursor, so moves arc: the path bows
+  // up and to the left (away from the pivot) by up to ARC of its length.
+  // Timing starts brisk and settles slowly (velocity peaks early). A
+  // waypoint flagged STRAIGHT ends a drag: the cursor is holding a card that
+  // moves in a straight line, so that leg doesn't arc.
+  const ARC = 0.14;
+  const handEase = (v: number) => ease(v ** 0.8);
   const at = (kf: number[][]) => {
     if (T <= kf[0][0]) return [kf[0][1], kf[0][2]];
     for (let j = 1; j < kf.length; j++) {
       if (T <= kf[j][0]) {
-        const d = kf[j][0] - kf[j - 1][0];
-        const p = d > 0 ? ease((T - kf[j - 1][0]) / d) : 1;
-        return [lerp(kf[j - 1][1], kf[j][1], p), lerp(kf[j - 1][2], kf[j][2], p)];
+        const [t0, x0, y0] = kf[j - 1];
+        const [t1, x1, y1, straight] = kf[j];
+        const d = t1 - t0;
+        const raw = d > 0 ? (T - t0) / d : 1;
+        const p = straight ? ease(raw) : handEase(raw);
+        let x = lerp(x0, x1, p);
+        let y = lerp(y0, y1, p);
+        const dx = x1 - x0;
+        const dy = y1 - y0;
+        const len = Math.hypot(dx, dy);
+        if (!straight && len > 4) {
+          // Unit normal to the move, flipped to point away from the pivot.
+          let nx = -dy / len;
+          let ny = dx / len;
+          if (nx + ny > 0) {
+            nx = -nx;
+            ny = -ny;
+          }
+          const bulge = ARC * len * 4 * raw * (1 - raw);
+          x += nx * bulge;
+          y += ny * bulge;
+        }
+        return [x, y];
       }
     }
     const last = kf[kf.length - 1];
     return [last[1], last[2]];
   };
+  const STRAIGHT = 1;
 
   const cursors = USERS.map((u, i) => {
     const a = 0.2 + 0.3 * i;
@@ -184,7 +223,7 @@ function scene(T: number) {
     const [x, y] = at([
       [0, ...start],
       [a, ...start],
-      [a + 0.8, ...home],
+      [a + 0.8, ...home, STRAIGHT],
       [qA - 0.1, ...inp(i)],
       [qB + 0.1, ...inp(i)],
       [qB + 0.6, ...below(i)],
@@ -231,6 +270,7 @@ function scene(T: number) {
           ? `${present} people on this board`
           : 'Board ready',
     replayOp: seg(12.8, 13),
+    settled: T >= SETTLE_AT,
   };
 }
 
@@ -281,7 +321,7 @@ export function WorkTogetherDemo() {
     let last = performance.now();
     let lastPaint = 0;
     const frame = (now: number) => {
-      c.t = Math.min(END, c.t + Math.min(0.1, (now - last) / 1000));
+      c.t = Math.min(END, c.t + Math.min(0.1, (now - last) / 1000) * PLAYBACK_RATE);
       last = now;
       if (now - lastPaint > 33 || c.t >= END) {
         lastPaint = now;
@@ -346,10 +386,18 @@ export function WorkTogetherDemo() {
         </div>
       </div>
 
-      <div className={styles.board} ref={boardRef}>
+      <div
+        className={styles.board}
+        ref={boardRef}
+        style={{ height: scale * (s.settled ? BOARD_H_SETTLED : BOARD_H) }}
+      >
         <div
           className={styles.stage}
-          style={{ width: BOARD_W, height: BOARD_H, transform: `scale(${scale})` }}
+          style={{
+            width: BOARD_W,
+            height: s.settled ? BOARD_H_SETTLED : BOARD_H,
+            transform: `scale(${scale})`,
+          }}
         >
           {s.cards.map((c) => (
             <div
@@ -552,6 +600,7 @@ export function WorkTogetherDemo() {
             placement="home-section"
             className={styles.cta}
             style={{
+              top: CTA_Y,
               opacity: s.ctaP,
               transform: `translate(-50%, calc(-50% + ${(1 - ease(s.ctaP)) * 12}px))`,
               pointerEvents: s.ctaLive ? 'auto' : 'none',
@@ -560,6 +609,25 @@ export function WorkTogetherDemo() {
           >
             Explore Multiplayer AI
           </LandingLink>
+          {!reduced && (
+            <button
+              type="button"
+              className={styles.replay}
+              style={{
+                top: REPLAY_Y,
+                opacity: s.replayOp * 0.8,
+                pointerEvents: s.replayOp > 0 ? 'auto' : 'none',
+              }}
+              tabIndex={s.replayOp > 0 ? undefined : -1}
+              onClick={() => {
+                reset();
+                play();
+              }}
+            >
+              <RotateCcw size={14} aria-hidden />
+              Play again
+            </button>
+          )}
         </div>
       </div>
 
@@ -584,22 +652,6 @@ export function WorkTogetherDemo() {
           Explore Multiplayer AI <span aria-hidden="true">→</span>
         </LandingLink>
       </div>
-
-      {!reduced && (
-        <button
-          type="button"
-          className={styles.replay}
-          style={{ opacity: s.replayOp * 0.8, pointerEvents: s.replayOp > 0 ? 'auto' : 'none' }}
-          tabIndex={s.replayOp > 0 ? undefined : -1}
-          onClick={() => {
-            reset();
-            play();
-          }}
-        >
-          <RotateCcw size={14} aria-hidden />
-          Play again
-        </button>
-      )}
     </div>
   );
 }
