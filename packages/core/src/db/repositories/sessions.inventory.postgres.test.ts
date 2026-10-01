@@ -65,6 +65,9 @@ describe.skipIf(!url || process.env.AGOR_DB_DIALECT !== 'postgresql')(
           expect(
             await repository.findPage({ visibleToUserId, boardId: foreign.boardId, limit: 0 })
           ).toEqual({ total: 0, data: [] });
+          expect(
+            await repository.findPage({ visibleToUserId, createdBy: foreign.owner, limit: 100 })
+          ).toEqual({ total: 0, data: [] });
           expect(await repository.findAll({ visibleToUserId, branchId: foreign.branchId })).toEqual(
             []
           );

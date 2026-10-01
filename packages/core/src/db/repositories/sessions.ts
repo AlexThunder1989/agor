@@ -11,6 +11,7 @@ import type {
   Session,
   SessionID,
   SessionUpdate,
+  UserID,
   UUID,
 } from '@agor/core/types';
 import { SessionStatus } from '@agor/core/types';
@@ -126,6 +127,8 @@ export interface SessionPageOptions {
   boardId?: string;
   branchId?: BranchID;
   branchIds?: BranchID[];
+  /** Restrict to sessions created by this user (a filter, never an access grant). */
+  createdBy?: UserID;
   archived?: boolean;
   sortUpdatedAt?: 1 | -1;
   sortCreatedAt?: 1 | -1;
@@ -612,6 +615,7 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
       if (opts.branchId !== undefined) conditions.push(eq(sessions.branch_id, opts.branchId));
       if (opts.branchIds !== undefined)
         conditions.push(inArray(sessions.branch_id, opts.branchIds));
+      if (opts.createdBy !== undefined) conditions.push(eq(sessions.created_by, opts.createdBy));
       if (opts.archived !== undefined) conditions.push(eq(sessions.archived, opts.archived));
       if (opts.visibleToUserId) {
         conditions.push(

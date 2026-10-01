@@ -169,6 +169,51 @@ describe('SessionsService.find — board_id pushdown', () => {
   );
 
   dbTest(
+    'serves a regular user created_by query on the SQL path, recency-sorted and RBAC-scoped',
+    async ({ db }) => {
+      const user = await new UsersRepository(db).create({
+        user_id: generateId(),
+        email: `mine-${generateId()}@example.invalid`,
+        role: 'member',
+      });
+      const visibleBranch = await createBranchOnBoard(db, null, user.user_id);
+      const hiddenBranch = await createBranchOnBoard(db, null);
+      const older = await createSession(db, visibleBranch, { created_by: user.user_id });
+      await createSession(db, visibleBranch); // someone else's session on my branch
+      // My session on a branch I can no longer see stays hidden: a filter, not a grant.
+      await createSession(db, hiddenBranch, { created_by: user.user_id });
+      const newer = await createSession(db, visibleBranch, { created_by: user.user_id });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await new SessionRepository(db).update(older, { title: 'touched' });
+      const app = feathers<{ sessions: SessionsService }>();
+      app.use('sessions', createService(db));
+      app.service('sessions').hooks({
+        before: {
+          all: [typedValidateQuery(sessionQueryValidator)],
+          find: [scopeFindToAccessibleSessionsSql()],
+        },
+      });
+      const findAllSpy = vi.spyOn(SessionRepository.prototype, 'findAll');
+      for (const provider of ['socketio', 'rest']) {
+        const result = await app.service('sessions').find({
+          provider,
+          user,
+          query: {
+            created_by: user.user_id,
+            archived: false,
+            $sort: { updated_at: -1 },
+            $limit: 100,
+            $count: provider === 'rest' ? 'false' : false,
+          },
+        });
+        expect(orderedIds(result)).toEqual([older, newer]);
+      }
+      // The SQL page path never loads the caller's whole visible inventory.
+      expect(findAllSpy).not.toHaveBeenCalled();
+    }
+  );
+
+  dbTest(
     'lets bounded consumers opt out of exact counts without changing default pagination',
     async ({ db }) => {
       const service = createService(db);
