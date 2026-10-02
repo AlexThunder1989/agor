@@ -124,6 +124,29 @@ export function markBoardPartitionLoaded(
   });
 }
 
+// The boards the UI currently displays (registered by `useBoardPartition`), in
+// registration order. The UI resolves its board from far more than the URL
+// (artifact routes, the mobile shell's fallbacks), so a reconnect resync
+// reconciles THIS board rather than re-deriving one from the URL.
+const displayedBoards = new Map<number, string>();
+let displayedSequence = 0;
+
+/** Record that the UI displays `boardId`; returns the unregister function. */
+export function registerDisplayedBoard(boardId: string): () => void {
+  const key = ++displayedSequence;
+  displayedBoards.set(key, boardId);
+  return () => {
+    displayedBoards.delete(key);
+  };
+}
+
+/** The board the UI displays (the most recently registered one), if any. */
+export function getDisplayedBoardId(): string | undefined {
+  let latest: string | undefined;
+  for (const boardId of displayedBoards.values()) latest = boardId;
+  return latest;
+}
+
 /** Forget a failed partition so `useBoardPartition` loads it again. */
 export function retryBoardPartition(boardId: string): void {
   const state = agorStore.getState().boardPartitions.get(boardId);

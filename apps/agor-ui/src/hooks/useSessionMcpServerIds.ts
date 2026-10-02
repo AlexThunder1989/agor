@@ -22,13 +22,17 @@ export function useSessionMcpServerIds(
     useAgorStore(useMemo(() => makeSessionMcpServerIdsSelector(sessionId), [sessionId])) ??
     EMPTY_IDS;
   const loaded = useAgorStore((s) => (sessionId ? s.sessionMcpLoaded.has(sessionId) : false));
-  // Loads capture the realtime authority, which exists once first paint ran.
   const firstPaintSettled = useAgorStore((s) => !s.loading);
+  // Re-run when a load becomes possible again (an authenticated reconnect)
+  // or a reset superseded a read in flight (it then applies nothing).
+  const authority = useAgorStore((s) => s.dataAuthority);
+  const epoch = useAgorStore((s) => s.sessionMcpEpoch);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: authority and epoch are re-run triggers
   useEffect(() => {
-    if (!client || !sessionId || loaded || !firstPaintSettled) return;
+    if (!client || !sessionId || loaded || !firstPaintSettled || !authority) return;
     void loadSessionMcpServerIds(client, sessionId);
-  }, [client, sessionId, loaded, firstPaintSettled]);
+  }, [client, sessionId, loaded, firstPaintSettled, authority, epoch]);
 
   return { ids, loaded };
 }

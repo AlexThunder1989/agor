@@ -20,7 +20,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { getRevision } from '../store/agorHydration';
 import { agorStore } from '../store/agorStore';
-import { markBoardPartitionLoaded } from '../store/boardPartitions';
+import { markBoardPartitionLoaded, registerDisplayedBoard } from '../store/boardPartitions';
 import { captureLoadLifetime } from '../store/loadLifetime';
 // Session `patched`/`updated` writes are coalesced to one flush per frame (see
 // realtimeBatch); flush synchronously in tests that assert the post-patch store.
@@ -2151,5 +2151,34 @@ describe('useAgorData — reconnect reconciles the displayed partition', () => {
     expect(fetchCount('board-objects', 'findAll')).toBe(before.objects);
     expect(fetchCount('cards', 'findAll')).toBe(before.cards);
     expect(agorStore.getState().boardPartitions.size).toBe(0);
+  });
+});
+
+describe('useAgorData — reconnect follows the board the UI displays', () => {
+  it('reconciles an artifact route board (resolved by the UI, not the URL)', async () => {
+    window.history.pushState({}, '', '/a/01a0fdaa/');
+    onTestFinished(() => window.history.pushState({}, '', '/'));
+    const board = { board_id: 'board-art', slug: 'art', name: 'Artifact board' };
+    const seed: Record<string, unknown[]> = {
+      boards: [board],
+      'boards:get': { ...board, objects: { z: { type: 'zone' } } } as never,
+      cards: [{ card_id: 'k-1', board_id: 'board-art', title: 'one' }],
+    };
+    const { client, emitIo, fetchArguments } = makeMockClient(seed);
+    const { result } = renderHook(() => useAgorData(client));
+    await waitForInitialLoad(result);
+    await flush();
+    // The UI resolved the artifact's board and shows it (useBoardPartition).
+    const unregister = registerDisplayedBoard('board-art');
+    onTestFinished(unregister);
+
+    act(() => emitIo('connect'));
+    await waitFor(() =>
+      expect(agorStore.getState().boardPartitions.get('board-art')?.status).toBe('loaded')
+    );
+    expect(fetchArguments('cards', 'findAll').at(-1)).toMatchObject({
+      query: { board_id: 'board-art' },
+    });
+    expect(agorStore.getState().boardById.get('board-art')?.objects).toBeDefined();
   });
 });

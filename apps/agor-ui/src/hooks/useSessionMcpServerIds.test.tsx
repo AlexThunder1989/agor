@@ -52,4 +52,48 @@ describe('useSessionMcpServerIds', () => {
     expect(result.current).toEqual({ ids: [], loaded: false });
     expect(find).not.toHaveBeenCalled();
   });
+
+  it('reloads once the authority becomes valid again (an authenticated reconnect)', async () => {
+    const { client, find } = makeClient([{ session_id: 's-1', mcp_server_id: 'a' }]);
+    agorStore.getState().setLoading(false);
+    const { result } = renderHook(() => useSessionMcpServerIds(client, 's-1'));
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+
+    // Disconnect: the authority goes away and every session is unloaded.
+    act(() => {
+      setRealtimeAuthorityScope(null);
+      resetSessionMcpLinks();
+    });
+    expect(result.current.loaded).toBe(false);
+    expect(find).toHaveBeenCalledTimes(1);
+
+    act(() => setRealtimeAuthorityScope('user-a:member:2'));
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(find).toHaveBeenCalledTimes(2);
+  });
+
+  it('reloads when a reset supersedes a read still in flight', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const find = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        await gate;
+        return [{ session_id: 's-1', mcp_server_id: 'a' }];
+      })
+      .mockResolvedValue([{ session_id: 's-1', mcp_server_id: 'a' }]);
+    const client = { service: () => ({ find }) } as unknown as AgorClient;
+    agorStore.getState().setLoading(false);
+    const { result } = renderHook(() => useSessionMcpServerIds(client, 's-1'));
+    await waitFor(() => expect(find).toHaveBeenCalledTimes(1));
+
+    // A reconnect resync resets the links while the first read is in flight:
+    // that read applies nothing, so the hook must read again.
+    act(() => resetSessionMcpLinks());
+    await act(async () => release());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(find).toHaveBeenCalledTimes(2);
+  });
 });

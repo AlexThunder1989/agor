@@ -127,6 +127,15 @@ interface AgorMeta {
    * session `sessionMcpServerIds` may be partial: "not loaded" is not "none".
    */
   sessionMcpLoaded: Set<string>;
+  /** Bumped by every `resetSessionMcpLoaded`; a read from an older epoch applies nothing. */
+  sessionMcpEpoch: number;
+  /**
+   * The realtime authority scope (identity, role, auth generation) loads run
+   * under, or null while there is none (signed out, disconnected, reauth).
+   * Mirrored from `setRealtimeAuthorityScope` so on-demand loaders (board
+   * partitions, session MCP links) re-run when it becomes valid again.
+   */
+  dataAuthority: string | null;
 }
 
 type AgorMetaWithUserScope = AgorMeta & UserScopeMeta;
@@ -191,8 +200,10 @@ interface AgorActions {
   markGloballyHydrated: (collections: readonly string[]) => void;
   /** Record that one session's MCP links are loaded. */
   markSessionMcpLoaded: (sessionId: string) => void;
-  /** Forget which sessions' MCP links are loaded (reconnect, authority change). */
+  /** Forget which sessions' MCP links are loaded and bump their epoch. */
   resetSessionMcpLoaded: () => void;
+  /** Mirror the realtime authority scope (see `dataAuthority`). */
+  setDataAuthority: (authority: string | null) => void;
   /** Mirror archive visibility while retaining the persisted board placement. */
   evictArchivedBranch: (branchId: string) => void;
   /** Atomically mirror every normalized FK cascade/SET NULL from a hard delete. */
@@ -263,6 +274,8 @@ const INITIAL_META: AgorMetaWithUserScope = {
   boardPartitions: new Map(),
   globallyHydrated: new Set(),
   sessionMcpLoaded: new Set(),
+  sessionMcpEpoch: 0,
+  dataAuthority: null,
 };
 
 export const agorStore = createStore<AgorState>()(
@@ -368,8 +381,10 @@ export const agorStore = createStore<AgorState>()(
       if (current.has(sessionId)) return;
       set({ sessionMcpLoaded: new Set(current).add(sessionId) });
     },
-    resetSessionMcpLoaded: () => {
-      if (get().sessionMcpLoaded.size > 0) set({ sessionMcpLoaded: new Set() });
+    resetSessionMcpLoaded: () =>
+      set({ sessionMcpLoaded: new Set(), sessionMcpEpoch: get().sessionMcpEpoch + 1 }),
+    setDataAuthority: (authority) => {
+      if (authority !== get().dataAuthority) set({ dataAuthority: authority });
     },
 
     setMap: (key, value) => {

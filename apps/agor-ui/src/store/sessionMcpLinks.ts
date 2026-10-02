@@ -66,9 +66,9 @@ export function mergeSessionMcpSnapshot(
 }
 
 const inflight = new Map<string, Promise<void>>();
-// Bumped with every `resetSessionMcpLinks`, so a read that started before a
-// reconnect resync never marks its session loaded afterwards.
-let generation = 0;
+// A read that started before a reset (`sessionMcpEpoch`) never marks its
+// session loaded afterwards; the epoch is reactive, so readers re-run.
+const epoch = () => agorStore.getState().sessionMcpEpoch;
 
 /**
  * Forget which sessions are loaded (a reconnect may have missed link events;
@@ -76,7 +76,6 @@ let generation = 0;
  * screen; mounted readers reload and their edit controls wait meanwhile.
  */
 export function resetSessionMcpLinks(): void {
-  generation += 1;
   agorStore.getState().resetSessionMcpLoaded();
 }
 
@@ -89,12 +88,12 @@ export function loadSessionMcpServerIds(client: AgorClient, sessionId: string): 
   // Captured before the first await, like every load (see `loadLifetime`).
   const lifetime = captureLoadLifetime();
   if (!lifetime) return Promise.resolve();
-  const loadGeneration = generation;
+  const loadGeneration = epoch();
   const key = `${lifetime.authorityScope}\u0000${lifetime.loadEpoch}\u0000${loadGeneration}\u0000${sessionId}`;
   const existing = inflight.get(key);
   if (existing) return existing;
 
-  const isCurrent = () => isLoadLifetimeCurrent(lifetime) && loadGeneration === generation;
+  const isCurrent = () => isLoadLifetimeCurrent(lifetime) && loadGeneration === epoch();
   const run = async () => {
     const fence = beginPartitionLoad();
     try {

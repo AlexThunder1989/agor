@@ -56,7 +56,11 @@ import {
 } from '../store/agorMaps';
 import * as realtime from '../store/agorRealtimeActions';
 import { agorStore, shallow, useStoreWithEqualityFn } from '../store/agorStore';
-import { markBoardPartitionLoaded, otherLoadedScopes } from '../store/boardPartitions';
+import {
+  getDisplayedBoardId,
+  markBoardPartitionLoaded,
+  otherLoadedScopes,
+} from '../store/boardPartitions';
 import {
   captureLoadLifetime,
   isLoadLifetimeCurrent,
@@ -872,16 +876,21 @@ export function useAgorData(
           openedTranscriptReady = prefetch.ready;
         }
 
-        // A reconnect resync resolves it too: the displayed board's partition
-        // is reconciled in place, every other board is unloaded (below). It
-        // chains through the live branches, which the resync replaces.
+        // A reconnect resync reconciles the board the UI actually displays
+        // (`useBoardPartition` registers it: artifact routes and the mobile
+        // shell's fallbacks resolve boards the URL alone can't) in place, and
+        // unloads every other board (below). First paint runs before the UI
+        // mounts, so it resolves from the URL.
+        const displayedBoardId = silent ? getDisplayedBoardId() : undefined;
         const boardScope =
+          (displayedBoardId && boardsMap.has(displayedBoardId) ? displayedBoardId : null) ??
           resolveDisplayedBoardId(
             pathname,
             boardsMap,
             silent ? agorStore.getState().branchById : interimBranchById,
             interimSessionById
-          ) ?? undefined;
+          ) ??
+          undefined;
         // No displayed board (Home): board objects and cards are not read.
         const deferAnnotations = !boardScope;
         if (deferAnnotations && !silent) setInitialLoadPlan(HOME_INITIAL_LOAD_KEYS);

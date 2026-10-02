@@ -395,6 +395,8 @@ export function untombstoneSession(authorityScope: string, sessionId: string): v
  * before its map reset and before the previous subscription's passive cleanup.
  */
 export function setRealtimeAuthorityScope(authorityScope: string | null): void {
+  // Before the early return: a store reset (remount) clears the mirror.
+  agorStore.getState().setDataAuthority(authorityScope);
   if (activeAuthorityScope === authorityScope) return;
   authorityCancellation.abort();
   authorityCancellation = new AbortController();

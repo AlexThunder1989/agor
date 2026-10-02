@@ -83,4 +83,22 @@ describe('useBoardPartition', () => {
     );
     expect(unknown.result.current.boardReady).toBe(true);
   });
+
+  it('loads once the authority becomes valid again (an authenticated reconnect)', async () => {
+    // The disconnect: no authority, and the transition unloaded every board.
+    setRealtimeAuthorityScope(null);
+    const { client, sessionReads, releaseAll } = makeClient();
+    const { result } = renderHook(() =>
+      useBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true })
+    );
+    await act(async () => {});
+    expect(sessionReads()).toBe(0);
+    expect(result.current.boardReady).toBe(false);
+
+    // Reauthenticated under a new generation: nothing else re-renders the hook.
+    act(() => setRealtimeAuthorityScope('user-a:member:2'));
+    await waitFor(() => expect(sessionReads()).toBe(1));
+    await act(async () => releaseAll());
+    await waitFor(() => expect(result.current.boardReady).toBe(true));
+  });
 });

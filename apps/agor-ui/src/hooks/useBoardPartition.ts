@@ -6,6 +6,7 @@ import {
   loadBoardPartition,
   makeBoardPartitionSelector,
   makeBoardReadySelector,
+  registerDisplayedBoard,
   retryBoardPartition,
 } from '../store/boardPartitions';
 
@@ -26,6 +27,10 @@ export function useBoardPartition(
   const status = partition?.status;
   const boardKnown = useAgorStore((s) => (boardId ? s.boardById.has(boardId) : false));
   const firstPaintSettled = useAgorStore((s) => !s.loading);
+  // Loads run under the realtime authority: none while disconnected or
+  // reauthenticating. A reconnect unloads every board, so the displayed one
+  // loads again once the authority is valid (nothing else re-renders this).
+  const authority = useAgorStore((s) => s.dataAuthority);
   const { canUseMemberWorkspaceServices } = options;
   // Nothing to load without a board, or for one that doesn't exist (boards
   // are global and gated, so after first paint an unknown id never resolves):
@@ -33,7 +38,7 @@ export function useBoardPartition(
   const boardReady = partitionReady || !boardId || (firstPaintSettled && !boardKnown);
 
   useEffect(() => {
-    if (!client || !boardId || !boardKnown || !firstPaintSettled) return;
+    if (!client || !boardId || !boardKnown || !firstPaintSettled || !authority) return;
     if (partitionReady) return;
     // An entry from another authority or load lifetime can never settle: it
     // counts as unloaded (authority transitions also forget every entry).
@@ -48,7 +53,15 @@ export function useBoardPartition(
     client,
     firstPaintSettled,
     status,
+    authority,
   ]);
+
+  // Publish the displayed board, so a reconnect resync reconciles this board
+  // in place (see `registerDisplayedBoard`).
+  useEffect(() => {
+    if (!boardId || !boardKnown) return;
+    return registerDisplayedBoard(boardId);
+  }, [boardId, boardKnown]);
 
   // A failed load retries automatically once the socket reconnects.
   useEffect(() => {
