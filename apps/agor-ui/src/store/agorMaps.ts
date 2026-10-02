@@ -165,19 +165,6 @@ export function buildById<T extends object>(
   return reconcileByIdMap(prev, map);
 }
 
-// Group session-MCP relationship rows by session_id.
-export function buildSessionMcpMap(
-  list: readonly { session_id: string; mcp_server_id: string }[]
-): Map<string, string[]> {
-  const map = new Map<string, string[]>();
-  for (const relationship of list) {
-    const ids = map.get(relationship.session_id);
-    if (ids) ids.push(relationship.mcp_server_id);
-    else map.set(relationship.session_id, [relationship.mcp_server_id]);
-  }
-  return map;
-}
-
 // Derived board-object index set, built once from a fetched list. Shared by
 // the essential (board-scoped, first-paint) index build and the background
 // full-hydration pass — single source of truth so the two can't diverge.

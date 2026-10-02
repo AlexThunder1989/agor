@@ -5,7 +5,7 @@ import { SESSION_LIST_ROW_SHAPE } from '@agor-live/client';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Form } from 'antd';
 import type React from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectionProvider } from '../../contexts/ConnectionContext';
 import { SessionSettingsModal } from './SessionSettingsModal';
 
@@ -16,7 +16,11 @@ vi.mock('../../store/agorStore', () => ({
 }));
 vi.mock('../../store/selectors', () => ({
   selectMcpServerById: () => new Map(),
-  selectSessionMcpServerIds: () => new Map(),
+}));
+// This session's MCP links as the per-session loader reports them.
+const mcpLinks = vi.hoisted(() => ({ value: { ids: [] as string[], loaded: true } }));
+vi.mock('../../hooks/useSessionMcpServerIds', () => ({
+  useSessionMcpServerIds: () => mcpLinks.value,
 }));
 vi.mock('../../utils/message', () => ({ useThemedMessage: () => ({ showError: vi.fn() }) }));
 vi.mock('../AgenticToolConfigurationPicker', () => ({
@@ -25,10 +29,16 @@ vi.mock('../AgenticToolConfigurationPicker', () => ({
 }));
 // Chip-row stub that drives the shared `agenticToolPresetId` field.
 vi.mock('../AgenticConfigChipRow', () => ({
-  AgenticConfigChipRow: ({ showEffort = true }: { showEffort?: boolean }) => {
+  AgenticConfigChipRow: ({
+    showEffort = true,
+    mcpLoading = false,
+  }: {
+    showEffort?: boolean;
+    mcpLoading?: boolean;
+  }) => {
     const form = Form.useFormInstance();
     return (
-      <div>
+      <div data-mcp-loading={String(mcpLoading)} data-testid="chip-row">
         {showEffort && <div data-testid="effort-chip" />}
         <Form.Item name="agenticToolPresetId" hidden>
           <input />
@@ -108,6 +118,53 @@ const codexSession = {
 } as unknown as Session;
 
 describe('SessionSettingsModal configuration', { timeout: 10_000 }, () => {
+  beforeEach(() => {
+    mcpLinks.value = { ids: [], loaded: true };
+  });
+
+  it('never sends an MCP diff while the session links are loading', async () => {
+    // Only a realtime event's link is in the store; the server has more.
+    mcpLinks.value = { ids: ['partial'], loaded: false };
+    const onClose = vi.fn();
+    const onUpdateSessionMcpServers = vi.fn();
+    render(
+      <SessionSettingsModal
+        open
+        onClose={onClose}
+        session={claudeSession}
+        client={null}
+        currentUser={null}
+        onUpdateSessionMcpServers={onUpdateSessionMcpServers}
+      />
+    );
+    expect(screen.getByTestId('chip-row')).toHaveAttribute('data-mcp-loading', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(onUpdateSessionMcpServers).not.toHaveBeenCalled();
+  });
+
+  it('seeds the MCP field when the links load while open, so saving keeps them', async () => {
+    mcpLinks.value = { ids: [], loaded: false };
+    const onUpdateSessionMcpServers = vi.fn();
+    const props = {
+      open: true,
+      onClose: vi.fn(),
+      session: claudeSession,
+      client: null,
+      currentUser: null,
+      onUpdateSessionMcpServers,
+    };
+    const { rerender } = render(<SessionSettingsModal {...props} />);
+
+    mcpLinks.value = { ids: ['a', 'b'], loaded: true };
+    rerender(<SessionSettingsModal {...props} />);
+    expect(screen.getByTestId('chip-row')).toHaveAttribute('data-mcp-loading', 'false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(onUpdateSessionMcpServers).toHaveBeenCalledWith('s1', ['a', 'b']));
+  });
+
   it('shows historical removed-runtime sessions as read-only', () => {
     render(
       <SessionSettingsModal

@@ -41,6 +41,7 @@ import { useFaviconStatus } from '../../hooks/useFaviconStatus';
 import { useLocalStorage } from '../../hooks/useLocalStorage';
 import { usePermissionDecision } from '../../hooks/usePermissionDecision';
 import { useRecentBoards } from '../../hooks/useRecentBoards';
+import { useSessionMcpServerIds } from '../../hooks/useSessionMcpServerIds';
 import { useSettingsRoute } from '../../hooks/useSettingsRoute';
 import { useStableCallback } from '../../hooks/useStableCallback';
 import { useTaskCompletionChime } from '../../hooks/useTaskCompletionChime';
@@ -54,7 +55,6 @@ import {
   makeCommentMentionSelector,
   makeRepoSelector,
   makeSessionExistsSelector,
-  makeSessionMcpServerIdsSelector,
   makeSessionSelector,
   makeSessionsForBranchSelector,
   makeUnreadCommentCountSelector,
@@ -284,10 +284,7 @@ export interface AppProps {
   uploadPolicy?: import('@agor/core/types').UploadIngressPolicy;
 }
 
-// Stable empty-array sentinel: keeps prop refs equal across renders for the
-// common no-MCP case so that downstream React.memo bailouts are not defeated.
-// Frozen at runtime; the consuming components only read it.
-const EMPTY_STRING_ARRAY: string[] = Object.freeze([] as string[]) as string[];
+// Stable empty-array sentinel; frozen at runtime, consumers only read it.
 const EMPTY_BOARDS: Board[] = Object.freeze([] as Board[]) as Board[];
 const EMPTY_SESSIONS: Session[] = Object.freeze([] as Session[]) as Session[];
 
@@ -1171,13 +1168,11 @@ export const App: React.FC<AppProps> = ({
     useAgorStore(
       useMemo(() => makeBranchSelector(selectedSessionBranchId), [selectedSessionBranchId])
     ) ?? null;
-  const selectedSessionMcpServerIds =
-    useAgorStore(
-      useMemo(
-        () => makeSessionMcpServerIdsSelector(effectiveSelectedSessionId),
-        [effectiveSelectedSessionId]
-      )
-    ) ?? EMPTY_STRING_ARRAY;
+  // Loaded on first need; the footer's edit control waits for it.
+  const { ids: selectedSessionMcpServerIds } = useSessionMcpServerIds(
+    client,
+    effectiveSelectedSessionId
+  );
 
   // Narrow per-id subscription for the quick-start picker's branch — only
   // patches to that specific branch (or a socket-in-flight arrival) wake the

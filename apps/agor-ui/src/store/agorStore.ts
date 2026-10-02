@@ -128,6 +128,11 @@ interface AgorMeta {
   boardPartitions: Map<string, BoardPartitionState>;
   /** Collections whose global snapshot has applied at least once. */
   globallyHydrated: Set<GloballyHydratedCollection>;
+  /**
+   * Sessions whose MCP links are loaded (`sessionMcpLinks.ts`). For any other
+   * session `sessionMcpServerIds` may be partial: "not loaded" is not "none".
+   */
+  sessionMcpLoaded: Set<string>;
 }
 
 type AgorMetaWithUserScope = AgorMeta & UserScopeMeta;
@@ -190,6 +195,10 @@ interface AgorActions {
   resetBoardPartitions: () => void;
   /** Record that a global snapshot of these collections has applied. */
   markGloballyHydrated: (collections: readonly string[]) => void;
+  /** Record that one session's MCP links are loaded. */
+  markSessionMcpLoaded: (sessionId: string) => void;
+  /** Forget which sessions' MCP links are loaded (reconnect, authority change). */
+  resetSessionMcpLoaded: () => void;
   /** Mirror archive visibility while retaining the persisted board placement. */
   evictArchivedBranch: (branchId: string) => void;
   /** Atomically mirror every normalized FK cascade/SET NULL from a hard delete. */
@@ -259,6 +268,7 @@ const INITIAL_META: AgorMetaWithUserScope = {
   agenticToolSettingsHydrated: false,
   boardPartitions: new Map(),
   globallyHydrated: new Set(),
+  sessionMcpLoaded: new Set(),
 };
 
 export const agorStore = createStore<AgorState>()(
@@ -273,6 +283,7 @@ export const agorStore = createStore<AgorState>()(
         boardPartitions: new Map(),
         globallyHydrated: new Set(),
         absentBranchIds: new Set(),
+        sessionMcpLoaded: new Set(),
       }),
 
     // Also clear the tenant-specific tool-settings map AND its hydration flag:
@@ -288,6 +299,7 @@ export const agorStore = createStore<AgorState>()(
         // Readiness describes the maps being cleared, so it resets with them.
         boardPartitions: new Map(),
         globallyHydrated: new Set(),
+        sessionMcpLoaded: new Set(),
         ...INITIAL_USER_SCOPE,
         absentBranchIds: new Set(),
       }),
@@ -356,6 +368,14 @@ export const agorStore = createStore<AgorState>()(
       );
       if (additions.length === 0) return;
       set({ globallyHydrated: new Set([...current, ...additions]) });
+    },
+    markSessionMcpLoaded: (sessionId) => {
+      const current = get().sessionMcpLoaded;
+      if (current.has(sessionId)) return;
+      set({ sessionMcpLoaded: new Set(current).add(sessionId) });
+    },
+    resetSessionMcpLoaded: () => {
+      if (get().sessionMcpLoaded.size > 0) set({ sessionMcpLoaded: new Set() });
     },
 
     setMap: (key, value) => {

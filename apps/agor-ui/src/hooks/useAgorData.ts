@@ -52,7 +52,6 @@ import {
   buildBoardObjectMaps,
   buildById,
   buildSessionMaps,
-  buildSessionMcpMap,
   keepLiveWrites,
 } from '../store/agorMaps';
 import * as realtime from '../store/agorRealtimeActions';
@@ -80,6 +79,7 @@ import {
   tombstoneSession,
   untombstoneSession,
 } from '../store/realtimeBatch';
+import { resetSessionMcpLinks } from '../store/sessionMcpLinks';
 import {
   isUnsupportedQueryError,
   MY_SESSIONS_GATED_LIMIT,
@@ -103,10 +103,10 @@ import {
 //
 // The first paint only needs what's required to render the canvas (branch
 // cards, their sessions, cards, comments, zones). Collections that aren't
-// needed to paint — mcp-servers, session-mcp-servers, gateway-channels,
-// artifacts, and the oauth-status probe — are fetched in the BACKGROUND
-// (see `fetchData`) and intentionally absent here so the gate never waits on
-// them. Their realtime subscriptions are still attached immediately in the
+// needed to paint — mcp-servers, gateway-channels, artifacts, and the
+// oauth-status probe — are fetched in the BACKGROUND (see `fetchData`), and
+// session↔MCP links per session on first need (`sessionMcpLinks`); none of
+// them is here, so the gate never waits on them. Their realtime subscriptions are still attached immediately in the
 // subscribe effect, so live updates land even before their fetch resolves.
 const INITIAL_LOAD_ITEMS = [
   { key: 'sessions', label: 'Sessions' },
@@ -631,18 +631,10 @@ export function useAgorData(
             agorStore.getState().markHydrated('mcpServersHydrated');
           }
         );
-        void runAuthorityHydration(
-          'session-mcp-servers',
-          ['sessionMcp'],
-          () =>
-            client
-              .service('session-mcp-servers')
-              .findAll({ query: { $limit: PAGINATION.DEFAULT_LIMIT } }),
-          (list) =>
-            agorStore
-              .getState()
-              .applyMaps((prev) => ({ ...prev, sessionMcpServerIds: buildSessionMcpMap(list) }))
-        );
+        // Session↔MCP links are not read here: each session's load on first
+        // need (`sessionMcpLinks`). A resync may have missed link events, so
+        // every session counts as unloaded again and mounted readers reload.
+        if (silent) resetSessionMcpLinks();
         void runAuthorityHydration(
           'gateway-channels',
           ['gatewayChannels'],
@@ -1107,9 +1099,10 @@ export function useAgorData(
         // Merge the essential slices in one atomic update. We spread `prev`
         // (rather than replacing the whole object) so the BACKGROUND-managed
         // slices — mcpServerById / gatewayChannelById / artifactById /
-        // sessionMcpServerIds / userAuthenticatedMcpServerIds — survive even if
-        // their fire-and-forget fetches resolved before this gate did. Those
-        // slices are owned by their background setters + realtime handlers.
+        // userAuthenticatedMcpServerIds — survive even if their fire-and-forget
+        // fetches resolved before this gate did, and so do the per-session
+        // `sessionMcpServerIds`. Those slices are owned by their own loaders
+        // and the realtime handlers.
         agorStore.getState().applyMaps((prev) => ({
           ...prev,
           sessionById: sessionsById,
@@ -1424,6 +1417,8 @@ export function useAgorData(
     cancelAllHydrations();
     releaseOpenedTranscriptPrefetch();
     stopUserScope();
+    // Which session↔MCP links are visible depends on the caller.
+    resetSessionMcpLinks();
     // Partition loads of the old authority are orphaned by the cancellation;
     // forget their entries so the displayed board loads again under this one.
     agorStore.getState().resetBoardPartitions();
