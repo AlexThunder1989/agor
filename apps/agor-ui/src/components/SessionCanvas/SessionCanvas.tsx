@@ -3363,6 +3363,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
             card={selectedCard}
             board={board}
             readOnlyReason={boardReady ? undefined : 'This board is still loading.'}
+            requireLoadedBoard
             zoneName={
               selectedCard
                 ? (() => {

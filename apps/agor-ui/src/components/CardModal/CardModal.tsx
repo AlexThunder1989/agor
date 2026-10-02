@@ -25,7 +25,9 @@ import {
 } from '@ant-design/icons';
 import { Button, Collapse, Input, Modal, Space, Tag, Tooltip, Typography, theme } from 'antd';
 import React, { useCallback, useEffect, useState } from 'react';
+import { useBoardMutationGuard } from '../../hooks/useBoardMutationGuard';
 import { useAgorStore } from '../../store/agorStore';
+import type { BoardWriteTicket } from '../../store/boardMutationGuard';
 import { selectBranchById } from '../../store/selectors';
 import { useThemedMessage } from '../../utils/message';
 import { isSafeExternalUrl } from '../../utils/safeExternalUrl';
@@ -51,6 +53,11 @@ interface CardModalProps {
    * loading, so the card shown may be stale).
    */
   readOnlyReason?: string;
+  /**
+   * The card shows its board's partition data (the canvas): edits need the
+   * partition loaded, and a reload while the modal is open makes it read-only.
+   */
+  requireLoadedBoard?: boolean;
 }
 
 const CardModalComponent = ({
@@ -65,6 +72,7 @@ const CardModalComponent = ({
   onCardUpdated,
   onCardDeleted,
   readOnlyReason,
+  requireLoadedBoard = false,
 }: CardModalProps) => {
   const { token } = theme.useToken();
   const { showSuccess, showError } = useThemedMessage();
@@ -114,15 +122,34 @@ const CardModalComponent = ({
     };
   }, [open, client, boardId]);
 
-  const canEdit = !readOnlyReason && Boolean(boardAccess?.capabilities.includes('board.edit'));
+  // The board write guard (`useBoardMutationGuard`). The ticket is captured
+  // when the modal opens on a card; every write, including those confirmed in
+  // a dialog, checks it immediately before dispatching. A board reload or a
+  // lost connection while the modal is open ends it: reopen to edit.
+  const guard = useBoardMutationGuard(boardId, true, { requirePartition: requireLoadedBoard });
+  const [ticket, setTicket] = useState<BoardWriteTicket | null>(null);
+  const cardId = card?.card_id;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: captured on open, per card
+  useEffect(() => {
+    setTicket(open && cardId ? guard.capture() : null);
+  }, [open, cardId]);
+  const ticketCurrent = guard.isCurrent(ticket);
+
+  const hasEditAccess = Boolean(boardAccess?.capabilities.includes('board.edit'));
+  const canEdit = !readOnlyReason && hasEditAccess && ticketCurrent;
   const editBlockedReason = canEdit
     ? undefined
-    : (readOnlyReason ?? "You don't have Board Editor or Manager access to change this card.");
+    : (readOnlyReason ??
+      (!hasEditAccess
+        ? "You don't have Board Editor or Manager access to change this card."
+        : !guard.canMutate
+          ? 'This board is unavailable for edits right now.'
+          : 'This board reloaded while the card was open. Reopen it to edit.'));
 
   const hasChanges = noteValue !== (card?.note || '') || descValue !== (card?.description || '');
 
   const handleSave = useCallback(async () => {
-    if (!card || !client || !hasChanges || !canEdit) return;
+    if (!card || !client || !hasChanges || !canEdit || !guard.isCurrent(ticket)) return;
     setSaving(true);
     try {
       const updated = await client.service('cards').patch(card.card_id, {
@@ -146,6 +173,8 @@ const CardModalComponent = ({
     descValue,
     hasChanges,
     canEdit,
+    guard,
+    ticket,
     onCardUpdated,
     showSuccess,
     showError,
@@ -158,6 +187,14 @@ const CardModalComponent = ({
       content: `This will hide "${card.title}" from the board while preserving its data.`,
       okText: 'Archive',
       onOk: async () => {
+        // The board may have reloaded, or the connection dropped, while the
+        // confirmation was open.
+        if (!guard.isCurrent(ticket)) {
+          guard.warnDropped(
+            'The card was not archived: the board reloaded or the connection dropped.'
+          );
+          return;
+        }
         try {
           const updated = await client.service('cards').patch(card.card_id, {
             archived: true,
@@ -172,7 +209,7 @@ const CardModalComponent = ({
         }
       },
     });
-  }, [card, client, canEdit, onCardUpdated, onClose, showSuccess, showError]);
+  }, [card, client, canEdit, guard, ticket, onCardUpdated, onClose, showSuccess, showError]);
 
   const handleDelete = useCallback(async () => {
     if (!card || !client || !canEdit) return;
@@ -182,6 +219,12 @@ const CardModalComponent = ({
       okText: 'Delete',
       okType: 'danger',
       onOk: async () => {
+        if (!guard.isCurrent(ticket)) {
+          guard.warnDropped(
+            'The card was not deleted: the board reloaded or the connection dropped.'
+          );
+          return;
+        }
         try {
           await client.service('cards').remove(card.card_id);
           onCardDeleted?.(card.card_id);
@@ -193,7 +236,7 @@ const CardModalComponent = ({
         }
       },
     });
-  }, [card, client, canEdit, onCardDeleted, onClose, showSuccess, showError]);
+  }, [card, client, canEdit, guard, ticket, onCardDeleted, onClose, showSuccess, showError]);
 
   if (!card) return null;
 

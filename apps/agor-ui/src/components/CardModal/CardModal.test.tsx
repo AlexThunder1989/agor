@@ -1,12 +1,61 @@
 import type { AgorClient, Board, CardWithType } from '@agor-live/client';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { App as AntApp } from 'antd';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { App as AntApp, Modal } from 'antd';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ConnectionProvider } from '../../contexts/ConnectionContext';
+import { agorStore } from '../../store/agorStore';
 import CardModal from './CardModal';
 
-function renderWithApp(ui: React.ReactElement) {
-  return render(<AntApp>{ui}</AntApp>);
+const { showWarning } = vi.hoisted(() => ({ showWarning: vi.fn() }));
+vi.mock('../../utils/message', () => ({
+  useThemedMessage: () => ({
+    showError: vi.fn(),
+    showSuccess: vi.fn(),
+    showWarning,
+    showInfo: vi.fn(),
+    showLoading: vi.fn(),
+    destroy: vi.fn(),
+  }),
+}));
+
+const CONNECTED = {
+  connected: true,
+  connecting: false,
+  authGeneration: 1,
+  outOfSync: false,
+  capturedSha: null,
+  currentSha: null,
+};
+
+function withApp(ui: React.ReactElement, connection = CONNECTED) {
+  return (
+    <ConnectionProvider value={connection}>
+      <AntApp>{ui}</AntApp>
+    </ConnectionProvider>
+  );
 }
+
+function renderWithApp(ui: React.ReactElement, connection = CONNECTED) {
+  return render(withApp(ui, connection));
+}
+
+function loadBoard() {
+  agorStore.getState().setBoardPartition('board-1', {
+    status: 'loaded',
+    authorityScope: 'fixture',
+    loadEpoch: 0,
+  });
+}
+
+beforeEach(() => {
+  agorStore.setState({ boardPartitions: new Map() });
+  showWarning.mockClear();
+});
+
+afterEach(() => {
+  // Confirmations are static dialogs outside the render container.
+  Modal.destroyAll();
+});
 
 const board: Board = { board_id: 'board-1', name: 'Team Board' } as Board;
 
@@ -100,5 +149,96 @@ describe('CardModal permission gating', () => {
     }
     expect(screen.getByText('Archive').closest('button')).toBeDisabled();
     expect(screen.getByText('Delete').closest('button')).toBeDisabled();
+  });
+
+  it('is read-only while disconnected, even with board.edit', async () => {
+    const { client, effectiveAccessFind } = makeClient(['board.view', 'board.edit']);
+    renderWithApp(<CardModal open card={card} board={board} client={client} onClose={vi.fn()} />, {
+      ...CONNECTED,
+      connected: false,
+    });
+    await waitFor(() => expect(effectiveAccessFind).toHaveBeenCalled());
+    for (const button of screen.getAllByText('Edit').map((el) => el.closest('button'))) {
+      expect(button).toBeDisabled();
+    }
+    expect(screen.getByText('Archive').closest('button')).toBeDisabled();
+    expect(screen.getByText('Delete').closest('button')).toBeDisabled();
+  });
+
+  it.each([
+    ['Archive', 'unload'],
+    ['Archive', 'unload-reload'],
+    ['Archive', 'disconnect'],
+    ['Delete', 'unload'],
+    ['Delete', 'unload-reload'],
+    ['Delete', 'disconnect'],
+  ])(
+    'a %s confirmation opened while editable dispatches nothing after %s',
+    async (action, change) => {
+      loadBoard();
+      const { client, patch, remove, effectiveAccessFind } = makeClient([
+        'board.view',
+        'board.edit',
+      ]);
+      const ui = (connection = CONNECTED) =>
+        withApp(
+          <CardModal
+            open
+            card={card}
+            board={board}
+            client={client}
+            onClose={vi.fn()}
+            requireLoadedBoard
+          />,
+          connection
+        );
+      const view = render(ui());
+      await waitFor(() => expect(effectiveAccessFind).toHaveBeenCalled());
+      await waitFor(() => expect(screen.getByText(action).closest('button')).not.toBeDisabled());
+      fireEvent.click(screen.getByText(action).closest('button') as HTMLButtonElement);
+      expect((await screen.findAllByText(`${action} card?`)).length).toBeGreaterThan(0);
+      if (change === 'disconnect') {
+        view.rerender(ui({ ...CONNECTED, connected: false }));
+      } else {
+        act(() => {
+          agorStore.getState().resetBoardPartitions();
+          if (change === 'unload-reload') loadBoard();
+        });
+      }
+      // The confirmation's own OK button (role queries compute styles that
+      // jsdom can't parse for antd's disabled buttons).
+      const okButtons = document.querySelectorAll<HTMLButtonElement>(
+        '.ant-modal-confirm-btns button'
+      );
+      await act(async () => {
+        fireEvent.click(okButtons[okButtons.length - 1]);
+      });
+      expect(patch).not.toHaveBeenCalled();
+      expect(remove).not.toHaveBeenCalled();
+      expect(showWarning).toHaveBeenCalledWith(expect.stringMatching(/was not (archived|deleted)/));
+    }
+  );
+
+  it('a card opened before a board reload stays read-only until reopened', async () => {
+    loadBoard();
+    const { client, effectiveAccessFind } = makeClient(['board.view', 'board.edit']);
+    renderWithApp(
+      <CardModal
+        open
+        card={card}
+        board={board}
+        client={client}
+        onClose={vi.fn()}
+        requireLoadedBoard
+      />
+    );
+    await waitFor(() => expect(effectiveAccessFind).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByText('Archive').closest('button')).not.toBeDisabled());
+    act(() => {
+      agorStore.getState().resetBoardPartitions();
+      loadBoard();
+    });
+    expect(screen.getByText('Archive').closest('button')).toBeDisabled();
+    expect(screen.getByText('Save').closest('button')).toBeDisabled();
   });
 });
