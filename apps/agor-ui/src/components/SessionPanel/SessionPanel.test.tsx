@@ -1,14 +1,24 @@
-import type { AgorClient, Branch, Session, Task } from '@agor-live/client';
-import { createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { AgorClient, Branch, Session, Task, User } from '@agor-live/client';
+import { SESSION_LIST_ROW_SHAPE } from '@agor-live/client';
+import { cleanup, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App as AntApp } from 'antd';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppActionsProvider } from '../../contexts/AppActionsContext';
 import { ConnectionProvider } from '../../contexts/ConnectionContext';
+import { buildSessionMaps } from '../../store/agorMaps';
+import { agorStore } from '../../store/agorStore';
+import { setRealtimeAuthorityScope } from '../../store/realtimeBatch';
 import { MOBILE_SHELL_MAX_WIDTH } from '../../utils/deviceDetection';
 import SessionPanel from './SessionPanel';
 
+// Accounting transport has dedicated hook tests; these suites exercise panel actions/composer.
+
+const autocomplete = vi.hoisted(() => ({ props: null as Record<string, unknown> | null }));
 vi.mock('../AutocompleteTextarea', () => ({
-  AutocompleteTextarea: () => <textarea aria-label="Prompt" />,
+  AutocompleteTextarea: (props: Record<string, unknown>) => {
+    autocomplete.props = props;
+    return <textarea aria-label="Prompt" />;
+  },
 }));
 
 vi.mock('../FileUpload', () => ({
@@ -26,10 +36,6 @@ vi.mock('../ForkSpawnModal/ForkSpawnModal', () => ({
 
 vi.mock('../MCPServer', () => ({
   MCPServerPill: () => <span>MCP server</span>,
-}));
-
-vi.mock('../metadata', () => ({
-  CreatedByTag: () => <span>Created by test user</span>,
 }));
 
 vi.mock('../Pill', () => ({
@@ -271,13 +277,86 @@ describe('SessionPanel search control', () => {
     expect(getSearchRow()).toHaveStyle({ maxHeight: '0px' });
   });
 
-  it('retains the same lazy reactive-session cache key as ConversationView', () => {
+  it('does not fetch a duplicate queue in the panel', () => {
+    const service = vi.fn(() => ({ find: vi.fn(async () => ({ data: [] })) }));
+    renderPanel({ client: { service } as unknown as AgorClient });
+    expect(service.mock.calls.flat().some((name) => String(name).includes('/tasks/queue'))).toBe(
+      false
+    );
+  });
+
+  it('takes composer slash commands and skills from the full reactive session', () => {
+    const leanRow = {
+      ...session,
+      agentic_tool: 'claude-code',
+      custom_context: { teamName: 'Backend' },
+    } as unknown as Session;
+    reactive.useSharedReactiveSession.mockReturnValue({
+      state: {
+        tasks: [],
+        session: {
+          ...leanRow,
+          custom_context: { teamName: 'Backend', slash_commands: ['/review'], skills: ['pdf'] },
+        },
+      },
+    } as never);
+    try {
+      renderPanel({ activeSession: leanRow });
+
+      expect(autocomplete.props?.slashCommands).toEqual(['/review']);
+      expect(autocomplete.props?.skills).toEqual(['pdf']);
+    } finally {
+      reactive.useSharedReactiveSession.mockImplementation(() => ({
+        state: { tasks: reactive.tasks },
+      }));
+    }
+  });
+
+  it('reads composer inventories from a full store row but never from a lean one', () => {
+    const fullRow = {
+      ...session,
+      agentic_tool: 'claude-code',
+      custom_context: { slash_commands: ['/full'], skills: ['full-skill'] },
+    } as unknown as Session;
+    // The reactive session has not loaded yet.
+    renderPanel({ activeSession: fullRow });
+    expect(autocomplete.props?.slashCommands).toEqual(['/full']);
+    expect(autocomplete.props?.skills).toEqual(['full-skill']);
+    cleanup();
+
+    // A lean row is a summary: even if it somehow still carried the keys, the
+    // composer waits for the full record instead of trusting it.
+    renderPanel({
+      activeSession: { ...fullRow, read_shape: SESSION_LIST_ROW_SHAPE } as unknown as Session,
+    });
+    expect(autocomplete.props?.slashCommands).toBeUndefined();
+    expect(autocomplete.props?.skills).toBeUndefined();
+  });
+
+  it('retains the same lean reactive-session cache key as ConversationView', () => {
     renderPanel();
 
     expect(reactive.useSharedReactiveSession).toHaveBeenLastCalledWith(null, session.session_id, {
       enabled: true,
-      reactiveOptions: { taskHydration: 'lazy' },
+      reactiveOptions: { taskHydration: 'lean' },
     });
+  });
+});
+
+describe('SessionPanel header status line', () => {
+  afterEach(() => {
+    agorStore.setState({ userById: new Map() });
+  });
+
+  it('shows sentence-case status and the creator as quiet text with a tooltip', async () => {
+    const creator = { user_id: 'user-2', name: 'Kasia', email: 'kasia@example.com' } as User;
+    agorStore.setState({ userById: new Map([[creator.user_id, creator]]) });
+    renderPanel({ activeSession: { ...session, created_by: creator.user_id } as Session });
+
+    expect(screen.getByText('Idle')).toBeInTheDocument();
+    expect(screen.queryByText(/Created by/)).toBeNull();
+    fireEvent.mouseEnter(screen.getByText('Kasia'));
+    expect(await screen.findByText('Created by Kasia')).toBeInTheDocument();
   });
 });
 
@@ -557,4 +636,61 @@ describe('SessionPanel mobile header', () => {
     expect(screen.getByRole('button', { name: 'Close panel' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
   });
+});
+
+describe('SessionPanel archive feedback', () => {
+  afterEach(() => {
+    setRealtimeAuthorityScope(null);
+    agorStore.getState().reset();
+    vi.restoreAllMocks();
+  });
+
+  it.each(['read-failure', 'mutation-failure', 'confirmed'] as const)(
+    'renders the correct archive outcome for %s',
+    async (outcome) => {
+      setRealtimeAuthorityScope('tenant-a:user-a:1');
+      agorStore.getState().applyMaps((prev) => ({ ...prev, ...buildSessionMaps([session]) }));
+      const archived = { ...session, archived: true };
+      const create = vi.fn(async () => {
+        if (outcome === 'mutation-failure') throw new Error('Archive denied');
+        return { session: archived };
+      });
+      const get = vi.fn(async () => {
+        if (outcome === 'read-failure') throw new Error('Read unavailable');
+        return archived;
+      });
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const client = {
+        service: (name: string) => {
+          if (name === `sessions/${session.session_id}/archive`) return { create };
+          if (name === 'sessions') return { get };
+          if (name === 'tasks') return { on: vi.fn(), off: vi.fn() };
+          if (name.endsWith('/tasks/queue')) return { find: async () => ({ data: [] }) };
+          throw new Error(`Unexpected service: ${name}`);
+        },
+      } as unknown as AgorClient;
+      const { onClose } = renderPanel({ client });
+      fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+      fireEvent.click(await screen.findByRole('menuitem', { name: /Archive session/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Archive', exact: true }));
+      const expected =
+        outcome === 'read-failure'
+          ? 'Session and same-branch children archived; refresh required to update the session list.'
+          : outcome === 'mutation-failure'
+            ? 'Failed to archive session'
+            : 'Session and same-branch children archived';
+      expect(await screen.findByText(expected)).toBeVisible();
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(get).toHaveBeenCalledTimes(outcome === 'mutation-failure' ? 0 : 1);
+      if (outcome === 'confirmed') expect(onClose).toHaveBeenCalledTimes(1);
+      else expect(onClose).not.toHaveBeenCalled();
+      if (outcome === 'read-failure') {
+        expect(screen.queryByText('Failed to archive session')).not.toBeInTheDocument();
+        expect(
+          screen.queryByText('Session and same-branch children archived')
+        ).not.toBeInTheDocument();
+        expect(agorStore.getState().sessionById.get(session.session_id)).toEqual(session);
+      }
+    }
+  );
 });

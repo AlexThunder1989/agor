@@ -1,3 +1,4 @@
+import { BRANCH_FILESYSTEM_ACTIONS } from '@agor/core/types';
 /**
  * Repos Service
  *
@@ -27,9 +28,11 @@ import {
 import {
   BranchMaintenanceRepository,
   BranchRepository,
+  enqueueAfterTenantDatabaseCommit,
   generateId,
   getCurrentTenantId,
   RepoRepository,
+  runWithTenantContext,
   runWithTenantDatabaseScope,
   runWithTenantDatabaseTransaction,
   shortId,
@@ -42,8 +45,13 @@ import {
   Conflict,
   Forbidden,
   NotAuthenticated,
+  NotFound,
 } from '@agor/core/feathers';
-import { redactGitUrlCredentials, stripGitUrlCredentials } from '@agor/core/git/pure';
+import {
+  assertNetworkGitRemoteUrl,
+  redactGitUrlCredentials,
+  stripGitUrlCredentials,
+} from '@agor/core/git/pure';
 import type {
   AuthenticatedParams,
   Branch,
@@ -70,6 +78,7 @@ import { DrizzleService } from '../adapters/drizzle';
 import type { BranchesServiceImpl } from '../declarations.js';
 import { emitHaNativeSocketEvent, tenantChannelName } from '../realtime/routing.js';
 import { ensureCanControlBranchEnvironment } from '../utils/branch-authorization.js';
+import { resolveBranchExecutorSandboxMounts } from '../utils/branch-executor-sandbox.js';
 import { ensureBranchWorkspaceAccess } from '../utils/branch-workspace-path.js';
 import { shouldUseCloneReferencePath } from '../utils/clone-reference.js';
 import { emitServiceEvent } from '../utils/emit-service-event.js';
@@ -91,7 +100,8 @@ export type RepoParams = QueryParams<{
   slug?: string;
   managed_by_agor?: boolean;
   cleanup?: boolean; // For delete operations: true = delete filesystem, false = database only
-}>;
+}> &
+  AuthenticatedParams;
 
 /**
  * Reduce an error to a short, log/DB-safe message. Strips embedded credentials
@@ -194,13 +204,20 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
   ): Promise<Repo | Repo[]> {
     const rows = Array.isArray(data) ? data : [data];
     for (const row of rows) this.validateCleanupPolicyWrite(row, params);
-    if (
-      resolveMultiTenancyConfig(this.app.get('config')).mode === 'required_from_auth' &&
-      rows.some((row) => row.repo_type === 'local')
-    ) {
-      throw new BadRequest(
-        'Local repository registration is unavailable in hosted multi-tenant mode.'
-      );
+    if (this.isHostedMultiTenancy()) {
+      if (rows.some((row) => row.repo_type === 'local')) {
+        throw new BadRequest(
+          'Local repository registration is unavailable in hosted multi-tenant mode.'
+        );
+      }
+      for (const row of rows) {
+        this.validateHostedRemoteUrlWrite(row);
+        // Managed storage is derived from the authenticated tenant and slug; a
+        // caller-chosen path would become filesystem authority for Git executors.
+        if (row.local_path != null && row.local_path !== this.managedRepoPath(row.slug, params)) {
+          throw new BadRequest('local_path is managed by Agor and cannot be set.');
+        }
+      }
     }
     return super.create(data, params);
   }
@@ -211,28 +228,74 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
     params?: RepoParams
   ): Promise<Repo | Repo[]> {
     this.validateCleanupPolicyWrite(data, params);
-    if (
-      data.repo_type === 'local' &&
-      resolveMultiTenancyConfig(this.app.get('config')).mode === 'required_from_auth'
-    ) {
-      if (!id) {
-        throw new BadRequest(
-          'Bulk conversion to local repositories is unavailable in hosted multi-tenant mode.'
-        );
-      }
-      const current = await this.get(id, params);
-      if (current.repo_type !== 'local') {
-        throw new BadRequest(
-          'Local repository registration is unavailable in hosted multi-tenant mode.'
-        );
-      }
-    }
+    await this.validateRepoLocationWrite(id, data, params);
     return super.patch(id, data, params);
   }
 
   override async update(id: string, data: Partial<Repo>, params?: RepoParams): Promise<Repo> {
     this.validateCleanupPolicyWrite(data, params);
+    await this.validateRepoLocationWrite(id, data, params);
     return super.update(id, data, params);
+  }
+
+  /**
+   * `local_path` is fixed when a repository is registered: rewriting it would
+   * aim every later Git executor (origin realign, branch materialization,
+   * sandbox mounts) at an arbitrary daemon-readable repository. Hosted
+   * deployments additionally require network remotes and forbid local rows.
+   */
+  private async validateRepoLocationWrite(
+    id: string | null,
+    data: Partial<Repo>,
+    params?: RepoParams
+  ): Promise<void> {
+    const hosted = this.isHostedMultiTenancy();
+    if (hosted) this.validateHostedRemoteUrlWrite(data);
+    const becomesLocal = hosted && data.repo_type === 'local';
+    const setsLocalPath = Object.hasOwn(data, 'local_path');
+    if (!becomesLocal && !setsLocalPath) return;
+    if (!id) {
+      throw new BadRequest(
+        becomesLocal
+          ? 'Bulk conversion to local repositories is unavailable in hosted multi-tenant mode.'
+          : 'local_path is managed by Agor and cannot be changed.'
+      );
+    }
+    const current = await this.get(id, params);
+    if (setsLocalPath && data.local_path !== current.local_path) {
+      throw new BadRequest('local_path is managed by Agor and cannot be changed.');
+    }
+    if (becomesLocal && current.repo_type !== 'local') {
+      throw new BadRequest(
+        'Local repository registration is unavailable in hosted multi-tenant mode.'
+      );
+    }
+  }
+
+  private isHostedMultiTenancy(): boolean {
+    return resolveMultiTenancyConfig(this.app.get('config')).mode === 'required_from_auth';
+  }
+
+  /** Canonical managed clone location: `<tenant repos root>/<slug>`. */
+  private managedRepoPath(slug: string | undefined, params?: RepoParams): string {
+    if (!slug || !isValidSlug(slug)) {
+      throw new BadRequest('A valid org/name slug is required for a managed repository.');
+    }
+    const tenantId =
+      (params as AuthenticatedParams | undefined)?.tenant?.tenant_id ?? getCurrentTenantId();
+    return path.join(getReposDir(tenantId), slug);
+  }
+
+  /** Hosted tenants share one daemon filesystem, so remotes must be network transports. */
+  private validateHostedRemoteUrlWrite(data: Partial<Repo>): void {
+    if (!data.remote_url) return;
+    try {
+      assertNetworkGitRemoteUrl(stripGitUrlCredentials(data.remote_url));
+    } catch {
+      throw new BadRequest(
+        'Repository remote must be an HTTPS or SSH URL in hosted multi-tenant mode.'
+      );
+    }
   }
 
   private validateCleanupPolicyWrite(data: Partial<Repo>, params?: RepoParams): void {
@@ -300,6 +363,9 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
     if (!slug || !isValidSlug(slug)) {
       throw new Error('Could not derive a valid slug from URL. Please provide a slug.');
     }
+    // Reject local transports before touching any row: a hosted clone runs as
+    // the daemon and could otherwise copy another tenant's repository.
+    if (this.isHostedMultiTenancy()) this.validateHostedRemoteUrlWrite({ remote_url: remoteUrl });
 
     // Slug-collision policy:
     // - `clone_status: 'failed'` → previous attempt left a tombstone row;
@@ -366,7 +432,7 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
     // Use the slug, not the URL basename, so two remotes with the same repo
     // name but distinct Agor slugs do not collide on disk.
     const tenantId = (params as AuthenticatedParams | undefined)?.tenant?.tenant_id;
-    const expectedLocalPath = path.join(getReposDir(tenantId), slug);
+    const expectedLocalPath = this.managedRepoPath(slug, params);
     const placeholder = (await this.create(
       {
         slug: slug as RepoSlug,
@@ -1095,7 +1161,9 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
         this.app,
         'git.branch.add',
         userId,
-        branch.branch_id
+        branch.branch_id,
+        undefined,
+        attemptId
       );
 
       // Retry/watchdog callers have no pre-resolved routing; create passes its
@@ -1108,55 +1176,79 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
         `${logPrefix} enqueue git.branch.add (reason=${reason}, storage_mode=${storageMode})`
       );
 
-      spawnExecutorFireAndForget(
-        {
-          command: 'git.branch.add',
-          sessionToken,
-          daemonUrl: getDaemonUrl(),
-          params: {
-            branchId: branch.branch_id,
-            repoId: repo.repo_id,
-            userId: userId as string | undefined,
-            principalBranchAccess: 'write',
-            // Echoed back on the executor's terminal patch so a superseded
-            // attempt's late ack can be discarded instead of overwriting a
-            // newer one.
-            ...(attemptId ? { provisioningAttemptId: attemptId } : {}),
-            restoreMode: branch.provisioning_operation === 'restore',
-            allowExistingCheckout: reason !== 'create',
-            useReference:
-              storageMode === 'clone' &&
-              !getTeammateConfig(branch)?.localHome &&
-              !!repo.local_path &&
-              shouldUseCloneReferencePath(this.app.get('config')),
+      const launch = () =>
+        spawnExecutorFireAndForget(
+          {
+            command: 'git.branch.add',
+            sessionToken,
+            daemonUrl: getDaemonUrl(),
+            params: {
+              branchId: branch.branch_id,
+              repoId: repo.repo_id,
+              userId: userId as string | undefined,
+              principalBranchAccess: 'write',
+              // Echoed back on the executor's terminal patch so a superseded
+              // attempt's late ack can be discarded instead of overwriting a
+              // newer one.
+              ...(attemptId ? { provisioningAttemptId: attemptId } : {}),
+              restoreMode: branch.provisioning_operation === 'restore',
+              allowExistingCheckout: reason !== 'create',
+              useReference:
+                storageMode === 'clone' &&
+                !getTeammateConfig(branch)?.localHome &&
+                !!repo.local_path &&
+                shouldUseCloneReferencePath(this.app.get('config')),
+            },
           },
-        },
-        {
-          logPrefix,
-          delegatedHomeKey: homeKey,
-          templateVariables: {
-            branch_id: branch.branch_id,
-            user_id: userId,
-            branch_fs_access: 'write',
-          },
-          onExit: (code) => {
-            if (code === 0) {
-              // Success path: the executor patched 'ready' itself.
-              console.log(`${logPrefix} executor exited cleanly (code 0)`);
-              return;
+          {
+            logPrefix,
+            delegatedHomeKey: homeKey,
+            templateVariables: {
+              branch_id: branch.branch_id,
+              user_id: userId,
+              branch_fs_access: 'write',
+            },
+            onExit: (code) => {
+              if (code === 0) {
+                // Success path: the executor patched 'ready' itself.
+                console.log(`${logPrefix} executor exited cleanly (code 0)`);
+                return;
+              }
+              console.error(
+                `${logPrefix} executor exited with code ${code ?? 'null'}; running safety-net reconcile`
+              );
+              void this.reconcileBranchFilesystemAfterExit(
+                branch.branch_id,
+                code,
+                tenantId,
+                attemptId
+              );
+            },
+          }
+        );
+      // REST uses short scopes; MCP may own an outer transaction. Neither the
+      // attempt nor its command credential may be consumed before commit.
+      if (
+        reason !== 'create' &&
+        enqueueAfterTenantDatabaseCommit(async () => {
+          const work = async () => {
+            try {
+              launch();
+            } catch (error) {
+              await this.markBranchProvisioningFailedIfStuck(
+                branch.branch_id,
+                `Failed to spawn executor: ${sanitizeProvisioningError(error)}`,
+                tenantId,
+                attemptId
+              );
             }
-            console.error(
-              `${logPrefix} executor exited with code ${code ?? 'null'}; running safety-net reconcile`
-            );
-            void this.reconcileBranchFilesystemAfterExit(
-              branch.branch_id,
-              code,
-              tenantId,
-              attemptId
-            );
-          },
-        }
-      );
+          };
+          if (tenantId) await runWithTenantContext(tenantId, work);
+          else await work();
+        })
+      )
+        return branch;
+      launch();
       return branch;
     } catch (error) {
       // Synchronous spawn failure (token generation, routing resolution, or a
@@ -1246,40 +1338,29 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
   }
 
   /**
-   * Explicit, authorized repair for a branch whose provisioning FAILED.
-   *
-   * This endpoint never decides that a `creating` attempt is orphaned:
-   *
-   * - `ready`                         → no-op (idempotent).
-   * - `creating`                      → 409 in-progress, even after a restart.
-   * - `failed`                        → atomically claim `failed → creating`
-   *                                     and re-dispatch the executor.
-   * - preserved/cleaned/deleted/other → 409; use restore/unarchive instead.
-   *
-   * The row-locked claim allows only one dispatcher across concurrent retries.
-   * Generation-fenced exit/ack handling can establish a known failure; the
-   * standalone startup reconciler is a separate, tenant-scoped safety net.
-   * HA startup deliberately does not run that reconciler. A stranded `creating`
-   * row needs separately established containment/recovery authority, not an
-   * age-based takeover through this endpoint. This is failed-attempt retry,
-   * not multi-tenant or HA orphan recovery.
+   * Authorized retry/restore through one atomic admission and executor owner.
+   * Active failed or stale archive outcomes are repairable; archived branches
+   * enter only via unarchive's internal restoreArchived argument. Creating is
+   * never taken over based on age. A ready active branch is a no-op.
    */
-  async retryBranchProvisioning(branchId: string, params?: RepoParams): Promise<Branch> {
+  async retryBranchProvisioning(
+    branchId: string,
+    params?: RepoParams,
+    restoreArchived = false
+  ): Promise<Branch> {
     const branchesService = this.app.service('branches');
     // Read through the service so short IDs resolve and RBAC hooks fire.
     const branch = (await branchesService.get(branchId, params)) as Branch;
     const status = branch.filesystem_status;
-    const logPrefix = `[branch-provisioning ${shortId(branch.branch_id)}]`;
     const branchRepo = new BranchRepository(this.db);
 
     // Authorization. The `get` above only establishes VIEW access, and the CAS
     // below writes through the repository — so it never passes through the
     // branches-service `patch` hook that normally demands `all`. Without this
-    // gate any member who can *see* a failed branch could trigger provisioning
-    // under `branch.created_by`'s execution identity and credentials. Assert the
+    // gate any member who can *see* a failed branch could trigger provisioning. Assert the
     // canonical branch-control level (effective `all`, owner, or global admin)
     // here in the service so REST, MCP and the UI are covered by one check;
-    // internal calls and service accounts bypass, as everywhere else.
+    // The row-locked validation below also requires a caller and filesystem write access.
     await this.withTenantDatabase(params, () =>
       ensureCanControlBranchEnvironment(
         branchRepo,
@@ -1292,7 +1373,7 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
     // Archived branches have their own restore/unarchive lifecycle. Status alone
     // does not catch this: archiving overwrites `filesystem_status`, but an
     // already-`failed` branch that was then archived can still read `failed`.
-    if (branch.archived) {
+    if (branch.archived && !restoreArchived) {
       throw new Conflict(
         'This branch is archived. Unarchive it first — archived branches are restored through the unarchive flow, not by retrying provisioning.',
         {
@@ -1303,7 +1384,9 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
       );
     }
 
-    if (status === 'ready') {
+    const restore =
+      restoreArchived || BRANCH_FILESYSTEM_ACTIONS.some((candidate) => candidate === status);
+    if (status === 'ready' && !restore) {
       return branch;
     }
     if (status === 'creating') {
@@ -1315,9 +1398,9 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
           filesystemStatus: status,
         }
       );
-    } else if (status !== 'failed') {
+    } else if (status !== 'failed' && !restore) {
       throw new Conflict(
-        `Branch provisioning cannot be retried from status "${status ?? 'unknown'}". Only a failed provisioning attempt is retryable; use the branch restore/unarchive flow for archived or cleaned branches.`,
+        `Branch provisioning cannot be retried from status "${status ?? 'unknown'}". Only failed or active preserved/cleaned/deleted records are recoverable; use unarchive for archived branches.`,
         {
           code: 'BRANCH_PROVISIONING_NOT_RETRYABLE',
           branchId: branch.branch_id,
@@ -1333,30 +1416,69 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
       throw new BadRequest(`Repo ${branch.repo_id} not found for branch ${branchId}`);
     }
 
-    // Atomic claim: only the caller that flips failed → creating dispatches.
-    // The claim stamps a fresh attempt generation onto the row, which fences
-    // this dispatch's acknowledgements against any attempt that came before it.
+    const requestUser = params?.user;
+    if (!requestUser) throw new NotAuthenticated('Authentication required');
+    const validate = async (db: import('@agor/core/db').Database, current: Branch) => {
+      await ensureBranchWorkspaceAccess(
+        new BranchRepository(db),
+        current,
+        requestUser.user_id,
+        requestUser.role as UserRole,
+        'all',
+        'write',
+        this.app.get('config').execution?.allow_superadmin === true
+      );
+      if (current.path !== branch.path || current.repo_id !== branch.repo_id)
+        throw new Conflict('Branch location changed; refresh before recovery');
+      if (
+        (current.storage_mode ?? 'worktree') === 'worktree' &&
+        resolveMultiTenancyConfig(this.app.get('config')).mode === 'required_from_auth'
+      )
+        throw new BadRequest(
+          'Historical worktree branches cannot be restored in hosted multi-tenant mode.'
+        );
+    };
     const { claimed, branch: claimedBranch } = await this.withTenantDatabase(params, () =>
-      branchRepo.claimFailedForProvisioningRetry(branch.branch_id, generateId())
+      branchRepo.claimForProvisioning(branch.branch_id, generateId(), {
+        restore,
+        archived: restoreArchived,
+        validate,
+      })
     );
     if (!claimed) {
-      console.log(
-        `${logPrefix} retry ignored — another attempt already claimed it (status=${claimedBranch.filesystem_status})`
+      // A competing attempt can finish before our locked read. Returning its
+      // durable ready state is a safe no-op, never another executor admission.
+      if (
+        !claimedBranch.archived &&
+        !claimedBranch.deletion_status &&
+        claimedBranch.filesystem_status === 'ready'
+      )
+        return claimedBranch;
+      if (claimedBranch.filesystem_status === 'creating') {
+        throw new Conflict(
+          'Branch provisioning is already in progress. Wait for it to finish before retrying.',
+          {
+            code: 'BRANCH_PROVISIONING_IN_PROGRESS',
+            branchId: claimedBranch.branch_id,
+            filesystemStatus: 'creating',
+          }
+        );
+      }
+      throw new Conflict(
+        'Branch recovery is blocked or its state changed. Refresh before retrying.'
       );
-      return claimedBranch;
     }
     this.emitBranchPatched(claimedBranch, params);
-
-    // Provision as the branch's original owner so impersonation/credentials
-    // match the create path. Dispatch inside the tenant scope too: it reads
-    // impersonation config from the database, and it captures the ambient tenant
-    // so the executor's async onExit safety net can re-enter the right scope.
-    const userId = branch.created_by as UserID;
-    // Take the dispatch result rather than the claimed row: a synchronous spawn
-    // failure marks the branch `failed` in there, and returning the pre-dispatch
-    // `creating` object would report an in-flight retry that never started.
-    return await this.withTenantDatabase(params, () =>
-      this.dispatchBranchProvisioning(claimedBranch, repo, userId, params, 'retry')
+    // Use the authorized caller's credentials and execution identity, never the
+    // original creator's credentials for another manager's recovery request.
+    return this.withTenantDatabase(params, () =>
+      this.dispatchBranchProvisioning(
+        claimedBranch,
+        repo,
+        requestUser.user_id as UserID,
+        params,
+        restore ? 'restore' : 'retry'
+      )
     );
   }
 
@@ -1469,27 +1591,45 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
       | UserID
       | undefined;
     if (!userId) throw new NotAuthenticated('Authentication required');
-    const branchFsAccess = await ensureBranchWorkspaceAccess(
-      new BranchRepository(this.db),
-      branch,
-      userId,
-      (serviceParams as Partial<AuthenticatedParams> | undefined)?.user?.role as
-        | UserRole
-        | undefined,
-      command === 'branch.agor-yml.export' ? 'session' : 'view',
-      command === 'branch.agor-yml.export' ? 'write' : 'read',
-      this.app.get('config').execution?.allow_superadmin === true
+    const tenantId = getCurrentTenantId();
+    if (!tenantId) throw new NotAuthenticated('Trusted tenant context is required');
+    // Long routes (export) carry tenant identity without a database scope, so
+    // prepare the launch in one short tenant unit and run the executor outside it.
+    const { branchFsAccess, delegatedHomeKey, sandboxMounts } = await this.withTenantDatabase(
+      serviceParams,
+      async () => ({
+        branchFsAccess: await ensureBranchWorkspaceAccess(
+          new BranchRepository(this.db),
+          branch,
+          userId,
+          (serviceParams as Partial<AuthenticatedParams> | undefined)?.user?.role as
+            | UserRole
+            | undefined,
+          command === 'branch.agor-yml.export' ? 'session' : 'view',
+          command === 'branch.agor-yml.export' ? 'write' : 'read',
+          this.app.get('config').execution?.allow_superadmin === true
+        ),
+        delegatedHomeKey: await resolveDelegatedExecutionHomeKey(
+          this.db,
+          userId,
+          this.app.get('config')
+        ),
+        // The caller is the execution principal for this stateless request, so
+        // a per-user sandbox mounts the caller's home store (not the owner's).
+        sandboxMounts: await resolveBranchExecutorSandboxMounts({
+          config: this.app.get('config'),
+          tenantId,
+          executionUserId: userId,
+          branch,
+          db: this.db,
+        }),
+      })
     );
     const sessionToken = await issueExecutorCommandToken(
       this.app,
       command,
       userId,
       branch.branch_id
-    );
-    const delegatedHomeKey = await resolveDelegatedExecutionHomeKey(
-      this.db,
-      userId,
-      this.app.get('config')
     );
 
     const payload = {
@@ -1502,6 +1642,7 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
         ...params,
         cwd: branch.path,
         principalBranchAccess: branchFsAccess,
+        ...sandboxMounts,
       },
     };
     const options = {
@@ -1514,8 +1655,6 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
       },
     };
     if (command !== 'branch.agor-yml.export') return requestExecutor(payload, options);
-    const tenantId = getCurrentTenantId();
-    if (!tenantId) throw new NotAuthenticated('Trusted tenant context is required');
     const scoped = <T>(work: (repository: BranchMaintenanceRepository) => Promise<T>) =>
       withFreshTenantWrite(this.db, tenantId, () => work(new BranchMaintenanceRepository(this.db)));
     const admitted = await scoped((repository) =>
@@ -1558,6 +1697,14 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
    * caller must name which branch's working copy to read. This is a
    * one-shot manual import — the repo is NOT re-ingested automatically on
    * subsequent operations.
+   *
+   * Registered as a long (identity-only) route, like its export sibling: the
+   * file is read by an executor process, so no tenant transaction may be held
+   * across that spawn. The repo read, the branch authorization (through the
+   * branches service, which arms its own scope) and the launch preparation in
+   * runAgorYmlExecutorCommand each open their own short unit; the executor
+   * carries the tenant only in its command token; the write runs in a fresh
+   * unit after the executor returns.
    */
   async importFromAgorYml(
     id: string,
@@ -1572,7 +1719,11 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
     if (!data?.branch_id) {
       throw new Error('branch_id is required to import .agor.yml');
     }
-    const repo = await this.get(id, params);
+    const tenantId =
+      (params as AuthenticatedParams | undefined)?.tenant?.tenant_id ?? getCurrentTenantId();
+    if (!tenantId) throw new NotAuthenticated('Trusted tenant context is required');
+
+    const repo = await this.withTenantDatabase(params, () => this.get(id, params));
     const branch = await this.getAuthorizedAgorYmlBranch(repo, data.branch_id, params);
 
     const importResult = await this.runAgorYmlExecutorCommand(
@@ -1599,22 +1750,27 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
       throw new Error('.agor.yml not found or has no environment configuration');
     }
 
-    // Preserve any existing DB-only template_overrides across import — the
-    // file never contains them, so a naive replace would otherwise wipe them.
-    const replacement: RepoEnvironment = repo.environment?.template_overrides
-      ? { ...environment, template_overrides: repo.environment.template_overrides }
-      : environment;
-
-    // Imports and YAML Save share the repository's complete-configuration
-    // replacement contract, removing deleted variants and fields atomically.
-    const updated = await this.repoRepo.setEnvironment(id, replacement);
+    // Fresh unit after the spawn: re-read the row, and re-assert the write gate
+    // in case a tenant freeze began while the executor ran. Preserve any
+    // existing DB-only template_overrides across import — the file never
+    // contains them, so a naive replace would otherwise wipe them. Imports and
+    // YAML Save share the repository's complete-configuration replacement
+    // contract, removing deleted variants and fields atomically.
+    const updated = await withFreshTenantWrite(this.db, tenantId, async () => {
+      const current = await this.repoRepo.findById(repo.repo_id);
+      if (!current) throw new NotFound(`Repository ${repo.repo_id} no longer exists`);
+      const replacement: RepoEnvironment = current.environment?.template_overrides
+        ? { ...environment, template_overrides: current.environment.template_overrides }
+        : environment;
+      return this.repoRepo.setEnvironment(current.repo_id, replacement);
+    });
 
     emitServiceEvent(this.app, {
       path: 'repos',
       event: 'patched',
       data: updated,
       params,
-      id,
+      id: updated.repo_id,
     });
     return updated;
   }

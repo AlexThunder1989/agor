@@ -28,8 +28,6 @@
  *   await loadDemoFixtures({ skipIfExists: true });
  */
 
-import os from 'node:os';
-import path from 'node:path';
 import type {
   Artifact,
   BoardID,
@@ -166,16 +164,16 @@ const SENTINEL_EMAIL = DEMO_USER_CREDENTIALS[0].email;
 async function resolveDatabase(options: DemoFixturesOptions): Promise<Database> {
   if (options.db) return options.db;
 
+  const { createDatabase, resolveDefaultDatabaseUrl } = await import('../db/client');
+
   let databaseUrl: string;
   const dialect = process.env.AGOR_DB_DIALECT;
   if (dialect === 'postgresql') {
     databaseUrl = process.env.DATABASE_URL || 'postgresql://localhost:5432/agor';
   } else {
-    const dbPath = path.join(os.homedir(), '.agor', 'agor.db');
-    databaseUrl = process.env.DATABASE_URL || `file:${dbPath}`;
+    databaseUrl = process.env.DATABASE_URL || resolveDefaultDatabaseUrl();
   }
 
-  const { createDatabase } = await import('../db/client');
   return createDatabase({ url: databaseUrl });
 }
 
@@ -583,7 +581,6 @@ export async function loadDemoFixtures(
         message_range: { start_index: 0, end_index: 3, start_timestamp: iso(0) },
         git_state: { ref_at_start: 'demo-feature-login', sha_at_start: 'demo000001' },
         completed_at: iso(60_000),
-        tool_use_count: 1,
       },
       {
         task_id: spawnedTaskId,
@@ -594,7 +591,6 @@ export async function loadDemoFixtures(
         message_range: { start_index: 0, end_index: 3, start_timestamp: iso(120_000) },
         git_state: { ref_at_start: 'demo-fix-navbar', sha_at_start: 'demo000002' },
         completed_at: iso(180_000),
-        tool_use_count: 1,
       },
       {
         task_id: forkedTaskId,
@@ -605,7 +601,6 @@ export async function loadDemoFixtures(
         message_range: { start_index: 0, end_index: 3, start_timestamp: iso(240_000) },
         git_state: { ref_at_start: 'demo-refactor-api', sha_at_start: 'demo000003' },
         completed_at: iso(300_000),
-        tool_use_count: 1,
       },
       {
         task_id: soloTaskId,
@@ -616,7 +611,6 @@ export async function loadDemoFixtures(
         message_range: { start_index: 0, end_index: 3, start_timestamp: iso(360_000) },
         git_state: { ref_at_start: 'demo-docs-update', sha_at_start: 'demo000004' },
         completed_at: iso(420_000),
-        tool_use_count: 1,
       },
     ];
     const createdTasks = await Promise.all(taskSpecs.map((spec) => taskRepo.create(spec)));

@@ -7,14 +7,22 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import * as yaml from 'js-yaml';
 import { type InstallableAgenticTool, isInstallableAgenticTool } from '../agentic-integrations';
+import type { Database } from '../db/client';
 import { EXECUTOR_RESPONSE_PROTOCOL } from '../executor-protocol';
 import type { AgenticToolName } from '../types';
 import { normalizeHttpBaseUrl } from '../utils/url';
-import { ensureAgorHome, ensureAgorHomeSync, getAgorHome, getConfigPath } from './agor-home';
+import {
+  agorHomePath,
+  ensureAgorHome,
+  ensureAgorHomeSync,
+  getAgorHome,
+  getConfigPath,
+} from './agor-home';
 import { getDefaultAnalyticsConfig } from './analytics-defaults.js';
 import { validateAnalyticsHeaders, validateAnalyticsMetadata } from './analytics-validation.js';
 import { DAEMON, ENVIRONMENT, MCP_TOKEN } from './constants';
@@ -49,6 +57,9 @@ import {
   type UnixUserMode,
   type UnknownJson,
 } from './types';
+
+// Set only by the core artifact build; source execution uses ESM imports.
+declare const __AGOR_CORE_CJS__: boolean;
 
 export const RETIRED_CONFIG_KEYS = {
   daemon: ['allowAnonymous', 'requireAuth'],
@@ -235,8 +246,9 @@ function parseAndValidateConfig(content: string): AgorConfig {
   return finalConfig;
 }
 
+export { AGOR_HOME_ENV, AGOR_HOME_MODE } from './agor-home';
 /** Shared state-home paths and creation policy. */
-export { ensureAgorHome, ensureAgorHomeSync, getAgorHome, getConfigPath };
+export { agorHomePath, ensureAgorHome, ensureAgorHomeSync, getAgorHome, getConfigPath };
 
 /**
  * Validate config and throw helpful errors for deprecated/invalid settings
@@ -703,12 +715,21 @@ function validateConfig(config: AgorConfig): void {
     'mcpToolSearch',
     'instanceLabel',
     'instanceDescription',
+    'navbarLogoLink',
+    'navbarLogoTooltip',
     'impersonation_token_expiry_ms',
     'cors_allow_sandpack',
     'cors_origins',
     'trust_proxy_hops',
+    'websocket_compression',
     ...RETIRED_CONFIG_KEYS.daemon,
   ]);
+  if (
+    config.daemon?.websocket_compression !== undefined &&
+    typeof config.daemon.websocket_compression !== 'boolean'
+  ) {
+    throw new Error('Config error: daemon.websocket_compression must be a boolean');
+  }
   only(config.ui, 'ui', ['base_url', 'port', 'host']);
   only(config.uploads, 'uploads', ['location', 'max_age_days', 'max_file_size_mb']);
   only(config.external_launch, 'external_launch', [
@@ -845,6 +866,7 @@ function validateConfig(config: AgorConfig): void {
     'permission_timeout_ms',
     'executor_command_template',
     'executor_storage',
+    'delegated_branch_deletion',
     'executor_command_nonzero_may_have_dispatched',
     'required_user_env_vars',
     ...RETIRED_CONFIG_KEYS.execution,
@@ -930,6 +952,12 @@ function validateConfig(config: AgorConfig): void {
     'branch_workspace',
     'base_repository',
   ]);
+  if (
+    config.execution?.delegated_branch_deletion !== undefined &&
+    typeof config.execution.delegated_branch_deletion !== 'boolean'
+  ) {
+    throw new Error('Config error: execution.delegated_branch_deletion must be a boolean');
+  }
   if (
     config.execution?.executor_storage?.user_home !== undefined &&
     !['replica-local', 'shared', 'persistent-per-user'].includes(
@@ -1466,12 +1494,12 @@ export function getDefaultConfig(): AgorConfig {
     },
     multi_tenancy: {
       filesystem_isolation_enabled: false,
-      tenants_base_folder: '~/.agor/tenants',
+      tenants_base_folder: agorHomePath('tenants'),
       mode: 'static',
       static_tenant_id: 'default',
     },
     uploads: {
-      location: '~/.agor',
+      location: getAgorHome(),
       max_age_days: 30,
       max_file_size_mb: 50,
     },
@@ -1500,6 +1528,10 @@ export function resolveEffectiveConfig(
     'AGOR_STATSD_ENABLED'
   );
   const statsdPort = parseOptionalPortEnvironmentValue(env.AGOR_STATSD_PORT, 'AGOR_STATSD_PORT');
+  const websocketCompression = parseOptionalBooleanEnvironmentValue(
+    env.AGOR_WEBSOCKET_COMPRESSION,
+    'AGOR_WEBSOCKET_COMPRESSION'
+  );
   const apmTraceServices = parseOptionalApmTraceDepthEnvironmentValue(env.AGOR_APM_TRACE_SERVICES);
   const externalLaunch = resolveEffectiveExternalLaunchConfig(config.external_launch, env);
 
@@ -1578,6 +1610,11 @@ export function resolveEffectiveConfig(
       ...(env.AGOR_JWT_SECRET ? { jwtSecret: env.AGOR_JWT_SECRET } : {}),
       ...(env.AGOR_MASTER_SECRET ? { masterSecret: env.AGOR_MASTER_SECRET } : {}),
       ...(env.INSTANCE_LABEL ? { instanceLabel: env.INSTANCE_LABEL } : {}),
+      ...(env.NAVBAR_LOGO_LINK ? { navbarLogoLink: env.NAVBAR_LOGO_LINK } : {}),
+      ...(env.NAVBAR_LOGO_TOOLTIP ? { navbarLogoTooltip: env.NAVBAR_LOGO_TOOLTIP } : {}),
+      ...(websocketCompression !== undefined
+        ? { websocket_compression: websocketCompression }
+        : {}),
     },
     ui: { ...defaults.ui, ...config.ui },
     deployment: {
@@ -1682,6 +1719,15 @@ export function assertValidEffectiveExecutionConfig(config: AgorConfig): void {
   if (execution.unix_user_mode === 'delegated' && !execution.executor_command_template) {
     throw new Error(
       "execution.unix_user_mode 'delegated' requires execution.executor_command_template so execution is actually delegated to an external substrate."
+    );
+  }
+
+  if (
+    execution.delegated_branch_deletion &&
+    (execution.unix_user_mode !== 'delegated' || !execution.executor_command_template)
+  ) {
+    throw new Error(
+      'execution.delegated_branch_deletion requires delegated mode and an external executor command template'
     );
   }
 
@@ -1877,11 +1923,11 @@ function constructDaemonLocalUrl(config: AgorConfig): string {
 }
 
 /**
- * Shared base URL resolver for browser-reachable URLs.
+ * Shared deployment-config resolver for browser-reachable URLs.
  *
- * All three public resolvers ({@link getBaseUrl}, {@link getDaemonBaseUrl},
- * {@link requirePublicBaseUrl}) differ only in which config key they prefer
- * and whether a missing explicit URL should throw.
+ * Used by {@link getDaemonBaseUrl}, {@link requirePublicBaseUrl}, and the
+ * static/local path of {@link getBaseUrl}. Hosted entity links instead resolve
+ * trusted tenant routing from the database and never use this fallback.
  *
  * @param prefer - `'ui'` checks `ui.base_url` first (for browser entity links),
  *   `'daemon'` checks `daemon.base_url` first (for API endpoints / OAuth).
@@ -1938,7 +1984,26 @@ export async function getDaemonBaseUrl(): Promise<string> {
  * Used to generate clickable URLs to sessions, boards, and other resources
  * that are sent to external platforms like Slack, email, etc.
  *
- * Resolution order:
+ * Hosted (`required_from_auth`): use durable routing from the current trusted
+ * tenant's verified launch. Missing metadata returns an empty string, so entity
+ * projections omit the link until someone opens the workspace through Cloud.
+ * No deployment origin fallback is safe in that mode.
+ *
+ * `db` is REQUIRED, and that is the whole point of the parameter. It was
+ * optional until the Slack MCP connect lane shipped two callers that simply
+ * omitted it: in hosted mode the handle is what
+ * {@link getTenantPublicBaseUrl} opens its short tenant read on, and the only
+ * other source is an ambient tenant database scope that background work —
+ * a deferred after-commit job, a repair sweep, a timer, an `identity-only`
+ * route — does not have. Those callers threw
+ * "Tenant public links require a tenant database" on their first line, which
+ * no SQLite/single-tenant suite can reproduce because the hosted branch is
+ * never taken there. Optional meant "forgot to pass it" compiled; required
+ * means it does not. A caller inside an open scope passes
+ * `getCurrentTenantDatabase()` rather than nothing, so the reliance is
+ * written down at the call site.
+ *
+ * Static/local resolution order (the handle is untouched):
  * 1. AGOR_BASE_URL environment variable (highest priority)
  * 2. ui.base_url from config.yaml
  * 3. daemon.base_url from config.yaml
@@ -1946,11 +2011,23 @@ export async function getDaemonBaseUrl(): Promise<string> {
  *
  * @returns Base URL without trailing slash (e.g., "https://agor.sandbox.preset.zone")
  */
-export async function getBaseUrl(): Promise<string> {
+export async function getBaseUrl(db: Database): Promise<string> {
+  const config = await loadConfig();
+  if (config.multi_tenancy?.mode === 'required_from_auth') {
+    // Use the canonical DB entrypoint: separately bundled config/DB artifacts
+    // must not create separate AsyncLocalStorage instances for tenant identity.
+    // Native import() in CJS would select the ESM DB and lose the CJS caller's
+    // scope. Keep loading lazy, but select the matching package export format.
+    const { getTenantPublicBaseUrl } =
+      typeof __AGOR_CORE_CJS__ !== 'undefined' && __AGOR_CORE_CJS__
+        ? (createRequire(import.meta.url)('@agor/core/db') as typeof import('@agor/core/db'))
+        : await import('@agor/core/db');
+    return getTenantPublicBaseUrl(db);
+  }
   if (process.env.AGOR_BASE_URL) {
     return validateBaseUrl(process.env.AGOR_BASE_URL);
   }
-  return resolveBaseUrl(await loadConfig(), 'ui');
+  return resolveBaseUrl(config, 'ui');
 }
 
 /**
@@ -2173,7 +2250,7 @@ export function ensureBranchCloneDepthAllowed(
 //
 // AGOR_HOME vs AGOR_DATA_HOME:
 //
-// AGOR_HOME (~/.agor by default):
+// AGOR_HOME (env var; ~/.agor by default, see getAgorHome()):
 //   - Daemon operating files: config.yaml, agor.db, logs/
 //   - Fast local storage (SSD)
 //
@@ -2275,7 +2352,7 @@ export function resolveTenantsBaseFolderFromConfig(
   config: { readonly multi_tenancy?: { readonly tenants_base_folder?: string } },
   agorHome = getAgorHome()
 ): string {
-  const configuredBase = config.multi_tenancy?.tenants_base_folder || '~/.agor/tenants';
+  const configuredBase = config.multi_tenancy?.tenants_base_folder || agorHomePath('tenants');
   const expandedBase = expandHomePath(configuredBase);
   return path.isAbsolute(expandedBase) ? expandedBase : path.resolve(agorHome, expandedBase);
 }

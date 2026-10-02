@@ -20,6 +20,10 @@ export interface TeammateCreationInput {
   boardId?: string;
   /** Tags the teammate as onboarding-seeded so its card shows the right copy. */
   createdViaOnboarding?: boolean;
+  /** Add the board welcome note (default true); skipped for boards that already hold work. */
+  welcomeNote?: boolean;
+  /** Never replace the board's primary; the server makes the new branch primary only if unset. */
+  keepExistingPrimary?: boolean;
 }
 
 export interface TeammateCreationDeps {
@@ -31,7 +35,7 @@ export interface TeammateCreationDeps {
       name: string;
       ref: string;
       createBranch: boolean;
-      sourceBranch: string;
+      sourceBranch?: string;
       sourceRemoteUrl?: string;
       pullLatest: boolean;
       boardId?: string;
@@ -62,7 +66,9 @@ export async function createTeammateBranch(
 
   const repo = deps.repoById.get(input.repoId);
   const branchName = input.branchName || `private-${slugify(input.displayName)}`;
-  const sourceBranch = input.sourceBranch || repo?.default_branch || 'main';
+  // Preserve omission: the executor distinguishes a template default from an
+  // explicit user ref (even when the user typed the default branch name).
+  const sourceBranch = input.sourceBranch || undefined;
 
   if (!deps.client) {
     throw new Error('Not connected');
@@ -84,13 +90,15 @@ export async function createTeammateBranch(
   }
 
   if (!shouldContinue()) return null;
-  await ensureTeammateWelcomeNote({
-    client: deps.client,
-    boardId,
-    teammateName: displayName,
-    teammateEmoji: input.emoji,
-  });
-  if (!shouldContinue()) return null;
+  if (input.welcomeNote !== false) {
+    await ensureTeammateWelcomeNote({
+      client: deps.client,
+      boardId,
+      teammateName: displayName,
+      teammateEmoji: input.emoji,
+    });
+    if (!shouldContinue()) return null;
+  }
 
   const teammateConfig: TeammateConfig = {
     kind: 'teammate',
@@ -124,7 +132,7 @@ export async function createTeammateBranch(
       });
       if (!shouldContinue()) return null;
     }
-    if (boardId) {
+    if (boardId && !input.keepExistingPrimary) {
       if (!shouldContinue()) return null;
       await deps.client
         ?.service('boards')

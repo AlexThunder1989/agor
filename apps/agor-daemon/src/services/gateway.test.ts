@@ -1,17 +1,21 @@
 import { materializeAgenticToolConfiguration } from '@agor/agentic-tools/config';
-import { getBaseUrl } from '@agor/core/config';
 import type { TenantScopeAwareDatabase } from '@agor/core/db';
 import {
   attachHiddenTenant,
+  createDatabaseAsync,
   createTenantScopedDatabaseProxy,
   GatewayListenerDiscoveryRepository,
   getCurrentTenantDatabaseScope,
   getCurrentTenantId,
+  MCPServerRepository,
+  runMigrations,
   runWithTenantContext,
   runWithTenantDatabaseScope,
   shortId,
+  UserMCPOAuthTokenRepository,
+  UsersRepository,
 } from '@agor/core/db';
-import { GatewayListenerError, getConnector } from '@agor/core/gateway';
+import { DiscordDirectMessageError, GatewayListenerError, getConnector } from '@agor/core/gateway';
 import type {
   GatewayChannel,
   GatewayOutboundMessage,
@@ -24,8 +28,15 @@ import type {
 } from '@agor/core/types';
 import { SessionStatus } from '@agor/core/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ingestInboundAttachments } from '../utils/gateway-attachments.js';
+import {
+  ingestDiscordInboundImages,
+  ingestInboundAttachments,
+} from '../utils/gateway-attachments.js';
 import { GatewayService, tenantIdFromGatewayChannel } from './gateway.js';
+import {
+  fingerprintMCPOAuthGrantConfiguration,
+  MCP_OAUTH_GRANT_BINDING_VERSION,
+} from './mcp-oauth-grant-binding.js';
 import { SessionsService } from './sessions.js';
 
 vi.mock('@agor/agentic-tools/config', async (importOriginal) => {
@@ -49,12 +60,18 @@ vi.mock('@agor/core/gateway', async (importOriginal) => {
   };
 });
 
+// `getBaseUrl` is deliberately NOT mocked. Mocking it to a constant is what
+// hid the argument: the hosted branch is chosen by config, resolves the
+// tenant's origin from the handle it is given, and a stub answers the same
+// string with or without one. These tests drive the real resolver from
+// `AGOR_BASE_URL` instead, which costs nothing here and keeps the call site
+// honest. The hosted branch itself is driven in
+// `gateway-mcp-slack-connect.test.ts`.
 vi.mock('@agor/core/config', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@agor/core/config')>();
   return {
     ...actual,
     assertInlineAgenticConfigurationAllowed: vi.fn(async () => undefined),
-    getBaseUrl: vi.fn(async () => 'https://agor.example.com'),
     resolveExecutionSecurityMode: vi.fn(() => ({
       unixUserMode: 'simple',
       requiresExecutionHomeKey: false,
@@ -63,6 +80,7 @@ vi.mock('@agor/core/config', async (importOriginal) => {
 });
 
 vi.mock('../utils/gateway-attachments.js', () => ({
+  ingestDiscordInboundImages: vi.fn(),
   ingestInboundAttachments: vi.fn(),
   buildPromptWithAttachments: vi.fn(
     (text: string, attachments: Array<{ ref: string }>) =>
@@ -83,6 +101,18 @@ const user: User = {
   default_agentic_config: {},
   unix_username: null,
 } as unknown as User;
+
+/** The OAuth configuration the gateway's seeded grants are issued against. */
+const GATEWAY_GRANT_BINDING = {
+  resourceUri: 'https://mcp.example.test/mcp',
+  metadataUrl: 'https://mcp.example.test/.well-known/oauth-authorization-server',
+  issuer: 'https://auth.example.test',
+  authorizationEndpoint: 'https://auth.example.test/authorize',
+  tokenEndpoint: 'https://auth.example.test/token',
+  redirectUri: 'https://agor.example.test/oauth/callback',
+  clientId: 'client-abc',
+  compatibilityMode: 'strict' as const,
+};
 
 const slackChannel: GatewayChannel = {
   id: 'chan-slack',
@@ -360,6 +390,7 @@ function makeGatewayHarness(args: {
     }
   ).usersRepo = { findByEmailForAlignment };
   const outboundRepo = {
+    listDiscordDirectMessageSends: vi.fn(async () => []),
     admitReplySession,
     completeReplyAdmission,
   };
@@ -396,42 +427,22 @@ beforeEach(() => {
   // repository construction as production and therefore need the deployment
   // master-secret invariant to be explicit.
   vi.stubEnv('AGOR_MASTER_SECRET', 'gateway-test-master-secret');
+  vi.stubEnv('AGOR_BASE_URL', 'https://agor.example.com');
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   vi.mocked(materializeAgenticToolConfiguration).mockClear();
-  vi.mocked(getBaseUrl).mockReset();
-  vi.mocked(getBaseUrl).mockResolvedValue('https://agor.example.com');
   vi.mocked(getConnector).mockReset();
+  vi.mocked(ingestDiscordInboundImages).mockReset();
   vi.mocked(ingestInboundAttachments).mockReset();
 });
 
 describe('GatewayService session links', () => {
-  it('builds browser-facing links from the configured UI origin', async () => {
-    vi.mocked(getBaseUrl).mockResolvedValueOnce('http://localhost:5173');
-    const { service } = makeGatewayHarness({});
-    const sessionId = '01927f9d-0000-7000-8000-000000000001' as SessionID;
-
-    const sessionUrl = await (
-      service as unknown as {
-        fetchExistingSessionUrlForGatewayUser: (
-          sessionId: SessionID,
-          user: User
-        ) => Promise<string | null>;
-      }
-    ).fetchExistingSessionUrlForGatewayUser(sessionId, user);
-
-    expect(sessionUrl).toBe(`http://localhost:5173/ui/s/${shortId(sessionId)}/`);
-  });
-
-  it('does not expose a 0.0.0.0 gateway link', async () => {
-    vi.mocked(getBaseUrl).mockResolvedValueOnce('http://0.0.0.0:5173');
-    const { service } = makeGatewayHarness({});
-
-    const sessionUrl = await (
-      service as unknown as {
+  const sessionLink = (service: unknown) =>
+    (
+      service as {
         fetchExistingSessionUrlForGatewayUser: (
           sessionId: SessionID,
           user: User
@@ -442,7 +453,42 @@ describe('GatewayService session links', () => {
       user
     );
 
-    expect(sessionUrl).toBeNull();
+  it('builds browser-facing links from the configured UI origin', async () => {
+    vi.stubEnv('AGOR_BASE_URL', 'https://agor.example.test');
+    const { service } = makeGatewayHarness({});
+    const sessionId = '01927f9d-0000-7000-8000-000000000001' as SessionID;
+
+    expect(await sessionLink(service)).toBe(
+      `https://agor.example.test/ui/s/${shortId(sessionId)}/`
+    );
+  });
+
+  /**
+   * This link is sent to somebody on Slack, Discord or GitHub, so the only
+   * question worth asking about its host is whether THEIR browser can open it.
+   * The `0.0.0.0` case below was the only one checked, and the two other
+   * callers that build a gateway link each carried their own half of the same
+   * check — which is how the Slack connect card came to post a button on
+   * `http://localhost:3030`, the fallback a deployment that never configured a
+   * public URL gets. One `isBrowserReachableUrl` now answers for all three.
+   *
+   * The consequence worth stating out loud, because it reaches past the MCP
+   * lanes: a `null` here suppresses the Discord/GitHub follow-up routing
+   * message entirely (`create`, where it is guarded by `if (sessionUrl && ...)`),
+   * so a deployment with only the localhost fallback stops pasting a link
+   * nobody in the thread can open. That is the intent, and
+   * `gateway.postgres.test.ts` configures a public origin because it is
+   * asserting the routing message rather than this rule.
+   */
+  it.each([
+    ['0.0.0.0', 'http://0.0.0.0:5173'],
+    ['localhost', 'http://localhost:5173'],
+    ['a loopback address', 'http://127.0.0.1:5173'],
+  ])('does not expose a gateway link on %s', async (_label, baseUrl) => {
+    vi.stubEnv('AGOR_BASE_URL', baseUrl);
+    const { service } = makeGatewayHarness({});
+
+    expect(await sessionLink(service)).toBeNull();
   });
 });
 
@@ -809,6 +855,40 @@ describe('GatewayService multi-tenant process state', () => {
       ).not.toHaveBeenCalled();
     }
   );
+
+  it('refuses a transported routeMessage to a DM even for an authorized branch owner', async () => {
+    const sendMessage = vi.fn();
+    const service = new GatewayService(
+      { run: vi.fn() } as never,
+      { service: vi.fn(), get: vi.fn(() => ({ execution: {} })) } as never
+    );
+    const mapping = makeMapping({ thread_id: 'discord:dm:333333333333333333:444444444444444444' });
+    Object.assign(service as unknown as Record<string, unknown>, {
+      durableListenerOwnership: true,
+      sessionRepo: { findById: vi.fn(async () => ({ branch_id: 'branch-1' })) },
+      branchRepo: {
+        findById: vi.fn(async () => ({ branch_id: 'branch-1' })),
+        isOwner: vi.fn(async () => true),
+        resolveUserPermission: vi.fn(async () => 'all'),
+      },
+      threadMapRepo: { findBySession: vi.fn(async () => mapping) },
+      channelRepo: {
+        findById: vi.fn(async () => ({
+          ...slackChannel,
+          channel_type: 'discord',
+          config: { direct_messages_enabled: true },
+        })),
+      },
+    });
+    vi.mocked(getConnector).mockReturnValue({ sendMessage, channelType: 'discord' });
+    await expect(
+      service.routeMessage({ session_id: mapping.session_id, message: 'refuse' }, {
+        provider: 'rest',
+        user: { user_id: 'owner', role: 'admin' },
+      } as never)
+    ).resolves.toEqual({ routed: false });
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
 
   it('does not use the local listener cache as PostgreSQL outbound authority', async () => {
     const sendMessage = vi.fn(async () => 'sent-1');
@@ -2726,58 +2806,195 @@ describe('GatewayService MCP resolution', () => {
     expect(emitted).toHaveBeenCalledOnce();
   });
 
-  it('warns when raw OAuth tokens exist but their authoritative binding is invalid', async () => {
+  /**
+   * The warning is the ONE surface that deliberately answers looser than
+   * `resolveMCPOAuthGrantLiveness`'s `live` — it also stays quiet for a grant
+   * that is merely expired, because the inject hook will JIT-refresh it. That
+   * widening is `refreshable` on the SAME read, not a second rule, so these
+   * cases pin exactly how far the looseness goes.
+   *
+   * They run against a real migrated database rather than an injected
+   * repository double: the point is which stored row the gateway's decision
+   * comes from, and a `getToken` stub answers that by construction.
+   */
+  describe.each([
+    {
+      state: 'a grant whose binding no longer matches the server',
+      grant: 'unbound' as const,
+      warns: true,
+    },
+    { state: 'no grant at all', grant: 'absent' as const, warns: true },
+    {
+      state: 'an expired grant with nothing to refresh with',
+      grant: 'expired-dead' as const,
+      warns: true,
+    },
+    {
+      // Deliberately optimistic, and only here: the executor never sees the
+      // stale access token, so warning a Slack thread that the server is
+      // unavailable would be the wrong error on a warning surface.
+      state: 'an expired grant that is one refresh away from usable',
+      grant: 'expired-refreshable' as const,
+      warns: false,
+    },
+    { state: 'a live grant', grant: 'live' as const, warns: false },
+  ])('gateway MCP auth warning — $state', ({ grant, warns }) => {
+    it(warns ? 'warns' : 'stays quiet', async () => {
+      const rawDb = await createDatabaseAsync({ dialect: 'sqlite', url: ':memory:' });
+      await runMigrations(rawDb);
+      const db = rawDb as unknown as TenantScopeAwareDatabase;
+      await new UsersRepository(rawDb).create({
+        user_id: user.user_id,
+        email: user.email,
+        name: user.name,
+        role: 'admin',
+      });
+
+      const servers = new MCPServerRepository(db);
+      const saved = await servers.create({
+        mcp_server_id: channelMcpId,
+        name: 'bound-oauth',
+        display_name: 'Bound OAuth',
+        transport: 'http',
+        url: 'https://mcp.example.test/mcp',
+        scope: 'global',
+        source: 'user',
+        enabled: true,
+        auth: { type: 'oauth', oauth_mode: 'per_user' },
+      } as Parameters<MCPServerRepository['create']>[0]);
+
+      if (grant !== 'absent') {
+        const expiresAt =
+          grant === 'live' ? new Date(Date.now() + 3600_000) : new Date(Date.now() - 3600_000);
+        await new UserMCPOAuthTokenRepository(db).saveToken(
+          user.user_id,
+          saved.mcp_server_id,
+          {
+            accessToken: 'at-1',
+            expiresAt,
+            ...(grant === 'expired-refreshable' ? { refreshToken: 'rt-1' } : {}),
+            clientId: GATEWAY_GRANT_BINDING.clientId,
+            grantBinding: {
+              generation: 1,
+              version: MCP_OAUTH_GRANT_BINDING_VERSION,
+              fingerprint: fingerprintMCPOAuthGrantConfiguration(
+                process.env.AGOR_MASTER_SECRET!,
+                saved,
+                GATEWAY_GRANT_BINDING,
+                MCP_OAUTH_GRANT_BINDING_VERSION
+              ),
+              metadataUri: GATEWAY_GRANT_BINDING.metadataUrl,
+              resourceUri: GATEWAY_GRANT_BINDING.resourceUri,
+              issuer: GATEWAY_GRANT_BINDING.issuer,
+              authorizationEndpoint: GATEWAY_GRANT_BINDING.authorizationEndpoint,
+              tokenEndpoint: GATEWAY_GRANT_BINDING.tokenEndpoint,
+              redirectUri: GATEWAY_GRANT_BINDING.redirectUri,
+            },
+          },
+          user.user_id
+        );
+        // The grant is real and its tokens are raw in the row; only its
+        // binding to the server's current configuration is broken.
+        if (grant === 'unbound') {
+          await servers.update(saved.mcp_server_id, { url: 'https://moved.example.test/mcp' });
+        }
+      }
+
+      const channel = {
+        ...slackChannel,
+        mcp_server_ids: [channelMcpId],
+      } as unknown as GatewayChannel;
+      const { service, promptCreate } = makeGatewayHarness({ channel, existingMapping: null, db });
+
+      await service.create({
+        channel_key: channel.channel_key,
+        thread_id: 'C123-100.000000',
+        text: 'start',
+        metadata: {
+          channel: 'C123',
+          channel_type: 'channel',
+          slack_has_mention: true,
+          slack_message_ts: '100.000000',
+        },
+      });
+
+      const [firstCall] = promptCreate.mock.calls;
+      expect(firstCall).toBeDefined();
+      const { prompt } = firstCall[0] as { prompt: string };
+      expect(prompt.includes('Bound OAuth')).toBe(warns);
+    });
+  });
+
+  /**
+   * The fifth instance of the tenant-scope class, on the surface that reads
+   * the grant.
+   *
+   * A Socket Mode listener creating a session carries tenant IDENTITY and no
+   * transaction. Every repository on this service opens its own scope, but
+   * `resolveMCPOAuthGrantLiveness` takes a raw handle and builds its own — so
+   * its first server read threw `Missing tenant database scope` straight into
+   * the loop's catch, and a new Slack thread stopped being told that a server
+   * its channel selected is unavailable. The cases above could not see it:
+   * they hand the service an unguarded database, where an unscoped read
+   * simply succeeds.
+   */
+  it('warns about an unauthenticated server on a caller holding only tenant context', async () => {
+    const rawDb = await createDatabaseAsync({ dialect: 'sqlite', url: ':memory:' });
+    await runMigrations(rawDb);
+    await new UsersRepository(rawDb).create({
+      user_id: user.user_id,
+      email: user.email,
+      name: user.name,
+      role: 'admin',
+    });
+    await new MCPServerRepository(rawDb).create({
+      mcp_server_id: channelMcpId,
+      name: 'unscoped-oauth',
+      display_name: 'Unscoped OAuth',
+      transport: 'http',
+      url: 'https://mcp.example.test/mcp',
+      scope: 'global',
+      source: 'user',
+      enabled: true,
+      auth: { type: 'oauth', oauth_mode: 'per_user' },
+    } as Parameters<MCPServerRepository['create']>[0]);
+
+    // The production guard: an unscoped read throws rather than succeeding.
+    const db = createTenantScopedDatabaseProxy(rawDb, {
+      requireScope: true,
+      label: 'gateway auth warning scope guard',
+    }) as unknown as TenantScopeAwareDatabase;
     const channel = {
       ...slackChannel,
       mcp_server_ids: [channelMcpId],
     } as unknown as GatewayChannel;
-    const { service, promptCreate } = makeGatewayHarness({ channel, existingMapping: null });
-    Object.assign(service as unknown as Record<string, unknown>, {
-      mcpServerRepo: {
-        findById: vi.fn(async () => ({
-          mcp_server_id: channelMcpId,
-          name: 'bound-oauth',
-          display_name: 'Bound OAuth',
-          transport: 'http',
-          scope: 'global',
-          enabled: true,
-          source: 'user',
-          url: 'https://mcp.example.test',
-          auth: { type: 'oauth', oauth_mode: 'per_user' },
-        })),
-      },
-      userTokenRepo: {
-        getToken: vi.fn(async () => ({
-          user_id: user.user_id,
-          mcp_server_id: channelMcpId,
-          oauth_access_token: 'raw-token-must-not-suppress-warning',
-          oauth_refresh_token: 'raw-refresh-must-not-suppress-warning',
-          grant_generation: 1,
-          grant_binding_version: 5,
-          refresh_status: 'idle',
-          refresh_generation: 0,
-          refresh_success_generation: 0,
-          created_at: new Date(),
-        })),
+    const { createUnscoped, promptCreate } = makeGatewayHarness({
+      channel,
+      existingMapping: null,
+      db,
+      connector: {
+        fetchThreadHistory: vi.fn(async () => ({ has_more: false, messages: [] })),
+        sendMessage: vi.fn(async () => '100.000001'),
       },
     });
 
-    await service.create({
-      channel_key: channel.channel_key,
-      thread_id: 'C123-100.000000',
-      text: 'start',
-      metadata: {
-        channel: 'C123',
-        channel_type: 'channel',
-        slack_has_mention: true,
-        slack_message_ts: '100.000000',
-      },
-    });
-
-    expect(promptCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: expect.stringContaining('Bound OAuth') }),
-      expect.anything()
+    // Tenant context and nothing else, exactly as the listener enters.
+    await runWithTenantContext('tenant-channel', () =>
+      createUnscoped({
+        channel_key: channel.channel_key,
+        thread_id: 'C123-100.000000',
+        text: 'start',
+        metadata: {
+          channel: 'C123',
+          channel_type: 'channel',
+          slack_has_mention: true,
+          slack_message_ts: '100.000000',
+        },
+      })
     );
+
+    const { prompt } = promptCreate.mock.calls[0]![0] as { prompt: string };
+    expect(prompt).toContain('Unscoped OAuth');
   });
 });
 
@@ -2843,6 +3060,101 @@ describe('GatewayService Discord beta routing', () => {
     },
   });
 
+  const validDm = () => ({
+    ...validDiscordInbound(),
+    thread_id: 'discord:dm:923456789012345678:423456789012345678',
+    metadata: {
+      discord_direct_message: true,
+      discord_channel_id: '923456789012345678',
+      discord_author_id: '423456789012345678',
+      discord_bot_user_id: '123456789012345678',
+      discord_message_id: '523456789012345678',
+      discord_role_ids: [],
+      discord_is_thread: false,
+    } as Record<string, unknown>,
+  });
+  const dmChannel = {
+    ...discordChannel,
+    config: { ...discordChannel.config, direct_messages_enabled: true },
+  } as GatewayChannel;
+
+  it.each([
+    { discord_direct_message: undefined },
+    { discord_direct_message: 'true' },
+    { discord_guild_id: '223456789012345678' },
+    { discord_has_mention: true },
+    { discord_reply_to_message_id: '523456789012345678' },
+    { discord_author_id: '623456789012345678' },
+  ])('rejects contradictory or missing DM authority: %j', async (patch) => {
+    const h = makeGatewayHarness({ channel: dmChannel });
+    const inbound = validDm();
+    inbound.metadata = { ...inbound.metadata, ...patch };
+    await expect(h.service.create(inbound)).resolves.toMatchObject({ success: false });
+    expect(h.threadMapRepo.findByChannelAndThread).not.toHaveBeenCalled();
+    expect(h.promptCreate).not.toHaveBeenCalled();
+  });
+
+  it('ignores a DM when the switch is off', async () => {
+    const h = makeGatewayHarness({ channel: discordChannel });
+    await expect(h.service.create(validDm())).resolves.toMatchObject({ success: false });
+    expect(h.sessionsCreate).not.toHaveBeenCalled();
+  });
+
+  it('keeps the DM key, skips seeds and history, and rejects unmapped aligned identities', async () => {
+    const connector = { sendMessage: vi.fn(), fetchProviderHistory: vi.fn() };
+    vi.mocked(getConnector).mockReturnValue(connector as never);
+    const h = makeGatewayHarness({ channel: dmChannel, connector });
+    await expect(h.service.create(validDm())).resolves.toMatchObject({ success: true });
+    expect(h.threadMapRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ thread_id: validDm().thread_id })
+    );
+    expect(h.outboundRepo.admitReplySession).not.toHaveBeenCalled();
+    expect(connector.fetchProviderHistory).not.toHaveBeenCalled();
+    const aligned = makeGatewayHarness({
+      channel: {
+        ...dmChannel,
+        config: { ...dmChannel.config, align_discord_users: true, user_map: {} },
+      } as GatewayChannel,
+    });
+    await expect(aligned.service.create(validDm())).resolves.toMatchObject({ success: false });
+    expect(aligned.promptCreate).not.toHaveBeenCalled();
+  });
+
+  it('refuses direct DM routes but echoes committed Agor prompts except callback prompts', async () => {
+    const connector = { sendMessage: vi.fn(async () => undefined) };
+    vi.mocked(getConnector).mockReturnValue(connector as never);
+    const h = makeGatewayHarness({
+      channel: dmChannel,
+      existingMapping: makeMapping({ channel_id: dmChannel.id, thread_id: validDm().thread_id }),
+      connector,
+    });
+    const route = { session_id: 'sess-1', message: '[Ana]: hello', metadata: { source: 'agor' } };
+    await expect(h.service.routeMessage(route)).resolves.toEqual({ routed: false });
+    expect(connector.sendMessage).not.toHaveBeenCalled();
+    h.service.routeMessageAfterCommit(route, { tenant: { tenant_id: 'tenant-channel' } });
+    await vi.waitFor(() => expect(connector.sendMessage).toHaveBeenCalledOnce());
+    h.service.routeMessageAfterCommit(
+      {
+        ...route,
+        metadata: { ...route.metadata, is_agor_callback: true },
+      },
+      { tenant: { tenant_id: 'tenant-channel' } }
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(connector.sendMessage).toHaveBeenCalledOnce();
+  });
+
+  const discordInboundFiles = [
+    {
+      id: '623456789012345678',
+      name: 'screenshot.png',
+      mimetype: 'image/png',
+      size: 2048,
+      url_private_download:
+        'https://cdn.discordapp.com/attachments/323456789012345678/623456789012345678/screenshot.png?ex=66aabbcc&is=66995a11&hm=signature',
+    },
+  ];
+
   it.each([
     ['guild', { discord_guild_id: '999999999999999999' }],
     ['allowed channel', { discord_channel_id: '923456789012345678' }],
@@ -2867,6 +3179,68 @@ describe('GatewayService Discord beta routing', () => {
       expect(sessionsCreate).not.toHaveBeenCalled();
     }
   );
+
+  it('stages Discord images through the existing owner-bound upload prompt path', async () => {
+    const imageChannel = {
+      ...discordChannel,
+      config: { ...discordChannel.config, files: true },
+    } as GatewayChannel;
+    vi.mocked(ingestDiscordInboundImages).mockResolvedValue({
+      uploads: [
+        {
+          ref: 'upl_00000000-0000-4000-8000-000000000011' as never,
+          name: '623456789012345678_screenshot.png',
+          mimeType: 'image/png',
+          size: 2048,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          expiresAt: '2026-01-02T00:00:00.000Z',
+          provenance: 'gateway-discord',
+        },
+      ],
+      failed: 0,
+    });
+    const harness = makeGatewayHarness({
+      channel: imageChannel,
+      existingMapping: makeMapping({
+        channel_id: imageChannel.id,
+        thread_id: '523456789012345678',
+        metadata: validDiscordInbound().metadata,
+      }),
+      connector: {},
+    });
+    const inbound = { ...validDiscordInbound(), files: discordInboundFiles };
+
+    await expect(harness.service.create(inbound)).resolves.toMatchObject({
+      success: true,
+      sessionId: 'sess-1',
+    });
+    expect(ingestDiscordInboundImages).toHaveBeenCalledWith({
+      files: discordInboundFiles,
+      tenantId: 'tenant-channel',
+      sessionId: 'sess-1',
+      branchId: 'branch-1',
+      createdBy: 'user-1',
+    });
+    expect(harness.promptCreate.mock.calls[0][0].prompt).toContain(
+      'upl_00000000-0000-4000-8000-000000000011'
+    );
+  });
+
+  it('does not stage Discord files when the channel keeps the text-only default', async () => {
+    const harness = makeGatewayHarness({
+      channel: discordChannel,
+      existingMapping: makeMapping({
+        channel_id: discordChannel.id,
+        thread_id: '523456789012345678',
+        metadata: validDiscordInbound().metadata,
+      }),
+      connector: {},
+    });
+    await harness.service.create({ ...validDiscordInbound(), files: discordInboundFiles });
+
+    expect(ingestDiscordInboundImages).not.toHaveBeenCalled();
+    expect(harness.promptCreate.mock.calls[0][0].prompt).toContain('hello');
+  });
 
   it('writes a new Discord mapping with the verified provider thread Snowflake', async () => {
     const harness = makeGatewayHarness({ channel: discordChannel, existingMapping: null });
@@ -3788,6 +4162,30 @@ describe('GatewayService Discord beta routing', () => {
     });
   });
 
+  it.each([
+    'discord_direct_messages_disabled',
+    'discord_dm_target_not_member',
+    'discord_dm_unreachable',
+  ] as const)('preserves %s through emit without recording or retrying', async (code) => {
+    const { service } = makeGatewayHarness({ channel: discordChannel });
+    const outboundRepo = { create: vi.fn() };
+    (service as unknown as { outboundRepo: unknown }).outboundRepo = outboundRepo;
+    const error = new DiscordDirectMessageError(code, 403);
+    const sendDirectMessage = vi.fn().mockRejectedValue(error);
+    vi.mocked(getConnector).mockReturnValue({ sendDirectMessage } as never);
+    await expect(
+      service.emitMessage({
+        gatewayChannelId: discordChannel.id,
+        target: 'user:444444444444444444',
+        message: 'private update',
+        emittedByUserId: user.user_id as UserID,
+        userRole: 'admin',
+      })
+    ).rejects.toBe(error);
+    expect(sendDirectMessage).toHaveBeenCalledOnce();
+    expect(outboundRepo.create).not.toHaveBeenCalled();
+  });
+
   it('rejects Discord threadTs proactive sends before connector admission', async () => {
     const { service } = makeGatewayHarness({ channel: discordChannel });
     vi.mocked(getConnector).mockReturnValue({ sendDirectMessage: vi.fn() } as never);
@@ -3800,7 +4198,7 @@ describe('GatewayService Discord beta routing', () => {
         emittedByUserId: user.user_id as UserID,
         userRole: 'admin',
       })
-    ).rejects.toThrow('fresh channel:<snowflake> seed');
+    ).rejects.toThrow('does not accept thread targets');
   });
 });
 
@@ -3887,7 +4285,13 @@ describe('GatewayService Slack progress tenant scope', () => {
 
     const { service } = makeGatewayHarness({
       db,
-      existingMapping: makeMapping(),
+      existingMapping: makeMapping({
+        thread_id: 'C123-100.000000',
+        metadata: {
+          slack_last_delivered_ts: '101.000000',
+          slack_active_thread_id: 'C123-100.000000',
+        },
+      } as Partial<ThreadSessionMap>),
       connector: { setThreadStatus },
     });
 
@@ -3916,6 +4320,58 @@ describe('GatewayService Slack progress tenant scope', () => {
     expect(seenTenants).toEqual(['tenant-channel']);
     expect(events.indexOf('tx:commit')).toBeLessThan(events.indexOf('status'));
   });
+
+  it.each(['C123', 'G123', 'D123'])(
+    'sends queued/tool status and clears it in order for %s threads',
+    async (conversationId) => {
+      const threadId = `${conversationId}-200.000000`;
+      const setThreadStatus = vi.fn(async () => {});
+      const { service, threadMapRepo } = makeGatewayHarness({
+        existingMapping: makeMapping({
+          // The active thread, not the original mapping root, owns the status.
+          metadata: { slack_active_thread_id: threadId },
+        }),
+        connector: { setThreadStatus },
+      });
+
+      // Exercise the per-session queue without waiting between incoming events.
+      // Tool and terminal updates must bypass the ordinary progress throttle.
+      await runWithTenantContext('tenant-channel', () =>
+        Promise.all(
+          [
+            { state: 'queued' as const },
+            { state: 'working' as const, tool_name: 'Read' },
+            { state: 'done' as const },
+          ].map((event) =>
+            service.updateProgress({ session_id: 'sess-1', task_id: 'task-1', ...event })
+          )
+        )
+      );
+
+      expect(setThreadStatus).toHaveBeenCalledTimes(3);
+      expect(setThreadStatus).toHaveBeenNthCalledWith(1, {
+        threadId,
+        status: 'is queued.',
+        loadingMessages: ['Queued in Agor…'],
+        iconEmoji: ':hourglass_flowing_sand:',
+      });
+      expect(setThreadStatus).toHaveBeenNthCalledWith(2, {
+        threadId,
+        status: 'is using Read.',
+        loadingMessages: ['Using Read…'],
+        iconEmoji: ':hourglass_flowing_sand:',
+      });
+      expect(setThreadStatus).toHaveBeenNthCalledWith(3, {
+        threadId,
+        status: '',
+        loadingMessages: undefined,
+        iconEmoji: ':hourglass_flowing_sand:',
+      });
+      expect(threadMapRepo.updateMetadata).toHaveBeenLastCalledWith(expect.any(String), {
+        slack_active_thread_id: threadId,
+      });
+    }
+  );
 });
 
 describe('GatewayService Slack streaming', () => {
@@ -4022,6 +4478,7 @@ describe('GatewayService outbound emit session branch binding', () => {
     vi.mocked(getConnector).mockReturnValue({ sendSlackMessage, sendDirectMessage } as never);
     const outboundRepo = {
       create: vi.fn(async (data: Record<string, unknown>) => ({ id: 'out-1', ...data })),
+      listDiscordDirectMessageSends: vi.fn(async () => []),
       admitReplySession: vi.fn(async () => null),
       completeReplyAdmission: vi.fn(async () => undefined),
     };

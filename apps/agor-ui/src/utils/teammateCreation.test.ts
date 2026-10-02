@@ -5,7 +5,7 @@ import { createTeammateBranch } from './teammateCreation';
 
 function makeRepo(overrides: Partial<Repo> = {}): Repo {
   return {
-    repo_id: 'repo-1',
+    repo_id: 'repo-1' as UUID,
     slug: 'preset-io/agor-teammate-framework',
     name: 'agor-teammate-framework',
     default_branch: 'main',
@@ -17,8 +17,8 @@ function makeRepo(overrides: Partial<Repo> = {}): Repo {
 
 function makeBranch(overrides: Partial<Branch> = {}): Branch {
   return {
-    branch_id: 'branch-1',
-    repo_id: 'repo-1',
+    branch_id: 'branch-1' as UUID,
+    repo_id: 'repo-1' as UUID,
     name: 'private-pineapple',
     ref: 'private-pineapple',
     path: '/tmp/private-pineapple',
@@ -32,7 +32,7 @@ function makeBranch(overrides: Partial<Branch> = {}): Branch {
 describe('createTeammateBranch', () => {
   it('stores teammate identity, including emoji, in the initial branch create payload', async () => {
     const repo = makeRepo();
-    const branch = makeBranch({ board_id: 'board-1' });
+    const branch = makeBranch({ board_id: 'board-1' as BoardID });
     const onCreateBranch = vi.fn().mockResolvedValue(branch);
     const onUpdateBranch = vi.fn();
     const boardsService = {
@@ -98,12 +98,49 @@ describe('createTeammateBranch', () => {
     expect(onUpdateBranch).not.toHaveBeenCalled();
   });
 
+  it('joins an existing board without a welcome note or replacing its primary when asked', async () => {
+    const repo = makeRepo();
+    const branch = makeBranch({ board_id: 'board-existing' as BoardID });
+    const onCreateBranch = vi.fn().mockResolvedValue(branch);
+    const boardsService = {
+      create: vi.fn(),
+      ensureTeammateWelcomeNote: vi.fn(),
+      setPrimaryTeammate: vi.fn().mockResolvedValue({}),
+    };
+    const client = { service: vi.fn(() => boardsService) };
+
+    await createTeammateBranch(
+      {
+        displayName: 'Rusty',
+        repoId: repo.repo_id,
+        boardId: 'board-existing',
+        welcomeNote: false,
+        keepExistingPrimary: true,
+      },
+      {
+        client: client as never,
+        repoById: new Map([[repo.repo_id, repo]]),
+        onCreateBranch,
+        onUpdateBranch: vi.fn(),
+      }
+    );
+
+    expect(boardsService.create).not.toHaveBeenCalled();
+    expect(boardsService.ensureTeammateWelcomeNote).not.toHaveBeenCalled();
+    expect(onCreateBranch).toHaveBeenCalledWith(
+      repo.repo_id,
+      expect.objectContaining({ boardId: 'board-existing' })
+    );
+    // The server already made the branch primary if the board had none; a client call would overwrite a concurrent one.
+    expect(boardsService.setPrimaryTeammate).not.toHaveBeenCalled();
+  });
+
   it('qualifies a template ref with its source remote while keeping the private repo as destination', async () => {
     const repo = makeRepo({
       slug: 'preset-io/agor-teammate-private',
       remote_url: 'https://github.com/preset-io/agor-teammate-private.git',
     });
-    const branch = makeBranch({ board_id: 'board-1' });
+    const branch = makeBranch({ board_id: 'board-1' as BoardID });
     const onCreateBranch = vi.fn().mockResolvedValue(branch);
     const boardsService = {
       ensureTeammateWelcomeNote: vi.fn().mockResolvedValue({}),
@@ -143,8 +180,8 @@ describe('createTeammateBranch', () => {
   });
 });
 
-it.each([undefined, 'custom-start'])(
-  'Blank uses the chosen repo default, unless a custom ref is explicit: %s',
+it.each([undefined, 'main', 'refs/heads/main', 'custom-start'])(
+  'Blank preserves implicit default versus explicit ref provenance: %s',
   async (sourceBranch) => {
     const repo = makeRepo({ default_branch: 'trunk' });
     const onCreateBranch = vi
@@ -162,7 +199,7 @@ it.each([undefined, 'custom-start'])(
     );
     expect(onCreateBranch).toHaveBeenCalledWith(
       repo.repo_id,
-      expect.objectContaining({ sourceBranch: sourceBranch ?? 'trunk' })
+      expect.objectContaining({ sourceBranch })
     );
     expect(onCreateBranch.mock.calls[0][1]).not.toHaveProperty('sourceRemoteUrl');
   }

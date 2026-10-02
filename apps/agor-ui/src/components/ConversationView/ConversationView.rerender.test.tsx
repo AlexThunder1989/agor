@@ -8,9 +8,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // message subtrees of other tasks — nor untouched messages of task X itself.
 const messageRenders = new Map<string, number>();
 
-vi.mock('../MessageBlock', async () => {
+vi.mock('../MessageBlock', async (importOriginal) => {
   const React = await import('react');
+  // Keep the module's non-component exports (e.g. getMessageSpeaker, which
+  // TaskBlock uses to group avatars) real — only the component is stubbed.
+  const actual = await importOriginal<typeof import('../MessageBlock')>();
   return {
+    ...actual,
     __esModule: true,
     // Memoized like the real MessageBlock — the pin is that props (above all
     // `message`) keep their identity, which is exactly what lets the real,
@@ -149,14 +153,7 @@ describe('ConversationView streaming re-render isolation', () => {
     const streamB = makeStreamingMessage('stream-b', 'task-b', 'partial');
     initialReactiveState = baseState(new Map([['stream-b', streamB]]));
 
-    render(
-      <ConversationView
-        client={null}
-        sessionId={SESSION_ID as any}
-        sessionModel="model"
-        forceExpandAll
-      />
-    );
+    render(<ConversationView client={null} sessionId={SESSION_ID as any} sessionModel="model" />);
 
     expect(screen.getByTestId('msg-stream-b')).toBeInTheDocument();
     const baseline = new Map(messageRenders);
@@ -183,14 +180,7 @@ describe('ConversationView streaming re-render isolation', () => {
     const streamB = makeStreamingMessage('stream-b', 'task-b', 'partial');
     initialReactiveState = baseState(new Map([['stream-b', streamB]]));
 
-    render(
-      <ConversationView
-        client={null}
-        sessionId={SESSION_ID as any}
-        sessionModel="model"
-        forceExpandAll
-      />
-    );
+    render(<ConversationView client={null} sessionId={SESSION_ID as any} sessionModel="model" />);
     const baseline = new Map(messageRenders);
 
     // Same entries, fresh Map identity — e.g. an unrelated field changed on the

@@ -1,6 +1,6 @@
 # Branches (cheat sheet for agents)
 
-> User-facing reference: [`apps/agor-docs/pages/guide/branches.mdx`](../../apps/agor-docs/pages/guide/branches.mdx).
+> User-facing reference: [`apps/agor-docs/content/guide/branches.mdx`](../../apps/agor-docs/content/guide/branches.mdx).
 
 ## The shape
 
@@ -37,6 +37,17 @@ sticky admission fences; failure never authorizes resuming ordinary work.
 invocation identity on that same row. It does not authorize callers or supervise
 executors. Its short claimed transactions must not contain filesystem/network
 work. Invocation uncertainty retains ownership; elapsed time is not settlement.
+The deletion executor's `settled` acknowledgement is narrower than process
+containment: direct storage work has stopped and every upload RPC was acknowledged.
+The executor tracks entry into workspace/SDK-home removal and permits settlement
+only on successful return. Recursive `fs.rm` can reject before sibling removals
+drain; a rejected removal (including Git or validation inside that call) stays
+fenced. Separate pre-removal validation/quiesce failures can still settle.
+Only DB-only requests may still be unknown. `failSettled` drains/fences them under
+the same Branch lock before clearing ownership. It does not infer rollback. An
+unknown upload or a claimed legacy invocation without this evidence stays blocked;
+see the guide's **Deletion recovery** section. Failed, never-claimed dispatches
+can instead be replaced atomically, fencing any late old claim by generation.
 `db/branch-admission.ts` supplies the Branch-first lock for producer admission.
 Do not expose maintenance methods or internal claim JSON as generic CRUD.
 
@@ -55,6 +66,7 @@ empty descendant query as proof of filesystem/process containment.
 - **Never use subprocess for git.** Always `simple-git` via `packages/core/src/git/index.ts`.
 - **Port allocation** uses `branch.unique_id` (monotonic per repo). Templates like `{{add 9000 branch.unique_id}}` resolve in environment configs.
 - **Permanent deletion is executor-owned**: `commands/branch-deletion.ts` drives authenticated `branch-deletion-steps` requests; `BranchDeletionRepository` drains owned data before branch-row-last finalization. The shared maintenance claim fences managed producers. Known activity and best-effort terminal closure are not proof that detached processes stopped. Unknown invocations remain fenced; never retry on heartbeat age alone.
+- Delegated permanent deletion is opt-in through `execution.delegated_branch_deletion`; its executor verifies that tenant worktrees, repos, and branch homes share an external storage device before removal. A missing or inconsistent mount must leave the branch fenced.
 - **Moving a branch** requires branch Manager authority and Editor/Manager access on both boards. Inherited permissions follow the destination defaults; explicit overrides and primary ownership remain unchanged.
 - **Deleting a board** first materializes every inheriting branch as an override, including the shared-session prompt switch.
 - **Sessions reference branches**, not the other way around. Cascading from branch → sessions, not sessions → branch.

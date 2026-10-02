@@ -106,6 +106,7 @@ import { startOpenSourceTelemetryUsageSummaryInterval } from './utils/open-sourc
 import { assertRealtimePublishPolicyCoverage } from './utils/realtime-publish-policy.js';
 import { resolveSandboxProtectedDataRoots } from './utils/sandbox-context.js';
 import { configureDaemonUrl, configureExecutor } from './utils/spawn-executor.js';
+import { assertTenantServiceClassification } from './utils/tenant-service-classification.js';
 import { configureUploadStagingStoreFromConfig } from './utils/upload-staging.js';
 import { registerAllWidgets } from './widgets/index.js';
 
@@ -757,10 +758,14 @@ async function startDaemonWithOwnedMetrics(
     buildInfo: DAEMON_BUILD_INFO,
     workIdentity: distributedWorkIdentity,
     multiTenancy,
+    websocketCompression: effectiveConfig.daemon?.websocket_compression !== false,
     ...(realtimeRuntime
       ? { adapter: realtimeRuntime.adapter, onServerCreated: (io) => realtimeRuntime.attach(io) }
       : {}),
   });
+  if (effectiveConfig.daemon?.websocket_compression === false) {
+    console.log('WebSocket compression disabled via config (daemon.websocket_compression=false)');
+  }
   app.configure(socketio(socketIOConfig.serverOptions, socketIOConfig.callback));
   configureChannels(app);
   configureSwagger(app, { version: DAEMON_VERSION, port: DAEMON_PORT });
@@ -917,6 +922,18 @@ async function startDaemonWithOwnedMetrics(
   // not request data.
   // --------------------------------------------------------------------------
   assertRealtimePublishPolicyCoverage(app);
+
+  // --------------------------------------------------------------------------
+  // Phase 3.6: Every registered service must also have declared WHERE its
+  // tenant database scope is armed — `scoped`, `identity-only`, or a narrowly
+  // reviewed `system`. One defect class (an unclassified route reaching a free
+  // function from identity-only context, the guard error laundered into a
+  // generic refusal) has shipped five times; declaring the policy at
+  // registration is what stops a new service from reintroducing it. Services
+  // that predate the mechanism are baselined, and that baseline may only
+  // shrink. Deterministic for the same reason as the assertion above.
+  // --------------------------------------------------------------------------
+  assertTenantServiceClassification(app);
 
   // --------------------------------------------------------------------------
   // Phase 4: Startup (orphan cleanup, health, scheduler, listen, shutdown)

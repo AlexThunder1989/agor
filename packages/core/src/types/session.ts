@@ -218,7 +218,22 @@ export function getDefaultPermissionMode(agenticTool: AgenticToolName): Permissi
 export const SESSION_SDK_HOME_SCOPES = ['execution_home', 'branch'] as const;
 export type SessionSdkHomeScope = (typeof SESSION_SDK_HOME_SCOPES)[number];
 
+export interface SessionUsageSummary {
+  total: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+  cost: number;
+}
+
 export interface Session {
+  /** Create-response-only warning count; not persisted. No server identity is disclosed. */
+  mcp_defaults_skipped?: number;
+
+  /** Read-only, opt-in aggregate over all tasks, independent of transcript paging. */
+  usage_summary?: SessionUsageSummary;
+
   /** Unique session identifier (UUIDv7) */
   session_id: SessionID;
 
@@ -624,17 +639,25 @@ export type SchedulerInitializationFailureCode =
 /** Session data accepted before defaults and configuration references are materialized. */
 export type CreateSessionInput = Omit<
   Partial<Session>,
-  'agentic_tool' | 'agentic_tool_preset_id' | 'model_config' | 'sdk_home_scope'
+  | 'agentic_tool'
+  | 'agentic_tool_preset_id'
+  | 'model_config'
+  | 'sdk_home_scope'
+  | 'usage_summary'
+  | 'mcp_defaults_skipped'
 > & {
   agentic_tool?: AgenticToolName;
   agentic_tool_preset_id?: AgenticToolConfigurationReference | null;
   model_config?: Partial<NonNullable<Session['model_config']>> | null;
-  /** MCP server IDs to attach in the same create call (issue #2629). */
+  /** Strict explicit selection (including []); omit to inherit branch then user defaults. */
   mcpServerIds?: string[];
 };
 
 /** Session patch semantics: omit/undefined preserves, string sets, null clears. */
-export type SessionUpdate = Omit<Partial<Session>, 'sdk_session_id' | 'sdk_home_scope'> & {
+export type SessionUpdate = Omit<
+  Partial<Session>,
+  'sdk_session_id' | 'sdk_home_scope' | 'usage_summary' | 'mcp_defaults_skipped'
+> & {
   sdk_session_id?: string | null;
 };
 
@@ -749,6 +772,87 @@ export function getGatewaySource(session: Pick<Session, 'custom_context'>): Gate
   const s = source as Record<string, unknown>;
   if (!s.channel_id || !s.channel_name || !s.channel_type || !s.thread_id) return null;
   return source as GatewaySource;
+}
+
+/**
+ * Bulky, single-session `custom_context` keys that a lean session list omits.
+ *
+ * `scheduled_run` (the scheduler's run snapshot) and the SDK-reported
+ * `slash_commands` / `skills` inventories are read only for one open session,
+ * yet they make up most of every session row. `sessions.find({ lean: true })`
+ * drops them from each row; `sessions.get` always returns them. Everything
+ * else in `custom_context` (e.g. `gateway_source`, user template fields) stays.
+ */
+export const LEAN_SESSION_LIST_OMITTED_CONTEXT_KEYS = [
+  'scheduled_run',
+  'slash_commands',
+  'skills',
+] as const;
+
+export type LeanSessionListOmittedContextKey =
+  (typeof LEAN_SESSION_LIST_OMITTED_CONTEXT_KEYS)[number];
+
+/** `read_shape` stamped on every row of `sessions.find({ lean: true })`. */
+export const SESSION_LIST_ROW_SHAPE = 'session-list-v1';
+
+/**
+ * A row from `sessions.find({ lean: true })`: a session summary whose
+ * `custom_context` has the `LEAN_SESSION_LIST_OMITTED_CONTEXT_KEYS` withheld.
+ *
+ * Every lean row carries `read_shape` — also when the stored context never had
+ * those keys — so a consumer can tell "withheld" from "absent". Full rows
+ * (`sessions.get`, a find without `lean`, realtime events) never carry it.
+ * Read withheld keys only after `hasFullSessionDetails`, or from `sessions.get`.
+ */
+export type SessionListRow = Omit<Session, 'custom_context'> & {
+  custom_context?: Record<string, unknown> & {
+    gateway_source?: GatewaySource;
+  } & { [K in LeanSessionListOmittedContextKey]?: never };
+  readonly read_shape: typeof SESSION_LIST_ROW_SHAPE;
+};
+
+/** True when `row` is a lean list row (its withheld context keys are unknown). */
+export function isSessionListRow(row: Session | SessionListRow): row is SessionListRow {
+  return (row as { read_shape?: unknown }).read_shape === SESSION_LIST_ROW_SHAPE;
+}
+
+/**
+ * True when `row` is a full session record, so a missing withheld
+ * `custom_context` key (e.g. `scheduled_run`) really is absent.
+ */
+export function hasFullSessionDetails(row: Session | SessionListRow): boolean {
+  return !isSessionListRow(row);
+}
+
+/**
+ * Project a session row for a lean list: a copy with the withheld
+ * `custom_context` keys removed and the enumerable, read-only `read_shape`
+ * marker set. The copy keeps every own property descriptor, including
+ * non-enumerable ones such as the hidden `tenant_id` the daemon's tenant
+ * after-hook checks. The withheld keys are always removed, whatever
+ * `read_shape` the input claims, so a forged marker cannot carry them through.
+ */
+export function toLeanSessionListRow(session: Session | SessionListRow): SessionListRow {
+  const { read_shape: _claimed, ...descriptors } = Object.getOwnPropertyDescriptors(
+    session
+  ) as PropertyDescriptorMap;
+  const copy = Object.create(Object.getPrototypeOf(session), descriptors) as Record<
+    string,
+    unknown
+  >;
+  const context = session.custom_context;
+  if (context && LEAN_SESSION_LIST_OMITTED_CONTEXT_KEYS.some((key) => key in context)) {
+    const lean: Record<string, unknown> = { ...context };
+    for (const key of LEAN_SESSION_LIST_OMITTED_CONTEXT_KEYS) delete lean[key];
+    copy.custom_context = lean;
+  }
+  Object.defineProperty(copy, 'read_shape', {
+    value: SESSION_LIST_ROW_SHAPE,
+    enumerable: true,
+    writable: false,
+    configurable: false,
+  });
+  return copy as unknown as SessionListRow;
 }
 
 /**

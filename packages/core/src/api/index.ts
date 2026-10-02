@@ -1,3 +1,10 @@
+import type {
+  KNOWLEDGE_TRANSFER,
+  KnowledgeTransferBody,
+  KnowledgeTransferPage,
+  KnowledgeTransferWrite,
+  KnowledgeTransferWriteResult,
+} from '../types/knowledge-transfer';
 /**
  * Feathers Client for Agor
  *
@@ -15,9 +22,10 @@ import type {
   BoardCommentPatch,
   BoardCommentReposition,
   BoardExportBlob,
+  BoardImportResult,
   Branch,
   BranchCapabilityPolicy,
-  BranchEnvironmentUpdate,
+  CancelQueuedTasksInput,
   CapabilityPolicyWorkspacePreferences,
   CardType,
   CardWithType,
@@ -64,6 +72,7 @@ import type {
   OwnershipTransferResult,
   PatchAgenticToolPreset,
   PermissionMode,
+  ReorderQueuedTasksInput,
   Repo,
   RuntimeTelemetryInput,
   Schedule,
@@ -74,6 +83,7 @@ import type {
   SessionID,
   SessionUpdate,
   Task,
+  TaskQueueMutationResult,
   TeammateWelcomeNoteRequest,
   TemplateRenderRequest,
   TemplateRenderResponse,
@@ -92,7 +102,12 @@ import type { Application, Paginated, Params } from '@feathersjs/feathers';
 import { feathers } from '@feathersjs/feathers';
 import socketio from '@feathersjs/socketio-client';
 import io, { type Socket } from 'socket.io-client';
-import { DAEMON, MESSAGE_PAGINATION, PAGINATION } from '../config/constants';
+import {
+  BROWSER_FEATHERS_ACK_TIMEOUT_MS,
+  DAEMON,
+  MESSAGE_PAGINATION,
+  PAGINATION,
+} from '../config/constants';
 
 /**
  * Default daemon URL for client connections
@@ -541,6 +556,8 @@ export interface TasksService extends AgorService<Task> {
   reportRuntimeTelemetry(data: RuntimeTelemetryInput, params?: Params): Promise<Task>;
   /** Report a daemon-authorized SDK watchdog decision. */
   reportSdkHealthFailure(data: SdkHealthFailureInput, params?: Params): Promise<Task>;
+  cancelQueued(data: CancelQueuedTasksInput, params?: Params): Promise<TaskQueueMutationResult>;
+  reorderQueued(data: ReorderQueuedTasksInput, params?: Params): Promise<TaskQueueMutationResult>;
   /**
    * Mark a task as completed
    */
@@ -657,7 +674,7 @@ export interface BoardsService extends AgorService<Board> {
   /**
    * Import board from a JSON blob
    */
-  fromBlob(blob: BoardExportBlob, params?: Params): Promise<Board>;
+  fromBlob(blob: BoardExportBlob, params?: Params): Promise<BoardImportResult>;
 
   /**
    * Export board to YAML string
@@ -667,7 +684,10 @@ export interface BoardsService extends AgorService<Board> {
   /**
    * Import board from YAML string
    */
-  fromYaml(data: { yaml?: string; content?: string } | string, params?: Params): Promise<Board>;
+  fromYaml(
+    data: { yaml?: string; content?: string } | string,
+    params?: Params
+  ): Promise<BoardImportResult>;
 
   /**
    * Clone an existing board with a new name
@@ -714,7 +734,7 @@ export interface UsersService extends AgorService<User> {
    * recorded as an explicit user pick.
    */
   setPrimaryTeammate(
-    data: { branchId: string; expectedUserId: UserID },
+    data: { branchId: string | null; expectedUserId: UserID },
     params?: Params
   ): Promise<Branch | null>;
   /** Set an onboarding/default teammate only when the caller is still unset. */
@@ -765,22 +785,6 @@ export interface BranchesService extends AgorService<Branch> {
    * Remove branch from board
    */
   removeFromBoard(id: string, params?: Params): Promise<Branch>;
-
-  /**
-   * Update environment status
-   */
-  updateEnvironment(
-    data:
-      | {
-          branch_id?: string;
-          branchId?: string;
-          environment_update?: BranchEnvironmentUpdate;
-          environmentUpdate?: BranchEnvironmentUpdate;
-        }
-      | string,
-    environmentUpdate?: BranchEnvironmentUpdate,
-    params?: Params
-  ): Promise<Branch>;
 
   /**
    * Start branch environment
@@ -872,6 +876,11 @@ export interface AgorClient
   service(path: `board-comments/${string}/reposition`): BoardCommentRepositionService;
 
   // Standard services (CRUD only)
+  service(path: typeof KNOWLEDGE_TRANSFER.path): {
+    find(params?: Params): Promise<KnowledgeTransferPage>;
+    get(id: string, params?: Params): Promise<KnowledgeTransferBody>;
+    create(data: KnowledgeTransferWrite, params?: Params): Promise<KnowledgeTransferWriteResult>;
+  };
   service(path: 'cards'): AgorService<CardWithType>;
   service(path: 'card-types'): AgorService<CardType>;
   service(path: 'users'): UsersService;
@@ -949,7 +958,7 @@ function extendBoardsService(client: AgorClient): void {
 
   const rawFromBlob = (
     boardsService as unknown as {
-      fromBlob?: (data: BoardExportBlob, params?: Params) => Promise<Board>;
+      fromBlob?: (data: BoardExportBlob, params?: Params) => Promise<BoardImportResult>;
     }
   ).fromBlob?.bind(boardsService);
 
@@ -974,7 +983,7 @@ function extendBoardsService(client: AgorClient): void {
 
   const rawFromYaml = (
     boardsService as unknown as {
-      fromYaml?: (data: unknown, params?: Params) => Promise<Board>;
+      fromYaml?: (data: unknown, params?: Params) => Promise<BoardImportResult>;
     }
   ).fromYaml?.bind(boardsService);
 
@@ -1357,7 +1366,7 @@ function extendBranchesService(client: AgorClient): void {
   };
   if (branchesService[BRANCHES_SERVICE_EXTENDED]) return;
   if (typeof branchesService.methods === 'function') {
-    branchesService.methods('updateEnvironment', 'ensureTeammateKnowledgeNamespace', 'clean');
+    branchesService.methods('ensureTeammateKnowledgeNamespace', 'clean');
   }
   branchesService[BRANCHES_SERVICE_EXTENDED] = true;
 }
@@ -1373,7 +1382,9 @@ function extendTasksService(client: AgorClient): void {
       'connectExecutor',
       'reportTerminationComplete',
       'reportRuntimeTelemetry',
-      'reportSdkHealthFailure'
+      'reportSdkHealthFailure',
+      'cancelQueued',
+      'reorderQueued'
     );
   }
   tasksService[TASKS_SERVICE_EXTENDED] = true;
@@ -1588,7 +1599,10 @@ export function createClient(
     verbose?: boolean;
     /** Limit reconnection attempts (useful for CLI to avoid hanging) */
     reconnectionAttempts?: number;
-    /** Reject acknowledged service calls when Socket.IO does not receive an acknowledgement. */
+    /**
+     * Reject acknowledged service calls when Socket.IO does not receive an
+     * acknowledgement. Browsers default to BROWSER_FEATHERS_ACK_TIMEOUT_MS.
+     */
     ackTimeout?: number;
     /** Authenticate each Socket.IO connection before the server accepts it. */
     socketAuthentication?: SocketConnectionAuthentication;
@@ -1597,6 +1611,12 @@ export function createClient(
   // Detect if running in browser vs Node.js (CLI)
   // Use 'in' operator to avoid TypeScript index signature errors during DTS build
   const isBrowser = typeof globalThis !== 'undefined' && 'window' in globalThis;
+
+  // Without an ack deadline Socket.IO discards, rather than rejects, the
+  // callback of a call in flight at disconnect, so the caller's promise never
+  // settles. Browser tabs drop sockets routinely (sleep, backgrounding).
+  const ackTimeout =
+    options?.ackTimeout ?? (isBrowser ? BROWSER_FEATHERS_ACK_TIMEOUT_MS : undefined);
 
   // Configure socket.io with better defaults for React StrictMode and reconnection
   const socketAuthentication = options?.socketAuthentication;
@@ -1612,7 +1632,7 @@ export function createClient(
       options?.reconnectionAttempts ?? (isBrowser ? Number.POSITIVE_INFINITY : 2),
     // Timeout settings
     timeout: 20000, // 20s timeout for initial connection
-    ...(options?.ackTimeout === undefined ? {} : { ackTimeout: options.ackTimeout }),
+    ...(ackTimeout === undefined ? {} : { ackTimeout }),
     // Transports (WebSocket preferred, fallback to polling)
     transports: ['websocket', 'polling'],
     // Connection lifecycle settings

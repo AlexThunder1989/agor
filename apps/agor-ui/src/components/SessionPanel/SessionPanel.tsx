@@ -16,6 +16,7 @@ import type {
 } from '@agor-live/client';
 import {
   getDefaultPermissionMode,
+  hasFullSessionDetails,
   isAgenticToolName,
   mapToCodexPermissionConfig,
   SessionStatus,
@@ -37,10 +38,10 @@ import {
 import type { InputRef, MenuProps } from 'antd';
 import {
   Alert,
-  App,
   Badge,
   Button,
   Dropdown,
+  Flex,
   Input,
   Modal,
   Space,
@@ -54,8 +55,8 @@ import { getDaemonUrl } from '../../config/daemon';
 import { useAppActions } from '../../contexts/AppActionsContext';
 import { useRecenterMap } from '../../contexts/CanvasNavigationContext';
 import { useConnectionDisabled } from '../../contexts/ConnectionContext';
+import { useConfirmArchiveSession } from '../../hooks/useConfirmArchiveSession';
 import { useIsMobileViewport } from '../../hooks/useIsMobileViewport';
-import { useSessionActions } from '../../hooks/useSessionActions';
 import { useSessionSearch } from '../../hooks/useSessionSearch';
 import { useSharedReactiveSession } from '../../hooks/useSharedReactiveSession';
 import { useAgorStore } from '../../store/agorStore';
@@ -76,19 +77,19 @@ import {
   readPromptDraftSeed,
   savePromptDraft,
 } from '../../utils/promptDrafts';
+import { getSessionStatusLabel } from '../../utils/sessionStatus';
 import { getSessionDisplayTitle, getSessionTitleStyles } from '../../utils/sessionTitle';
 import { AgentSelectionGrid } from '../AgentSelectionGrid/AgentSelectionGrid';
 import { AutocompleteTextarea } from '../AutocompleteTextarea';
 import { FileUpload } from '../FileUpload';
 import { ForkSpawnModal } from '../ForkSpawnModal/ForkSpawnModal';
 import type { ModelConfig } from '../ModelSelector';
-import { CreatedByTag } from '../metadata';
 import { getUrlDisplayLabel } from '../Pill/url-helpers';
 import { ToolIcon } from '../ToolIcon';
+import { UserIdentityAvatar } from '../UserIdentityAvatar';
 import {
   buildPromptWithAttachments,
   getComposerAttachmentFailureMessage,
-  getComposerUploadAccept,
   getLatestComposerPromptText,
   isBlockingComposerAttachment,
 } from './composerAttachments';
@@ -99,6 +100,7 @@ import { SessionAttachmentTray } from './SessionAttachmentTray';
 import { SessionComposerDropZone } from './SessionComposerDropZone';
 import { SessionFooter } from './SessionFooter';
 import { SessionPanelContent } from './SessionPanelContent';
+import { buildSpawnPromptContext } from './spawn-prompt-context';
 import {
   isStopTransportAmbiguous,
   reconcileStopTransportFailure,
@@ -337,7 +339,6 @@ PromptInput.displayName = 'PromptInput';
 // a fresh array — the memos deriving footer props from `tasks` (and through
 // them the memoized SessionFooter) key on its identity.
 const EMPTY_TASKS: Task[] = [];
-
 export interface SessionPanelProps {
   client: AgorClient | null;
   session: Session | null;
@@ -365,7 +366,6 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
   const mobileHeaderButtonStyle: React.CSSProperties | undefined = isMobileShell
     ? { minWidth: MOBILE_TOUCH_TARGET, minHeight: MOBILE_TOUCH_TARGET }
     : undefined;
-  const { modal } = App.useApp();
   const { showSuccess, showInfo, showError } = useThemedMessage();
   const connectionDisabled = useConnectionDisabled();
   const recenterMap = useRecenterMap();
@@ -391,7 +391,7 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
     availableAgents,
   } = useAppActions();
 
-  const { archiveSession } = useSessionActions(client);
+  const confirmArchive = useConfirmArchiveSession(client);
 
   // Click-to-edit session title, inline in the header — see render below.
   // Draft is seeded from the *explicit* title only (not the description
@@ -523,7 +523,6 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
   );
   const [scrollToBottom, setScrollToBottom] = React.useState<(() => void) | null>(null);
   const [scrollToTop, setScrollToTop] = React.useState<(() => void) | null>(null);
-  const [queuedTasks, setQueuedTasks] = React.useState<Task[]>([]);
   const [forkModalOpen, setForkModalOpen] = React.useState(false);
   const [spawnModalOpen, setSpawnModalOpen] = React.useState(false);
   const [uploadModalOpen, setUploadModalOpen] = React.useState(false);
@@ -541,13 +540,14 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
   const reactiveSessionId = session?.session_id ?? null;
   const { state: reactiveSessionState } = useSharedReactiveSession(client, reactiveSessionId, {
     enabled: open,
-    // ConversationView retains the same lazy handle. Keeping the cache key
+    // ConversationView retains the same lean handle. Keeping the cache key
     // identical collapses duplicate Session bootstrap/reconnect reads while
-    // preserving the transcript's latest-task hydration contract.
-    reactiveOptions: { taskHydration: 'lazy' },
+    // preserving paged history without eager historical tool hydration.
+    reactiveOptions: { taskHydration: 'lean' },
   });
 
   const tasks = reactiveSessionState?.tasks || EMPTY_TASKS;
+  const queuedTasks = reactiveSessionState?.queuedTasks ?? EMPTY_TASKS;
   React.useEffect(() => {
     if (
       forceFailTarget &&
@@ -631,87 +631,6 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
   const composerSendInFlightRef = React.useRef<typeof composerSessionIdentityRef.current | null>(
     null
   );
-
-  // Fetch queued tasks (post never-lose-prompt: queueing lives on tasks, not messages).
-  React.useEffect(() => {
-    if (!client || !session) return;
-
-    const fetchQueue = async () => {
-      try {
-        const response = await client.service(`/sessions/${session.session_id}/tasks/queue`).find();
-        const data = (response as { data: Task[] }).data || [];
-        setQueuedTasks(data);
-      } catch (error) {
-        console.error('[SessionPanel] Failed to fetch queue:', error);
-      }
-    };
-
-    fetchQueue();
-
-    const tasksService = client.service('tasks');
-
-    const handleQueued = (task: Task) => {
-      if (task.session_id === session.session_id) {
-        setQueuedTasks((prev) => {
-          // Deduplicate: optimistic update from enqueue may have already added this task
-          if (prev.some((t) => t.task_id === task.task_id)) return prev;
-          return [...prev, task].sort((a, b) => (a.queue_position ?? 0) - (b.queue_position ?? 0));
-        });
-      }
-    };
-
-    // A queued task drops out of the drawer when its status flips off 'queued'
-    // (drained by spawnTaskExecutor → RUNNING, or admin-cancelled to STOPPED).
-    const handleTaskPatched = (task: Task) => {
-      if (task.session_id !== session.session_id) return;
-      if (task.status !== TaskStatus.QUEUED) {
-        setQueuedTasks((prev) => prev.filter((t) => t.task_id !== task.task_id));
-      }
-    };
-
-    const handleTaskRemoved = (task: Task) => {
-      if (task.session_id === session.session_id) {
-        setQueuedTasks((prev) => prev.filter((t) => t.task_id !== task.task_id));
-      }
-    };
-
-    tasksService.on('queued', handleQueued);
-    tasksService.on('patched', handleTaskPatched);
-    tasksService.on('updated', handleTaskPatched);
-    tasksService.on('removed', handleTaskRemoved);
-
-    return () => {
-      tasksService.off('queued', handleQueued);
-      tasksService.off('patched', handleTaskPatched);
-      tasksService.off('updated', handleTaskPatched);
-      tasksService.off('removed', handleTaskRemoved);
-    };
-  }, [client, session]);
-
-  // Token breakdown calculation
-  const tokenBreakdown = React.useMemo(() => {
-    if (!session?.agentic_tool) {
-      return { total: 0, input: 0, output: 0, cacheRead: 0, cacheCreation: 0, cost: 0 };
-    }
-
-    return tasks.reduce(
-      (acc, task) => {
-        if (!task.normalized_sdk_response) return acc;
-
-        const { tokenUsage, costUsd } = task.normalized_sdk_response;
-
-        return {
-          total: acc.total + tokenUsage.totalTokens,
-          input: acc.input + tokenUsage.inputTokens,
-          output: acc.output + tokenUsage.outputTokens,
-          cacheRead: acc.cacheRead + (tokenUsage.cacheReadTokens || 0),
-          cacheCreation: acc.cacheCreation + (tokenUsage.cacheCreationTokens || 0),
-          cost: acc.cost + (costUsd || 0),
-        };
-      },
-      { total: 0, input: 0, output: 0, cacheRead: 0, cacheCreation: 0, cost: 0 }
-    );
-  }, [tasks, session?.agentic_tool]);
 
   // Get latest context window
   const latestContextWindow = React.useMemo(() => {
@@ -909,7 +828,17 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
   // The composer subtree only depends on composer/draft state — memoize it so
   // ordinary SessionPanel re-renders (reactive-session notifies, store
   // patches) hand the memoized SessionFooter a reference-stable slot.
-  const sessionCustomContext = session?.custom_context as Record<string, unknown> | undefined;
+  // Store rows may be lean list rows that withhold the SDK-reported
+  // slash_commands / skills inventories; the reactive session holds the full
+  // record from `sessions.get` (kept current by realtime patches). Fall back to
+  // the store row only when it is itself a full record.
+  const fullSession =
+    reactiveSessionState?.session?.session_id === session?.session_id
+      ? reactiveSessionState?.session
+      : session && hasFullSessionDetails(session)
+        ? session
+        : null;
+  const sessionCustomContext = fullSession?.custom_context as Record<string, unknown> | undefined;
   const promptInputSlot = React.useMemo(() => {
     if (!session) return null;
     return (
@@ -968,7 +897,6 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
         <input
           ref={attachmentInputRef}
           type="file"
-          accept={getComposerUploadAccept()}
           multiple
           disabled={composerAttachmentUploading}
           style={{ display: 'none' }}
@@ -1020,22 +948,7 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
       return;
     }
 
-    modal.confirm({
-      title: 'Archive session and same-branch children?',
-      content:
-        'This archives the session and its same-branch forked or spawned descendants. Remote-created sessions remain active.',
-      okText: 'Archive',
-      cancelText: 'Cancel',
-      onOk: async () => {
-        const archived = await archiveSession(session.session_id);
-        if (archived) {
-          showSuccess('Session and same-branch children archived');
-          onClose();
-        } else {
-          showError('Failed to archive session');
-        }
-      },
-    });
+    confirmArchive(session.session_id, { onArchived: onClose });
   };
 
   const hasBranchActions = !!branch;
@@ -1374,25 +1287,7 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
     // forwarding prompt; the spawn config's `permissionMode` is rendered into
     // the meta-prompt as the *child* session's intended mode. They're distinct
     // — don't reuse one for the other.
-    const spawnConfig =
-      typeof config === 'string'
-        ? { userPrompt: config }
-        : {
-            userPrompt: config.prompt || '',
-            agenticTool: config.agent,
-            permissionMode: config.permissionMode,
-            modelConfig: config.modelConfig,
-            codexSandboxMode: config.codexSandboxMode,
-            codexApprovalPolicy: config.codexApprovalPolicy,
-            codexNetworkAccess: config.codexNetworkAccess,
-            mcpServerIds: config.mcpServerIds,
-            callbackConfig: {
-              enableCallback: config.enableCallback,
-              includeLastMessage: config.includeLastMessage,
-              includeOriginalPrompt: config.includeOriginalPrompt,
-            },
-            extraInstructions: config.extraInstructions,
-          };
+    const spawnConfig = buildSpawnPromptContext(config);
 
     await client
       .service(`sessions/${session.session_id}/spawn-prompt`)
@@ -1472,6 +1367,16 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
     }
   };
 
+  const creator =
+    session.created_by && session.created_by !== currentUserId
+      ? userById.get(session.created_by)
+      : undefined;
+  const creatorName = creator
+    ? creator.name || creator.email.split('@')[0]
+    : session.created_by === 'anonymous'
+      ? 'Anonymous'
+      : 'Unknown user';
+
   const getStatusColor = () => {
     switch (session.status) {
       case 'running':
@@ -1509,7 +1414,6 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
       session={activeSession}
       currentUserId={currentUserId}
       footerTimerTask={footerTimerTask}
-      tokenBreakdown={tokenBreakdown}
       latestContextWindow={latestContextWindow}
       footerGradient={footerGradient}
       sessionMcpServerIds={sessionMcpServerIds}
@@ -1564,14 +1468,22 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
       <div
         style={{
           flexShrink: 0,
-          padding: `${token.sizeUnit * 3}px ${token.sizeUnit * 6}px`,
+          padding: `${token.paddingSM}px ${token.padding}px`,
           borderBottom: `1px solid ${token.colorBorder}`,
           background: token.colorBgContainer,
         }}
       >
         {/* Row 1: icon + title + badge + actions, center-aligned */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: token.marginXS,
+              alignItems: 'center',
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
             {/* Mobile: a full-screen session reads as a dismissible overlay, so a
                 leading Close (X) is the right metaphor. Desktop keeps its
                 trailing Close on the right (below). */}
@@ -1587,7 +1499,7 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
               </Tooltip>
             )}
             <div style={{ flexShrink: 0 }}>
-              <ToolIcon tool={session.agentic_tool} size={40} />
+              <ToolIcon tool={session.agentic_tool} size={24} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               {editingTitle ? (
@@ -1607,7 +1519,11 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
                   }}
                   placeholder="Untitled session"
                   variant="borderless"
-                  style={{ fontSize: 18, fontWeight: 600, padding: 0 }}
+                  style={{
+                    fontSize: token.fontSizeLG,
+                    fontWeight: token.fontWeightStrong,
+                    padding: 0,
+                  }}
                 />
               ) : (
                 <Tooltip title="Click to rename">
@@ -1635,7 +1551,10 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
                   >
                     <Typography.Text
                       strong
-                      style={{ fontSize: 18, ...getSessionTitleStyles(isMobileShell ? 1 : 2) }}
+                      style={{
+                        fontSize: token.fontSizeLG,
+                        ...getSessionTitleStyles(isMobileShell ? 1 : 2),
+                      }}
                     >
                       {session.title || session.description
                         ? getSessionDisplayTitle(session, { includeAgentFallback: false })
@@ -1653,17 +1572,27 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
                   </button>
                 </Tooltip>
               )}
-              <Badge status={getStatusColor()} text={session.status.toUpperCase()} />
-              {session.created_by && (
-                <div style={{ marginTop: token.sizeUnit }}>
-                  <CreatedByTag
-                    createdBy={session.created_by}
-                    currentUserId={currentUserId}
-                    userById={userById}
-                    prefix="Created by"
-                  />
-                </div>
-              )}
+              <Flex align="center" gap={token.marginXXS} wrap>
+                <Badge status={getStatusColor()} />
+                <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
+                  {getSessionStatusLabel(session.status)}
+                </Typography.Text>
+                {session.created_by && session.created_by !== currentUserId && (
+                  <>
+                    <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
+                      ·
+                    </Typography.Text>
+                    <Tooltip title={`Created by ${creatorName}`}>
+                      <Flex align="center" gap={token.marginXXS}>
+                        <UserIdentityAvatar user={creator} size={16} style={{ flexShrink: 0 }} />
+                        <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
+                          {creatorName}
+                        </Typography.Text>
+                      </Flex>
+                    </Tooltip>
+                  </>
+                )}
+              </Flex>
             </div>
           </div>
           <Space size={4}>
@@ -1745,7 +1674,7 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
               </Typography.Text>
             )}
             {!query && !isMobileShell && (
-              <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+              <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
                 Esc to close
               </Typography.Text>
             )}
@@ -1815,9 +1744,7 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
               >
                 <SearchOutlined style={{ fontSize: 16, color: token.colorTextTertiary }} />
               </div>
-              <Typography.Text strong style={{ fontSize: 13 }}>
-                No results
-              </Typography.Text>
+              <Typography.Text strong>No results</Typography.Text>
               <Typography.Text
                 type="secondary"
                 style={{ fontSize: 12, textAlign: 'center', lineHeight: 1.5, maxWidth: 200 }}
@@ -1859,13 +1786,11 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
             setScrollToBottom={setScrollToBottom}
             setScrollToTop={setScrollToTop}
             queuedTasks={queuedTasks}
-            setQueuedTasks={setQueuedTasks}
             spawnModalOpen={spawnModalOpen}
             setSpawnModalOpen={setSpawnModalOpen}
             onSpawnModalConfirm={handleSpawnModalConfirm}
             inputValueRef={inputValueRef}
             isOpen={open}
-            forceExpandAll={searchOpen && query.trim().length > 0}
           />
         </div>
 
@@ -1958,7 +1883,7 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
           onCancel={() => setSwitchToolOpen(false)}
           footer={null}
         >
-          <Typography.Paragraph type="secondary" style={{ fontSize: 13 }}>
+          <Typography.Paragraph type="secondary">
             Choose a different tool for this session. Since nothing has been sent yet, this replaces
             the session in place.
           </Typography.Paragraph>

@@ -7,7 +7,7 @@ import type {
   SpawnConfig,
 } from '@agor-live/client';
 import { getTeammateConfig, isTeammate } from '@agor-live/client';
-import { LeftOutlined, RobotOutlined } from '@ant-design/icons';
+import { LeftOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons';
 import {
   Alert,
   Badge,
@@ -24,6 +24,7 @@ import {
 } from 'antd';
 import type React from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { useCanManageBoard } from '../../hooks/useCanManageBoard';
 import { useAgorStore } from '../../store/agorStore';
 import {
   selectBranchById,
@@ -35,6 +36,7 @@ import {
 import { mapToArray } from '../../utils/mapHelpers';
 import { useThemedMessage } from '../../utils/message';
 import { BranchSessionSections } from '../BranchCard';
+import { BranchFilesystemRecovery } from '../BranchFilesystemRecovery';
 import { BranchHeaderPill } from '../BranchHeaderPill';
 import { BoardBranchList, BoardSessionList } from '../BranchListDrawer';
 import { BranchMetadataRow } from '../BranchMetadataRow';
@@ -76,6 +78,8 @@ interface BoardTeammatePanelProps {
   unreadCommentsCount?: number;
   hasUserMentions?: boolean;
   onCollapse?: () => void;
+  /** Opens teammate creation targeted at this board (it becomes the primary). */
+  onCreateTeammate?: () => void;
   deferSessionDetails?: boolean;
   onDeferredDetailsHydrated?: () => void;
   client: AgorClient | null;
@@ -106,6 +110,7 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
   unreadCommentsCount = 0,
   hasUserMentions = false,
   onCollapse,
+  onCreateTeammate,
   deferSessionDetails = false,
   onDeferredDetailsHydrated,
   client,
@@ -120,6 +125,14 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
   const userById = useAgorStore(selectUserById);
   const commentById = useAgorStore(selectCommentById);
   const boardObjects = board?.objects;
+  const canEditBoard = useCanManageBoard(
+    client,
+    board ?? undefined,
+    currentUserId ? userById.get(currentUserId) : undefined
+  );
+  // A primary whose branch or repo is not loaded yet must not be offered for replacement.
+  const canCreateTeammate =
+    canEditBoard && !!onCreateTeammate && !board?.primary_teammate_id && !primaryTeammateBranch;
   const defaultTab: BoardTeammatePanelTab = primaryTeammateInaccessible
     ? 'all-sessions'
     : 'teammate';
@@ -227,7 +240,7 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
   }, [teammateOptions, selectedTeammateId]);
 
   const handleAssignTeammate = async () => {
-    if (!board || !client || !selectedTeammateId) return;
+    if (!board || !client || !selectedTeammateId || !canEditBoard) return;
 
     const teammate = branchById.get(selectedTeammateId);
     if (!teammate) return;
@@ -283,11 +296,13 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
               borderBottom: `1px solid ${token.colorBorderSecondary}`,
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: token.marginXS, minWidth: 0 }}
+            >
               <div
                 style={{
-                  width: 36,
-                  height: 36,
+                  width: token.fontSizeHeading3,
+                  height: token.fontSizeHeading3,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -295,29 +310,34 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
                 }}
               >
                 {isCreating ? (
-                  <Spin />
+                  <Spin size="small" />
                 ) : teammateConfig?.emoji ? (
-                  <span style={{ fontSize: 30 }}>{teammateConfig.emoji}</span>
+                  <span style={{ fontSize: token.fontSizeHeading3, lineHeight: 1 }}>
+                    {teammateConfig.emoji}
+                  </span>
                 ) : (
-                  <RobotOutlined style={{ fontSize: 30, color: token.colorInfo }} />
+                  <RobotOutlined
+                    style={{ fontSize: token.fontSizeHeading3, color: token.colorInfo }}
+                  />
                 )}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                 <Typography.Title
-                  level={4}
-                  style={{ margin: 0, fontWeight: 600 }}
+                  level={5}
+                  style={{ margin: 0 }}
                   ellipsis={{
                     tooltip: teammateConfig?.displayName ?? primaryTeammateBranch.name,
                   }}
                 >
                   {teammateConfig?.displayName ?? primaryTeammateBranch.name}
                 </Typography.Title>
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
                   Primary teammate
                 </Typography.Text>
               </div>
             </div>
 
+            <BranchFilesystemRecovery branch={primaryTeammateBranch} client={client} />
             <BranchMetadataRow
               branch={primaryTeammateBranch}
               repo={primaryTeammateRepo}
@@ -403,33 +423,44 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
             </Typography.Text>
           }
           style={{ padding: '24px 0 16px' }}
-        />
-        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-          <Typography.Text strong>Assign an existing teammate</Typography.Text>
-          <Select
-            showSearch
-            placeholder="Select a teammate"
-            value={selectedTeammateId}
-            onChange={setSelectedTeammateId}
-            options={teammateOptions}
-            optionFilterProp="searchText"
-            disabled={assigningTeammate || teammateOptions.length === 0}
-            style={{ width: '100%' }}
-          />
-          {teammateOptions.length === 0 && (
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              No existing teammates are available to assign.
-            </Typography.Text>
+        >
+          {canCreateTeammate && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={onCreateTeammate}>
+              Create AI teammate
+            </Button>
           )}
-          <Button
-            type="primary"
-            onClick={handleAssignTeammate}
-            loading={assigningTeammate}
-            disabled={!selectedTeammateId || !board || !client}
-          >
-            Assign
-          </Button>
-        </Space>
+        </Empty>
+        {canEditBoard && (!canCreateTeammate || teammateOptions.length > 0) && (
+          <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+            <Typography.Text strong>
+              {canCreateTeammate ? 'Or assign an existing teammate' : 'Assign an existing teammate'}
+            </Typography.Text>
+            <Select
+              showSearch
+              aria-label="Select a teammate"
+              placeholder="Select a teammate"
+              value={selectedTeammateId}
+              onChange={setSelectedTeammateId}
+              options={teammateOptions}
+              optionFilterProp="searchText"
+              disabled={assigningTeammate || teammateOptions.length === 0}
+              style={{ width: '100%' }}
+            />
+            {teammateOptions.length === 0 && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                No existing teammates are available to assign.
+              </Typography.Text>
+            )}
+            <Button
+              type={canCreateTeammate ? 'default' : 'primary'}
+              onClick={handleAssignTeammate}
+              loading={assigningTeammate}
+              disabled={!selectedTeammateId || !board || !client}
+            >
+              Assign
+            </Button>
+          </Space>
+        )}
       </div>
     );
   })();
@@ -496,16 +527,30 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
           {
             key: 'comments',
             label: (
-              <Badge
-                count={unreadCommentsCount}
-                size="small"
-                offset={[8, 0]}
-                style={{
-                  backgroundColor: hasUserMentions ? token.colorError : token.colorPrimaryBgHover,
-                }}
-              >
-                <span>Comments</span>
-              </Badge>
+              <span style={{ display: 'inline-flex', alignItems: 'flex-start' }}>
+                Comments
+                {/* In-flow (so the tab measures it and the scrolling list never clips it),
+                    raised into the tab's top padding and tucked over the label's end. */}
+                <Badge
+                  count={unreadCommentsCount}
+                  size="small"
+                  styles={{
+                    root: {
+                      position: 'relative',
+                      top: -token.paddingXS,
+                      // An empty badge still has a root; do not subtract from
+                      // the measured label width after the unread count clears.
+                      marginInlineStart: unreadCommentsCount > 0 ? -token.marginXS : 0,
+                    },
+                    indicator: {
+                      paddingInline: token.paddingXXS,
+                      backgroundColor: hasUserMentions
+                        ? token.colorError
+                        : token.colorPrimaryBgHover,
+                    },
+                  }}
+                />
+              </span>
             ),
             children: board ? (
               <div style={{ height: 'calc(100vh - 112px)' }}>
@@ -531,21 +576,34 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
             ),
           },
         ]}
+        rootClassName="agor-panel-tabs"
+        tabBarGutter={token.marginSM}
         style={{ height: '100%' }}
-        styles={{ body: { height: '100%' }, content: { height: '100%' } }}
-        tabBarStyle={{ margin: 0, padding: '0 12px' }}
+        styles={{
+          body: { height: '100%' },
+          content: { height: '100%' },
+          item: { fontSize: token.fontSizeSM, padding: `${token.paddingXS}px 0` },
+        }}
+        tabBarStyle={{ margin: 0 }}
+        // Insets live in the extra slots, not tab-bar padding: rc-tabs measures the bar
+        // minus its extras, so padding would hide overflow from its scroll/fade logic.
         tabBarExtraContent={{
-          right: onCollapse ? (
-            <Tooltip title="Collapse panel" placement="bottom">
-              <Button
-                type="text"
-                size="small"
-                icon={<LeftOutlined style={{ fontSize: 11 }} />}
-                onClick={onCollapse}
-                style={{ marginRight: 4 }}
-              />
-            </Tooltip>
-          ) : undefined,
+          left: <div style={{ width: token.padding }} />,
+          right: (
+            <div style={{ paddingInlineEnd: token.paddingXXS }}>
+              {onCollapse && (
+                <Tooltip title="Collapse panel" placement="bottom">
+                  <Button
+                    type="text"
+                    size="small"
+                    aria-label="Collapse panel"
+                    icon={<LeftOutlined style={{ fontSize: 11 }} />}
+                    onClick={onCollapse}
+                  />
+                </Tooltip>
+              )}
+            </div>
+          ),
         }}
       />
     </div>
