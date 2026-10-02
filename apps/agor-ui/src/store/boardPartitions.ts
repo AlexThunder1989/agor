@@ -188,6 +188,9 @@ export function loadBoardPartition(
         const touched = (collection: HydratedCollection, id: string) =>
           touchedSince(collection, id, fence.startRevisions[collection]);
         store().applyMaps((prev) => applyBoardPartition(prev, snapshot, touched));
+        // `applyMaps` notifies subscribers synchronously; one may have ended
+        // this lifetime (logout, remount) or started a load that owns the entry.
+        if (!isCurrent()) return;
         store().setBoardPartition(boardId, { status: 'loaded', authorityScope, loadEpoch });
         return;
       } catch (err) {

@@ -417,6 +417,46 @@ describe('loadBoardPartition', () => {
     expect(agorStore.getState().sessionById.has('s-2')).toBe(true);
   });
 
+  it("never records loaded into the next user's store when its apply's subscriber logs out", async () => {
+    const { client, release } = makePartitionClient({ sessions: [session('s-1', 'br-1')] });
+    const load = loadBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true });
+    // `applyMaps` notifies synchronously: switch identity from inside it.
+    const unsubscribe = agorStore.subscribe((state) => {
+      if (!state.sessionById.has('s-1')) return;
+      unsubscribe();
+      cancelAllHydrations();
+      agorStore.getState().reset();
+      setRealtimeAuthorityScope('user-b:member:1');
+    });
+    release();
+    await load;
+    expect(agorStore.getState().boardPartitions.has(BOARD)).toBe(false);
+    expect(ready()).toBe(false);
+  });
+
+  it('never overwrites the entry of a load that superseded it during its apply', async () => {
+    const first = makePartitionClient({ sessions: [session('s-1', 'br-1')] });
+    const second = makePartitionClient({ sessions: [session('s-2', 'br-1')] });
+    const load = loadBoardPartition(first.client, BOARD, { canUseMemberWorkspaceServices: true });
+    let reload: Promise<void> | undefined;
+    const unsubscribe = agorStore.subscribe((state) => {
+      if (!state.sessionById.has('s-1')) return;
+      unsubscribe();
+      cancelAllHydrations(); // remount: a new lifetime loads the board again
+      reload = loadBoardPartition(second.client, BOARD, { canUseMemberWorkspaceServices: true });
+    });
+    first.release();
+    await load;
+    const entry = agorStore.getState().boardPartitions.get(BOARD);
+    expect(entry?.status).toBe('loading');
+    expect(isPartitionStateCurrent(entry)).toBe(true);
+    second.release();
+    await reload;
+    expect(agorStore.getState().sessionById.has('s-2')).toBe(true);
+    expect(ready()).toBe(true);
+    expect(isPartitionStateCurrent(agorStore.getState().boardPartitions.get(BOARD))).toBe(true);
+  });
+
   it('never applies after the restart budget: records a retryable error instead', async () => {
     let calls = 0;
     const client = {
