@@ -614,6 +614,8 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
        * only an explicit re-apply captures a new ticket.
        */
       stale?: boolean;
+      /** The last save was rejected (e.g. permission): the draft stays open. */
+      saveError?: string;
     } | null>(null);
     const [markdownContent, setMarkdownContent] = useState('');
     const [markdownWidth, setMarkdownWidth] = useState(500); // Default width
@@ -2733,6 +2735,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
         }
 
         const objectId = markdownModal.objectId || `markdown-${Date.now()}`;
+        const saved = markdownModal.objectId ? board.objects?.[objectId] : undefined;
         const position = markdownModal.position;
         const objectData: BoardObject = {
           type: 'markdown',
@@ -2766,6 +2769,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
         });
 
         // Persist to backend
+        setMarkdownModal((current) => (current ? { ...current, saveError: undefined } : current));
         try {
           await client.service('boards').patch(ticket.boardId, {
             _action: 'upsertObject',
@@ -2774,10 +2778,22 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
           } as unknown as Partial<Board>);
         } catch (error) {
           console.error('Failed to save markdown note:', error);
-          // Rollback optimistic update
+          // Rollback optimistic update: the note shows what is saved.
           if (!markdownModal.objectId) {
             setNodes((nodes) => nodes.filter((n) => n.id !== objectId));
+          } else if (saved?.type === 'markdown') {
+            setNodes((nodes) =>
+              nodes.map((n) =>
+                n.id === objectId
+                  ? { ...n, data: { ...n.data, content: saved.content, width: saved.width } }
+                  : n
+              )
+            );
           }
+          // Keep the editor open with the draft; only a successful save closes it.
+          const reason = error instanceof Error && error.message ? error.message : String(error);
+          setMarkdownModal((current) => (current ? { ...current, saveError: reason } : current));
+          return;
         }
 
         closeMarkdownModal();
@@ -3272,6 +3288,15 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
             okButtonProps={{ disabled: !markdownContent.trim() || !canMutateBoard }}
             width={1000}
           >
+            {markdownModal.saveError && !markdownModal.stale && (
+              <Alert
+                type="error"
+                showIcon
+                title="Note not saved."
+                description={markdownModal.saveError}
+                style={{ marginBottom: 16 }}
+              />
+            )}
             {markdownModal.stale && (
               <Alert
                 type="warning"

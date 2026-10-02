@@ -8,7 +8,7 @@ import type {
   Session,
   User,
 } from '@agor-live/client';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from 'antd';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -844,6 +844,74 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
       release();
     });
     expect(patch).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the markdown editor and draft open when the save is rejected, and closes on a successful retry', async () => {
+    const noteBoard = {
+      ...board,
+      objects: {
+        ...board.objects,
+        'markdown-1': { type: 'markdown', x: 0, y: 0, width: 300, content: 'Old note' },
+      },
+    } as Board;
+    const patch = vi
+      .fn(async () => ({}))
+      .mockRejectedValueOnce(new Error('You do not have permission to edit this board.'));
+    const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
+    renderCanvas(client, noteBoard);
+    await act(async () => {});
+    const note = currentNode('markdown-1') as FlowNode & {
+      data: { onEdit: (id: string, content: string, width: number) => void };
+    };
+    act(() => note.data.onEdit('markdown-1', 'Old note', 300));
+    fireEvent.change(await screen.findByDisplayValue('Old note'), {
+      target: { value: 'My careful draft' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    });
+    expect(boardPatches(patch)).toHaveLength(1);
+    // Still open, with the draft and the reason; the note shows what is saved.
+    expect(screen.getByText('Edit Markdown Note')).toBeTruthy();
+    expect(screen.getByDisplayValue('My careful draft')).toBeTruthy();
+    expect(screen.getByText(/You do not have permission to edit this board/)).toBeTruthy();
+    expect(
+      (currentNode('markdown-1') as FlowNode & { data: { content: string } }).data.content
+    ).toBe('Old note');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    });
+    expect(boardPatches(patch)).toHaveLength(2);
+    await waitFor(() => expect(screen.queryByText('Edit Markdown Note')).toBeNull());
+  });
+
+  it('keeps a new markdown note draft open when its create is rejected', async () => {
+    const patch = vi.fn(async () => {
+      throw new Error('Forbidden');
+    });
+    const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
+    renderCanvas(client);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: 'Add Markdown Note' }));
+    act(() => {
+      (flowProps as unknown as { onPaneClick: (event: unknown) => void }).onPaneClick({
+        clientX: 50,
+        clientY: 60,
+      });
+    });
+    fireEvent.change(await screen.findByPlaceholderText(/# Title/), {
+      target: { value: 'A fresh note' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    });
+    expect(boardPatches(patch)).toHaveLength(1);
+    expect(screen.getByText('Add Markdown Note', { selector: '.ant-modal-title' })).toBeTruthy();
+    expect(screen.getByDisplayValue('A fresh note')).toBeTruthy();
+    expect(screen.getByText(/Forbidden/)).toBeTruthy();
+    // The optimistic note is rolled back.
+    expect(flowProps?.nodes.some((candidate) => candidate.type === 'markdown')).toBe(false);
   });
 
   it('keeps a markdown draft rejected by a reload and saves it only on an explicit re-apply', async () => {
