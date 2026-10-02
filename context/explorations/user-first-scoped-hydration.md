@@ -12,7 +12,7 @@ Status: design, revision 3 (2026-10-01), with Kamil's decisions applied (see bel
 
 - **Base:** `main`, which now contains the agent-first Home stack (#2905 → #2906 → #2901 → #2907) and lean PR #2887. The analysis below was done on the stack tip `6f8f538b`.
 - **Delivery:** one branch and one PR, reviewable commit by commit.
-- **Implementation status:** Step 1 (1.1–1.5) is implemented and rebased onto `main`. Session list reads go through `sessionListQuery` and are lean. The previous revision's 1.3 (edits to the old Home sections) is abandoned.
+- **Implementation status:** Steps 1 (1.1–1.5) and 2 (2.1–2.2) are implemented on this branch, which is based on `main`. Session list reads go through `sessionListQuery` and are lean. The previous revision's 1.3 (edits to the old Home sections) is abandoned.
 - **Step 1 review fixes (2026-10-01):** contracts that changed after review, in the code:
   - Every load (first paint, user scope, partitions) is fenced by a **load lifetime** (`store/loadLifetime.ts`: authority + cancellation epoch, captured before the first await). The user scope and partition records carry the starting load's lifetime.
   - The first-paint/resync wholesale apply keeps every id touched by a live event during the load; a gated page that raced my own sessions never skips U1.
@@ -21,6 +21,12 @@ Status: design, revision 3 (2026-10-01), with Kamil's decisions applied (see bel
   - Older daemon: rejected (400) or ignored keys put the scope in a terminal degraded state (`userScopeDegraded`); until 3.3 the global snapshots complete the flags (§10.2).
   - Caps are visible: `mySessionsTruncated` renders "N+" and suppresses "All caught up"; the teammate read reports its real `total` and sets `teammatesTruncated`.
   - On `/s/`, only U1 waits for the opened transcript.
+- **Step 2 (2026-10-02):** implemented. Contracts that differ from §4.3–§4.5 and §6 as written:
+  - Two shared reducers in `store/scopeMerge.ts`, both per-id fenced: `fillScope` (insert absent rows only) and `replaceScope` (also overwrite present rows and remove rows the scope claims that the snapshot omits). A row is removed only when no other loading/loaded scope claims it (`otherLoadedScopes`: board partitions, the user scope, and until 3.3 the global session/branch sets). Membership is a predicate on the current store row, not a per-load record.
+  - Partition loads fill branches and sessions (the global sets own them until 3.3) and reconcile board objects, cards and the full board record, so reopening an unloaded board drops stale rows.
+  - A reconnect reconciles the displayed board in place (board objects and cards read by `board_id`, one `boards.get`, a lean boards list) and unloads every other board. Home reads no board objects, cards or full boards. A board is ready only when its partition is loaded.
+  - Session↔MCP links: the touched fence is per (session, server) pair for `created`/`removed` and per session for a `patched` complete selection. `updateSessionMcpServers` refuses a session whose links are not loaded; a reconnect or authority change marks every session unloaded.
+  - Settings → Cards reads its own set when opened (all cards, card placements, `boards.get` for zone names). The mobile board page gates its empty states on `boardReady`.
 
 Paths are repo-relative: `UI` = `apps/agor-ui/src`, `D` = `apps/agor-daemon/src`, `core` = `packages/core/src`. `UI` line numbers refer to the stack tip. Daemon and core line numbers refer to `main`; the stack changes only `core/types/user.ts` there.
 
