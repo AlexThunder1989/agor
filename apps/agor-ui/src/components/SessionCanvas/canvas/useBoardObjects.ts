@@ -5,7 +5,12 @@
 import type { AgorClient, Board, BoardEntityObject, BoardObject } from '@agor-live/client';
 import { useCallback, useRef } from 'react';
 import type { Node } from 'reactflow';
-import { useMutationGate } from '../../../contexts/ConnectionContext';
+import {
+  BOARD_RELOADED_WARNING,
+  type BoardMutationGuard,
+  useBoardMutationGuard,
+} from '../../../hooks/useBoardMutationGuard';
+import type { BoardWriteTicket } from '../../../store/boardMutationGuard';
 import { useThemedMessage } from '../../../utils/message';
 import {
   computeLayerChanges,
@@ -26,9 +31,20 @@ interface UseBoardObjectsProps {
    *  "selected" outline. */
   activeUrlTargetArtifactId?: string | null;
   onEditMarkdown?: (objectId: string, content: string, width: number) => void;
-  /** Effective board.edit permission, resolved by the canvas. */
-  canEdit?: boolean;
+  /**
+   * The canvas's board.edit write guard. Every board-object write passes it:
+   * immediate actions capture a ticket when they run, dialogs pass the ticket
+   * captured when they opened, and batches pass the ticket of their queue.
+   */
+  guard: BoardMutationGuard;
 }
+
+/**
+ * The ticket a write runs under: `undefined` means an immediate action
+ * (capture now); a dialog passes the ticket it captured on open (`null` if
+ * the board couldn't be written then).
+ */
+type WriteTicketArg = BoardWriteTicket | null | undefined;
 
 function zonesOverlap(
   a: Extract<BoardObject, { type: 'zone' }>,
@@ -46,16 +62,25 @@ export const useBoardObjects = ({
   eraserMode = false,
   activeUrlTargetArtifactId,
   onEditMarkdown,
-  canEdit = true,
+  guard,
 }: UseBoardObjectsProps) => {
   // Use ref to avoid recreating callbacks when board changes
   const boardRef = useRef(board);
   boardRef.current = board;
-  const canEditRef = useRef(canEdit);
-  canEditRef.current = canEdit;
-  const mutationGate = useMutationGate();
-  const canMutateRef = useRef(mutationGate.canMutate);
-  canMutateRef.current = mutationGate.canMutate;
+  const guardRef = useRef(guard);
+  guardRef.current = guard;
+  const canEdit = guard.canMutate;
+  // Artifact lifecycle authorization is creator/admin based rather than
+  // board.edit based, but its board object is still board data: it needs the
+  // partition loaded and the connection usable like every other write.
+  const artifactGuard = useBoardMutationGuard(board?.board_id, true);
+  const artifactGuardRef = useRef(artifactGuard);
+  artifactGuardRef.current = artifactGuard;
+  /** The ticket for a write: the dialog's own, or one captured now. */
+  const ticketFor = useCallback(
+    (ticket: WriteTicketArg) => (ticket === undefined ? guardRef.current.capture() : ticket),
+    []
+  );
 
   const { showError } = useThemedMessage();
 
@@ -68,24 +93,32 @@ export const useBoardObjects = ({
    * Update an existing board object
    */
   const handleUpdateObject = useCallback(
-    async (objectId: string, objectData: BoardObject) => {
-      const currentBoard = boardRef.current;
-      if (!canEditRef.current || !currentBoard || !client) return false;
+    async (objectId: string, objectData: BoardObject, ticketArg?: WriteTicketArg) => {
+      if (!client) return false;
+      const ticket = ticketFor(ticketArg);
 
       try {
-        await client.service('boards').patch(currentBoard.board_id, {
-          _action: 'upsertObject',
-          objectId,
-          objectData,
-        } as unknown as Partial<Board>);
-        return true;
+        // A dialog's draft from before a reload is dropped with a warning and
+        // resolves `undefined`, which closes the dialog (`false` keeps it open
+        // for a retry after a failed request).
+        const sent = await guardRef.current.write(
+          ticket,
+          () =>
+            client.service('boards').patch(ticket?.boardId ?? '', {
+              _action: 'upsertObject',
+              objectId,
+              objectData,
+            } as unknown as Partial<Board>),
+          ticketArg === undefined ? undefined : BOARD_RELOADED_WARNING
+        );
+        return sent ? true : ticketArg === undefined ? false : undefined;
       } catch (error) {
         console.error('Failed to update object:', error);
         showError('Failed to save board object');
         return false;
       }
     },
-    [client, showError] // Only depend on stable services, not board
+    [client, showError, ticketFor] // Only depend on stable services, not board
   );
 
   /**
@@ -113,7 +146,8 @@ export const useBoardObjects = ({
   const reorderObject = useCallback(
     async (objectId: string, op: LayerOp) => {
       const currentBoard = boardRef.current;
-      if (!canEditRef.current || !currentBoard || !client) return;
+      const ticket = guardRef.current.capture();
+      if (!ticket || !currentBoard || !client) return;
 
       const objects = currentBoard.objects ?? {};
       const target = objects[objectId];
@@ -137,10 +171,12 @@ export const useBoardObjects = ({
       if (Object.keys(patches).length === 0) return;
 
       try {
-        await client.service('boards').patch(currentBoard.board_id, {
-          _action: 'mergeObjectFields',
-          objects: patches,
-        } as unknown as Partial<Board>);
+        await guardRef.current.write(ticket, () =>
+          client.service('boards').patch(ticket.boardId, {
+            _action: 'mergeObjectFields',
+            objects: patches,
+          } as unknown as Partial<Board>)
+        );
       } catch (error) {
         console.error('Failed to reorder object:', error);
         showError('Failed to reorder zone');
@@ -153,8 +189,12 @@ export const useBoardObjects = ({
    * Delete a zone (branch-centric: zones can pin branches)
    */
   const deleteZone = useCallback(
-    async (objectId: string, _deleteAssociatedSessions: boolean) => {
-      if (!canEditRef.current || !board || !client) return;
+    async (objectId: string, _deleteAssociatedSessions: boolean, ticketArg?: WriteTicketArg) => {
+      const ticket = ticketFor(ticketArg);
+      if (!client || !guardRef.current.isCurrent(ticket)) {
+        if (ticketArg !== undefined) guardRef.current.warnDropped();
+        return;
+      }
 
       // Mark as deleted to prevent re-appearance during WebSocket updates
       deletedObjectsRef.current.add(objectId);
@@ -165,7 +205,7 @@ export const useBoardObjects = ({
       setNodes((nodes) => nodes.filter((n) => n.id !== objectId));
 
       try {
-        await client.service('boards').patch(board.board_id, {
+        await client.service('boards').patch(ticket.boardId, {
           _action: 'deleteZone',
           objectId,
         } as unknown as Partial<Board>);
@@ -181,16 +221,19 @@ export const useBoardObjects = ({
         // Note: WebSocket update should restore the actual state
       }
     },
-    [board, client, setNodes, deletedObjectsRef]
+    [client, setNodes, deletedObjectsRef, ticketFor]
   );
 
   /**
    * Delete a board object
    */
   const deleteObject = useCallback(
-    async (objectId: string) => {
-      const currentBoard = boardRef.current;
-      if (!canEditRef.current || !currentBoard || !client) return;
+    async (objectId: string, ticketArg?: WriteTicketArg) => {
+      const ticket = ticketFor(ticketArg);
+      if (!client || !guardRef.current.isCurrent(ticket)) {
+        if (ticketArg !== undefined) guardRef.current.warnDropped();
+        return;
+      }
 
       // Mark as deleted to prevent re-appearance during WebSocket updates
       deletedObjectsRef.current.add(objectId);
@@ -199,7 +242,7 @@ export const useBoardObjects = ({
       setNodes((nodes) => nodes.filter((n) => n.id !== objectId));
 
       try {
-        await client.service('boards').patch(currentBoard.board_id, {
+        await client.service('boards').patch(ticket.boardId, {
           _action: 'removeObject',
           objectId,
         } as unknown as Partial<Board>);
@@ -215,7 +258,7 @@ export const useBoardObjects = ({
         deletedObjectsRef.current.delete(objectId);
       }
     },
-    [client, setNodes, deletedObjectsRef] // Removed board dependency
+    [client, setNodes, deletedObjectsRef, ticketFor] // Removed board dependency
   );
 
   /**
@@ -223,11 +266,14 @@ export const useBoardObjects = ({
    * Uses the artifacts service's lifecycle-safe remove method.
    */
   const deleteArtifact = useCallback(
-    async (objectId: string, artifactId: string) => {
-      // Artifact lifecycle authorization is creator/admin based rather than
-      // board.edit based, but it still obeys the global connection/version
-      // mutation gate. The ref protects callbacks captured before reconnect.
-      if (!canMutateRef.current || !client) return;
+    async (objectId: string, artifactId: string, ticketArg?: WriteTicketArg) => {
+      // Lifecycle-guarded (see `artifactGuard`); a confirmation passes the
+      // ticket it captured when it opened.
+      const ticket = ticketArg === undefined ? artifactGuardRef.current.capture() : ticketArg;
+      if (!client || !artifactGuardRef.current.isCurrent(ticket)) {
+        if (ticketArg !== undefined) artifactGuardRef.current.warnDropped();
+        return;
+      }
 
       // Mark as deleted to prevent re-appearance during WebSocket updates
       deletedObjectsRef.current.add(objectId);
@@ -333,6 +379,7 @@ export const useBoardObjects = ({
               isActiveUrlTarget: objectData.artifact_id === activeUrlTargetArtifactId,
               onUpdate: handleUpdateObject,
               onDeleteArtifact: deleteArtifact,
+              beginArtifactDelete: artifactGuard.capture,
             },
           };
         }
@@ -356,6 +403,7 @@ export const useBoardObjects = ({
               onUpdate: handleUpdateObject,
               onEdit: onEditMarkdown,
               onDelete: deleteObject,
+              beginBoardWrite: guard.capture,
             },
           };
         }
@@ -430,6 +478,7 @@ export const useBoardObjects = ({
             onUpdate: handleUpdateObject,
             onDelete: deleteZone,
             onReorder: reorderObject,
+            beginBoardWrite: guard.capture,
           },
         };
       });
@@ -445,6 +494,8 @@ export const useBoardObjects = ({
     activeUrlTargetArtifactId,
     onEditMarkdown,
     canEdit,
+    guard.capture,
+    artifactGuard.capture,
   ]);
 
   /**
@@ -452,8 +503,8 @@ export const useBoardObjects = ({
    */
   const addZoneNode = useCallback(
     async (x: number, y: number) => {
-      const currentBoard = boardRef.current;
-      if (!canEditRef.current || !currentBoard || !client) return;
+      const ticket = guardRef.current.capture();
+      if (!ticket || !client) return;
 
       const objectId = `zone-${Date.now()}`;
       const width = 400;
@@ -486,7 +537,7 @@ export const useBoardObjects = ({
 
       // Persist atomically
       try {
-        await client.service('boards').patch(currentBoard.board_id, {
+        await client.service('boards').patch(ticket.boardId, {
           _action: 'upsertObject',
           objectId,
           objectData: {
@@ -512,10 +563,17 @@ export const useBoardObjects = ({
    * Batch update positions for board objects after drag
    */
   const batchUpdateObjectPositions = useCallback(
-    async (updates: Record<string, { x: number; y: number }>) => {
+    async (
+      updates: Record<string, { x: number; y: number }>,
+      ticket: BoardWriteTicket | null
+    ): Promise<boolean> => {
       const currentBoard = boardRef.current;
-      if (!canEditRef.current || !currentBoard || !client || Object.keys(updates).length === 0)
-        return;
+      if (!currentBoard || !client || Object.keys(updates).length === 0) return true;
+      // The batch's queue ticket, checked right before the request (a batch
+      // resumes here after awaiting earlier writes). Resolves false if dropped.
+      if (!guardRef.current.isCurrent(ticket) || currentBoard.board_id !== ticket.boardId) {
+        return false;
+      }
 
       try {
         // Build objects payload with full object data + new positions
@@ -538,16 +596,17 @@ export const useBoardObjects = ({
         }
 
         if (Object.keys(objects).length === 0) {
-          return;
+          return true;
         }
 
-        await client.service('boards').patch(currentBoard.board_id, {
+        await client.service('boards').patch(ticket.boardId, {
           _action: 'batchUpsertObjects',
           objects,
         } as unknown as Partial<Board>);
       } catch (error) {
         console.error('Failed to persist object positions:', error);
       }
+      return true;
     },
     [client, deletedObjectsRef] // Removed board dependency
   );

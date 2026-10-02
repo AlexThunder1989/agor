@@ -4,6 +4,9 @@ import { App as AntApp } from 'antd';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectionProvider } from '../../../contexts/ConnectionContext';
+import { useBoardMutationGuard } from '../../../hooks/useBoardMutationGuard';
+import { agorStore } from '../../../store/agorStore';
+import type { BoardWriteTicket } from '../../../store/boardMutationGuard';
 import { useBoardObjects } from './useBoardObjects';
 
 // Spy the themed error toast so the failure path of reorderObject is observable.
@@ -28,7 +31,18 @@ const connectionState = {
   currentSha: null,
 };
 
+function loadBoard() {
+  agorStore.getState().setBoardPartition('board-1', {
+    status: 'loaded',
+    authorityScope: 'fixture',
+    loadEpoch: 0,
+  });
+}
+
 beforeEach(() => {
+  // Board writes need the board's partition loaded (`useBoardMutationGuard`).
+  agorStore.setState({ boardPartitions: new Map() });
+  loadBoard();
   showError.mockClear();
   connectionState.connected = true;
   connectionState.connecting = false;
@@ -72,7 +86,7 @@ function renderReorder(board: Board, client: unknown, canEdit = true) {
         boardObjectsForBoard: [],
         setNodes: vi.fn(),
         deletedObjectsRef: { current: new Set<string>() },
-        canEdit: effectiveCanEdit,
+        guard: useBoardMutationGuard(board.board_id, effectiveCanEdit),
       }),
     { wrapper, initialProps: { effectiveCanEdit: canEdit } }
   );
@@ -179,7 +193,7 @@ describe('updateObject', () => {
           boardObjectsForBoard: [],
           setNodes,
           deletedObjectsRef: { current: new Set<string>() },
-          canEdit,
+          guard: useBoardMutationGuard(board.board_id, canEdit),
         }),
       { wrapper, initialProps: { canEdit: true } }
     );
@@ -196,6 +210,60 @@ describe('updateObject', () => {
 
     expect(patch).not.toHaveBeenCalled();
     expect(setNodes).not.toHaveBeenCalled();
+  });
+});
+
+describe('board reloads', () => {
+  const note = { type: 'markdown', x: 0, y: 0, width: 300, content: 'Review' } as BoardObject;
+
+  it('drops a dialog write whose ticket predates an unload, even after the board reloads', async () => {
+    const { client, patch } = makeClient();
+    const setNodes = vi.fn();
+    const board = makeBoard({ a: note });
+    const { result } = renderHook(
+      () => {
+        const guard = useBoardMutationGuard(board.board_id, true);
+        return {
+          guard,
+          objects: useBoardObjects({
+            board,
+            client,
+            boardObjectsForBoard: [],
+            setNodes,
+            deletedObjectsRef: { current: new Set<string>() },
+            guard,
+          }),
+        };
+      },
+      { wrapper }
+    );
+    const data = result.current.objects.getBoardObjectNodes()[0]?.data;
+    // The dialog opened (captured its ticket) while the board was loaded.
+    const ticket = (data.beginBoardWrite as () => BoardWriteTicket | null)();
+    expect(ticket).not.toBe(null);
+    agorStore.getState().resetBoardPartitions();
+    loadBoard();
+    const onUpdate = data.onUpdate as (
+      id: string,
+      objectData: BoardObject,
+      ticket?: BoardWriteTicket | null
+    ) => Promise<boolean | undefined>;
+    const onDelete = data.onDelete as (
+      id: string,
+      ticket?: BoardWriteTicket | null
+    ) => Promise<void>;
+    // Resolves `undefined`, which closes a dialog (no retry of a stale draft).
+    await expect(onUpdate('a', { ...note, content: 'Edited' }, ticket)).resolves.toBe(undefined);
+    await onDelete('a', ticket);
+    await expect(
+      result.current.objects.batchUpdateObjectPositions({ a: { x: 5, y: 5 } }, ticket)
+    ).resolves.toBe(false);
+    expect(patch).not.toHaveBeenCalled();
+    expect(setNodes).not.toHaveBeenCalled();
+    // A write begun after the reload goes through.
+    const fresh = (data.beginBoardWrite as () => BoardWriteTicket | null)();
+    await expect(onUpdate('a', { ...note, content: 'Edited' }, fresh)).resolves.toBe(true);
+    expect(patch).toHaveBeenCalledTimes(1);
   });
 });
 

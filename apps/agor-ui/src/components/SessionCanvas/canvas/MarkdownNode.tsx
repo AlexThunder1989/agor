@@ -2,6 +2,7 @@ import type { BoardObject } from '@agor-live/client';
 import { DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import { App, Button, Card, Space, Typography, theme } from 'antd';
 import { useMutationGate } from '../../../contexts/ConnectionContext';
+import type { BoardWriteTicket } from '../../../store/boardMutationGuard';
 import { MarkdownRenderer } from '../../MarkdownRenderer/MarkdownRenderer';
 
 interface MarkdownNodeData {
@@ -11,7 +12,10 @@ interface MarkdownNodeData {
   canEdit: boolean;
   onUpdate: (id: string, data: BoardObject) => void;
   onEdit?: (objectId: string, content: string, width: number) => void;
-  onDelete?: (objectId: string) => void;
+  /** `ticket`: captured when the confirmation opened. */
+  onDelete?: (objectId: string, ticket?: BoardWriteTicket | null) => void;
+  /** Capture the board write ticket when a confirmation opens. */
+  beginBoardWrite?: () => BoardWriteTicket | null;
 }
 
 export const MarkdownNode = ({ data }: { data: MarkdownNodeData }) => {
@@ -30,6 +34,8 @@ export const MarkdownNode = ({ data }: { data: MarkdownNodeData }) => {
 
   const handleDelete = () => {
     if (mutationDisabled || !data.onDelete) return;
+    // A board reload while the confirmation is open drops the delete.
+    const ticket = data.beginBoardWrite?.();
 
     modal.confirm({
       title: 'Delete note?',
@@ -37,7 +43,7 @@ export const MarkdownNode = ({ data }: { data: MarkdownNodeData }) => {
       okText: 'Delete',
       okButtonProps: { danger: true },
       cancelText: 'Cancel',
-      onOk: () => data.onDelete?.(data.objectId),
+      onOk: () => data.onDelete?.(data.objectId, ticket),
     });
   };
 

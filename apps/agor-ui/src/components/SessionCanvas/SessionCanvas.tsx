@@ -64,10 +64,12 @@ import {
 } from '../../contexts/CanvasNavigationContext';
 import { useConnectionState, useMutationGate } from '../../contexts/ConnectionContext';
 import { getSessionCreationWarning } from '../../domain/sessionCreation';
+import { type BoardMutationGuard, useBoardMutationGuard } from '../../hooks/useBoardMutationGuard';
 import { useCanManageBoard } from '../../hooks/useCanManageBoard';
 import { useCursorTracking } from '../../hooks/useCursorTracking';
 import { useStableCallback } from '../../hooks/useStableCallback';
 import { agorStore, useAgorStore } from '../../store/agorStore';
+import type { BoardWriteTicket } from '../../store/boardMutationGuard';
 import { makeBoardReadySelector } from '../../store/boardPartitions';
 import {
   makeBoardObjectsForBoardSelector,
@@ -496,18 +498,18 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
     const boardReady = useAgorStore(
       useMemo(() => makeBoardReadySelector(board?.board_id), [board?.board_id])
     );
-    const boardReadyRef = useRef(boardReady);
-    boardReadyRef.current = boardReady;
-    const canMutateBoard = canEditBoard && mutationGate.canMutate && boardReady;
-    // Read by queued/debounced writes and stable callbacks at the moment they
-    // fire: an unloaded board (or a lost connection) drops them.
-    const canMutateBoardRef = useRef(canMutateBoard);
-    canMutateBoardRef.current = canMutateBoard;
     // Board Viewers may collaborate through comments even though structural
     // canvas mutations require board.edit. The daemon applies the same global
     // member floor plus board-view authorization on comment creation.
     const canComment = Boolean(currentUser && hasMinimumRole(currentUser.role, ROLES.MEMBER));
-    const canMutateComments = canComment && mutationGate.canMutate && boardReady;
+    // The single fence for every board-scoped write (`useBoardMutationGuard`).
+    // A write captures a ticket when it is queued or its dialog opens, and the
+    // ticket is rechecked immediately before every dispatch: a write decided
+    // before an unload never dispatches, even after the board reloads.
+    const boardGuard = useBoardMutationGuard(board?.board_id, canEditBoard);
+    const commentGuard = useBoardMutationGuard(board?.board_id, canComment);
+    const canMutateBoard = boardGuard.canMutate;
+    const canMutateComments = commentGuard.canMutate;
     const boardMutationMessage = !canEditBoard
       ? 'You do not have permission to edit this board'
       : !boardReady
@@ -577,12 +579,16 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
     const [drawingZone, setDrawingZone] = useState<{
       start: { x: number; y: number };
       end: { x: number; y: number };
+      /** Captured when the gesture began. */
+      ticket: BoardWriteTicket | null;
     } | null>(null);
 
     // Comment placement state (click-to-place)
     const [commentPlacement, setCommentPlacement] = useState<{
       position: { x: number; y: number }; // React Flow coordinates
       screenPosition: { x: number; y: number }; // Screen coordinates for popover
+      /** Captured at placement: the anchor geometry belongs to that board lifetime. */
+      ticket: BoardWriteTicket | null;
     } | null>(null);
     const [commentInput, setCommentInput] = useState('');
 
@@ -590,6 +596,8 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
     const [markdownModal, setMarkdownModal] = useState<{
       position: { x: number; y: number }; // React Flow coordinates
       objectId?: string; // For editing existing note
+      /** Captured when the editor opened; a board reload drops its save. */
+      ticket: BoardWriteTicket | null;
     } | null>(null);
     const [markdownContent, setMarkdownContent] = useState('');
     const [markdownWidth, setMarkdownWidth] = useState(500); // Default width
@@ -603,6 +611,8 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
       zoneId: string;
       trigger: ZoneTrigger;
       sessions: readonly Session[];
+      /** The drop's write ticket: a board reload while the picker is open drops it. */
+      ticket: BoardWriteTicket;
     } | null>(null);
     const handleCancelBranchTrigger = useCallback(() => setBranchTriggerModal(null), []);
     const handleExecuteBranchTrigger = useStableCallback(
@@ -623,11 +633,19 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
           return;
         }
 
+        // Rechecked before every dispatch, including after each await.
+        const stale = () => {
+          if (boardGuard.isCurrent(triggerModal.ticket)) return false;
+          boardGuard.warnDropped('This board reloaded; the zone trigger was not run.');
+          return true;
+        };
+
         try {
           let targetSessionId = sessionId;
 
           // Attach MCP in the create call so failures reject here, not silently dropped (#2629).
           if (sessionId === 'new') {
+            if (stale()) return;
             const newSession = await createZoneTriggerSession(client, {
               branchId: triggerModal.branchId,
               zoneName: triggerModal.zoneName,
@@ -647,6 +665,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
           let resultSessionId: string | undefined;
           switch (action) {
             case 'prompt': {
+              if (stale()) return;
               await client.sessions.prompt(targetSessionId, renderedTemplate, {
                 permissionMode,
               });
@@ -654,9 +673,11 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
               break;
             }
             case 'fork': {
+              if (stale()) return;
               const forkedSession = (await client
                 .service(`sessions/${targetSessionId}/fork`)
                 .create({ prompt: renderedTemplate })) as Session;
+              if (stale()) return;
               await client.sessions.prompt(forkedSession.session_id, renderedTemplate, {
                 permissionMode,
               });
@@ -664,9 +685,11 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
               break;
             }
             case 'spawn': {
+              if (stale()) return;
               const spawnedSession = (await client
                 .service(`sessions/${targetSessionId}/spawn`)
                 .create({ prompt: renderedTemplate })) as Session;
+              if (stale()) return;
               await client.sessions.prompt(spawnedSession.session_id, renderedTemplate, {
                 permissionMode,
               });
@@ -694,7 +717,17 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
     placementBoardRef.current = board;
 
     const pendingLayoutUpdatesRef = useRef<
-      Record<string, { x: number; y: number; intent?: EntityPlacementIntent }>
+      Record<
+        string,
+        {
+          x: number;
+          y: number;
+          intent?: EntityPlacementIntent;
+          /** Captured when the move was queued; checked before its dispatch. */
+          ticket: BoardWriteTicket;
+          guard: BoardMutationGuard;
+        }
+      >
     >({});
     const isDraggingRef = useRef(false);
 
@@ -795,7 +828,9 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
 
     // Track resize state
     const resizeTimerRef = useRef<NodeJS.Timeout | null>(null);
-    const pendingResizeUpdatesRef = useRef<Record<string, { width: number; height: number }>>({});
+    const pendingResizeUpdatesRef = useRef<
+      Record<string, { width: number; height: number; ticket: BoardWriteTicket }>
+    >({});
 
     // Handler to open edit modal for existing markdown note
     const handleEditMarkdownNote = useCallback(
@@ -809,10 +844,11 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
         setMarkdownModal({
           position: node.position,
           objectId,
+          ticket: boardGuard.capture(),
         });
         setActiveTool('markdown');
       },
-      [canMutateBoard]
+      [canMutateBoard, boardGuard]
     );
 
     // Board objects hook
@@ -825,9 +861,8 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
       eraserMode: activeTool === 'eraser',
       activeUrlTargetArtifactId,
       onEditMarkdown: handleEditMarkdownNote,
-      // Every board-object/zone/text/markdown write goes through these
-      // callbacks: they need the board loaded, not just board.edit.
-      canEdit: canMutateBoard,
+      // Every board-object/zone/text/markdown write goes through this guard.
+      guard: boardGuard,
     });
 
     // Extract zone labels - memoized to only change when labels actually change
@@ -867,7 +902,8 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
     // reads `board` and the placement map, which change on every board patch)
     // would defeat BranchNode's areEqual for all branches at once.
     const handleUnpinBranch = useStableCallback(async (branchId: string) => {
-      if (!board || !client || !canMutateBoardRef.current) return;
+      const ticket = boardGuard.capture();
+      if (!board || !client || !ticket) return;
 
       // Find the board_object for this branch
       const boardObject = boardObjectByBranch.get(branchId);
@@ -913,10 +949,12 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
       );
 
       // Update with absolute position and clear zone_id
-      await client.service('board-objects').patch(boardObject.object_id, {
-        position: { x: absoluteX, y: absoluteY },
-        zone_id: null, // null serializes correctly, undefined gets stripped
-      });
+      await boardGuard.write(ticket, () =>
+        client.service('board-objects').patch(boardObject.object_id, {
+          position: { x: absoluteX, y: absoluteY },
+          zone_id: null, // null serializes correctly, undefined gets stripped
+        })
+      );
     });
 
     // Convert branches to React Flow nodes (branch-centric approach)
@@ -1054,7 +1092,8 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
     // Handler to unpin a card from its zone. Identity-stabilized for the same
     // reason as handleUnpinBranch.
     const handleUnpinCard = useStableCallback(async (cardId: string) => {
-      if (!board || !client || !canMutateBoardRef.current) return;
+      const ticket = boardGuard.capture();
+      if (!board || !client || !ticket) return;
       const boardObject = boardObjectByCard.get(cardId);
       if (!boardObject?.zone_id) return;
 
@@ -1075,10 +1114,12 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
         })
       );
 
-      await client.service('board-objects').patch(boardObject.object_id, {
-        position: { x: absoluteX, y: absoluteY },
-        zone_id: null,
-      });
+      await boardGuard.write(ticket, () =>
+        client.service('board-objects').patch(boardObject.object_id, {
+          position: { x: absoluteX, y: absoluteY },
+          zone_id: null,
+        })
+      );
     });
 
     // Build card nodes from board_objects that have card_id set
@@ -1870,11 +1911,13 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
               }
 
               // An unloaded board's zone geometry may be stale: no write.
-              if (!canMutateBoardRef.current) return;
+              const ticket = boardGuard.capture();
+              if (!ticket) return;
               // Accumulate resize updates
               pendingResizeUpdatesRef.current[change.id] = {
                 width: newWidth,
                 height: newHeight,
+                ticket,
               };
 
               // Clear existing timer
@@ -1887,27 +1930,30 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
                 const updates = pendingResizeUpdatesRef.current;
                 pendingResizeUpdatesRef.current = {};
 
-                if (!board || !client) return;
-                // The board unloaded (a reconnect) or became read-only during
-                // the debounce: its full-object upsert could restore a zone
-                // deleted meanwhile, so the resize is dropped.
-                if (!canMutateBoardRef.current) {
-                  showWarning('This board is reloading; your last resize was not saved.');
-                  return;
-                }
+                if (!client) return;
+                let dropped = false;
 
                 // Persist all resize changes
-                for (const [nodeId, dimensions] of Object.entries(updates)) {
-                  const objectData = board.objects?.[nodeId];
+                for (const [nodeId, { width, height, ticket }] of Object.entries(updates)) {
+                  // Checked before every PATCH, including after awaiting the
+                  // previous one. A board that unloaded (a reconnect) since the
+                  // resize was queued drops it, even once it has reloaded: its
+                  // full-object upsert could restore a zone deleted meanwhile.
+                  if (!boardGuard.isCurrent(ticket)) {
+                    dropped = true;
+                    continue;
+                  }
+                  // The latest record, never this closure's.
+                  const latestBoard = placementBoardRef.current;
+                  const objectData =
+                    latestBoard?.board_id === ticket.boardId
+                      ? latestBoard.objects?.[nodeId]
+                      : undefined;
                   if (objectData && objectData.type === 'zone') {
-                    const updatedObject = {
-                      ...objectData,
-                      width: dimensions.width,
-                      height: dimensions.height,
-                    };
+                    const updatedObject = { ...objectData, width, height };
 
                     try {
-                      await client.service('boards').patch(board.board_id, {
+                      await client.service('boards').patch(ticket.boardId, {
                         _action: 'upsertObject',
                         objectId: nodeId,
                         objectData: updatedObject,
@@ -1917,6 +1963,9 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
                     }
                   }
                 }
+                if (dropped) {
+                  boardGuard.warnDropped('This board reloaded; your last resize was not saved.');
+                }
               }, 500);
             }
           }
@@ -1925,7 +1974,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
         // Call the original handler
         onNodesChangeInternal(changes);
       },
-      [board, client, onNodesChangeInternal, setNodes, showWarning]
+      [client, onNodesChangeInternal, setNodes, boardGuard]
     );
 
     // Handle node drag start
@@ -1961,8 +2010,11 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
 
         // Reset dragging flag immediately to allow node sync effects to run
         isDraggingRef.current = false;
-        // Never derive a zone from a board that isn't loaded (see `boardReady`).
-        if (!boardReadyRef.current) return;
+        // Never derive a zone from a board that isn't loaded: the move's
+        // ticket is captured now and checked before each of its dispatches.
+        const guard = node.type === 'comment' ? commentGuard : boardGuard;
+        const ticket = guard.capture();
+        if (!ticket) return;
 
         // Track final position locally
         // IMPORTANT: Store ABSOLUTE position, not relative!
@@ -1977,6 +2029,8 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
         pendingLayoutUpdatesRef.current[node.id] = {
           x: absolutePos.x,
           y: absolutePos.y,
+          ticket,
+          guard,
           ...(node.type === 'branchNode' || node.type === 'cardNode'
             ? {
                 intent: placementWrites.queue(node.id, getLivePlacement(node.id), board),
@@ -1993,12 +2047,16 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
         layoutUpdateTimerRef.current = setTimeout(async () => {
           const updates = pendingLayoutUpdatesRef.current;
           pendingLayoutUpdatesRef.current = {};
-          // The board was unloaded during the debounce (a reconnect): its zone
-          // geometry may be gone, so these moves are dropped, not persisted.
-          if (!boardReadyRef.current) {
-            showWarning('This board is reloading; your last move was not saved.');
-            return;
-          }
+          // Checked immediately before each dispatch below, including every
+          // dispatch after an await: a move queued before the board unloaded
+          // (a reconnect) is dropped, even once the board has reloaded.
+          let dropped = false;
+          const mayDispatch = (nodeId: string) => {
+            const update = updates[nodeId];
+            if (update?.guard.isCurrent(update.ticket)) return true;
+            dropped = true;
+            return false;
+          };
 
           try {
             // Separate updates for branches vs zones vs markdown vs comments
@@ -2011,6 +2069,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
             const markdownUpdates: Record<string, { x: number; y: number }> = {};
             const artifactUpdates: Record<string, { x: number; y: number }> = {};
             const commentUpdates: Array<{
+              nodeId: string;
               comment: BoardComment;
               position: { x: number; y: number };
               parentId?: string;
@@ -2124,6 +2183,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
                 }
 
                 commentUpdates.push({
+                  nodeId,
                   comment,
                   position: absolutePosition, // Always use absolute position for DB storage calculation
                   parentId,
@@ -2166,6 +2226,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
                 const existingBoardObject = getLivePlacement(nodeId);
                 if (existingBoardObject) {
                   if (!placementIsCurrent(existingBoardObject)) continue;
+                  if (!mayDispatch(nodeId)) continue;
                   await patchPlacement(nodeId, existingBoardObject, positionToStore, droppedZoneId);
                 }
                 // Cards don't fire zone triggers (V1: cards are inert in zones)
@@ -2237,7 +2298,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
 
                   // Handle trigger if zone has one AND zone assignment changed
                   const trigger = zoneData.trigger;
-                  if (trigger && zoneChanged) {
+                  if (trigger && zoneChanged && mayDispatch(nodeId)) {
                     if (trigger.behavior === 'always_new') {
                       // always_new: daemon resolves the zone, renders, creates
                       // a session, attaches inherited MCP servers, and sends
@@ -2265,6 +2326,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
                         trigger,
                         sessions:
                           agorStore.getState().sessionsByBranch.get(nodeId) ?? EMPTY_SESSIONS,
+                        ticket: updates[nodeId].ticket,
                       });
                     }
                   }
@@ -2278,6 +2340,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
                 // Find existing board_object or create new one
                 const existingBoardObject = getLivePlacement(branch_id);
                 if (!placementIsCurrent(existingBoardObject, branch_id)) continue;
+                if (!mayDispatch(branch_id)) continue;
 
                 if (existingBoardObject) {
                   await patchPlacement(branch_id, existingBoardObject, position, zone_id);
@@ -2294,23 +2357,20 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
               }
             }
 
-            // Update zone positions
-            if (Object.keys(zoneUpdates).length > 0) {
-              await batchUpdateObjectPositions(zoneUpdates);
-            }
-
-            // Update markdown positions
-            if (Object.keys(markdownUpdates).length > 0) {
-              await batchUpdateObjectPositions(markdownUpdates);
-            }
-
-            // Update artifact positions
-            if (Object.keys(artifactUpdates).length > 0) {
-              await batchUpdateObjectPositions(artifactUpdates);
+            // Update zone, markdown and artifact positions: one request per
+            // kind, each made only of moves whose ticket is still current.
+            for (const group of [zoneUpdates, markdownUpdates, artifactUpdates]) {
+              const current = Object.entries(group).filter(([nodeId]) => mayDispatch(nodeId));
+              if (current.length === 0) continue;
+              const sent = await batchUpdateObjectPositions(
+                Object.fromEntries(current),
+                updates[current[0][0]].ticket
+              );
+              if (!sent) dropped = true;
             }
 
             // Update comment positions
-            for (const { comment, position, parentId, parentType } of commentUpdates) {
+            for (const { nodeId, comment, position, parentId, parentType } of commentUpdates) {
               const reactFlowParentId =
                 parentId && parentType === 'zone'
                   ? boardCommentZoneParentObjectKey(parentId)
@@ -2333,6 +2393,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
                   : undefined
               );
 
+              if (!mayDispatch(nodeId)) continue;
               await client
                 .service(`board-comments/${comment.comment_id}/reposition`)
                 .create(plan.data);
@@ -2364,6 +2425,9 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
           } catch (error) {
             console.error('Failed to persist layout:', error);
           }
+          if (dropped) {
+            boardGuard.warnDropped('This board reloaded; your last move was not saved.');
+          }
         }, 500);
       },
       [
@@ -2375,6 +2439,8 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
         commentById,
         setNodes,
         showWarning,
+        boardGuard,
+        commentGuard,
       ]
     );
 
@@ -2401,17 +2467,18 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
           setDrawingZone({
             start: { x: event.clientX, y: event.clientY },
             end: { x: event.clientX, y: event.clientY },
+            ticket: boardGuard.capture(),
           });
         }
       },
-      [activeTool]
+      [activeTool, boardGuard]
     );
 
     const handlePointerMove = useCallback(
       (event: React.PointerEvent) => {
         if (activeTool === 'zone' && drawingZone && event.buttons === 1) {
           setDrawingZone({
-            start: drawingZone.start,
+            ...drawingZone,
             end: { x: event.clientX, y: event.clientY },
           });
         }
@@ -2421,14 +2488,14 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
 
     const handlePointerUp = useCallback(() => {
       if (activeTool === 'zone' && drawingZone && reactFlowInstanceRef.current) {
-        // Bail out if the daemon isn't usable — the in-flight gesture is
-        // discarded rather than persisted as a half-formed zone.
-        if (!canMutateBoard) {
+        // Bail out if the daemon isn't usable or the board reloaded since the
+        // gesture began — it is discarded rather than persisted.
+        const { start, end, ticket } = drawingZone;
+        if (!boardGuard.isCurrent(ticket)) {
           setDrawingZone(null);
           setActiveTool('select');
           return;
         }
-        const { start, end } = drawingZone;
 
         // Calculate position and dimensions in screen space
         const minX = Math.min(start.x, end.x);
@@ -2476,10 +2543,11 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
                 backgroundColor: defaultBackgroundColor,
                 canEdit: canMutateBoard,
                 onUpdate: (id: string, data: BoardObject) => {
-                  if (board && client && canMutateBoardRef.current) {
+                  const updateTicket = boardGuard.capture();
+                  if (client && updateTicket) {
                     client
                       .service('boards')
-                      .patch(board.board_id, {
+                      .patch(updateTicket.boardId, {
                         _action: 'upsertObject',
                         objectId: id,
                         objectData: data,
@@ -2491,11 +2559,11 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
             },
           ]);
 
-          // Persist to backend
-          if (board && client) {
+          // Persist to backend (no await since the ticket check above)
+          if (client) {
             client
               .service('boards')
-              .patch(board.board_id, {
+              .patch(ticket.boardId, {
                 _action: 'upsertObject',
                 objectId,
                 objectData: {
@@ -2519,7 +2587,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
         setDrawingZone(null);
         setActiveTool('select');
       }
-    }, [activeTool, drawingZone, board, client, setNodes, canMutateBoard]);
+    }, [activeTool, drawingZone, client, setNodes, canMutateBoard, boardGuard]);
 
     const openMarkdownPlacementModal = useCallback(
       (event: Pick<React.MouseEvent, 'clientX' | 'clientY'>): boolean => {
@@ -2532,10 +2600,10 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
           y: event.clientY,
         });
 
-        setMarkdownModal({ position });
+        setMarkdownModal({ position, ticket: boardGuard.capture() });
         return true;
       },
-      [canMutateBoard]
+      [canMutateBoard, boardGuard]
     );
 
     // Pane click handler for comment placement
@@ -2551,6 +2619,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
           setCommentPlacement({
             position, // React Flow coordinates for storing in DB
             screenPosition: { x: event.clientX, y: event.clientY }, // Screen coords for popover
+            ticket: commentGuard.capture(),
           });
         }
 
@@ -2559,7 +2628,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
           openMarkdownPlacementModal(event);
         }
       },
-      [activeTool, canMutateComments, openMarkdownPlacementModal]
+      [activeTool, canMutateComments, openMarkdownPlacementModal, commentGuard]
     );
 
     // Handler to create spatial comment
@@ -2567,7 +2636,14 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
       if (!commentPlacement || !board || !client || !currentUserId || !commentInput.trim()) {
         return;
       }
+      // Unavailable for now (disconnected, still loading): keep the draft.
       if (!canMutateComments) {
+        return;
+      }
+      // Placed before a board reload: its anchor geometry may be gone.
+      if (!commentGuard.isCurrent(commentPlacement.ticket)) {
+        commentGuard.warnDropped('This board reloaded; place your comment again.');
+        setCommentPlacement(null);
         return;
       }
 
@@ -2626,14 +2702,34 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
       } catch (error) {
         console.error('Failed to create spatial comment:', error);
       }
-    }, [commentPlacement, board, client, currentUserId, commentInput, canMutateComments]);
+    }, [
+      commentPlacement,
+      board,
+      client,
+      currentUserId,
+      commentInput,
+      canMutateComments,
+      commentGuard,
+    ]);
 
     // Handler to create/update markdown note
     const handleCreateMarkdownNote = useCallback(async () => {
       if (!markdownModal || !board || !client || !markdownContent.trim()) {
         return;
       }
+      // Unavailable for now (disconnected, still loading): keep the draft.
       if (!canMutateBoard) {
+        return;
+      }
+      // Opened before a board reload: saving could restore a note deleted
+      // meanwhile, so it is dropped (no await between this and the write).
+      const ticket = markdownModal.ticket;
+      if (!boardGuard.isCurrent(ticket)) {
+        boardGuard.warnDropped('This board reloaded while the note was open; it was not saved.');
+        setMarkdownModal(null);
+        setMarkdownContent('');
+        setMarkdownWidth(500);
+        setActiveTool('select');
         return;
       }
 
@@ -2673,10 +2769,11 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
               width: markdownWidth,
               canEdit: canMutateBoard,
               onUpdate: (id: string, data: BoardObject) => {
-                if (board && client && canMutateBoardRef.current) {
+                const updateTicket = boardGuard.capture();
+                if (client && updateTicket) {
                   client
                     .service('boards')
-                    .patch(board.board_id, {
+                    .patch(updateTicket.boardId, {
                       _action: 'upsertObject',
                       objectId: id,
                       objectData: data,
@@ -2693,7 +2790,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
 
       // Persist to backend
       try {
-        await client.service('boards').patch(board.board_id, {
+        await client.service('boards').patch(ticket.boardId, {
           _action: 'upsertObject',
           objectId,
           objectData: {
@@ -2727,6 +2824,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
       handleEditMarkdownNote,
       deleteObject,
       canMutateBoard,
+      boardGuard,
     ]);
 
     // Node click handler for eraser mode and comment placement
@@ -2755,6 +2853,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
             setCommentPlacement({
               position, // React Flow coordinates for storing in DB
               screenPosition: { x: event.clientX, y: event.clientY }, // Screen coords for popover
+              ticket: commentGuard.capture(),
             });
           }
           return;
@@ -2792,6 +2891,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
         canMutateComments,
         openMarkdownPlacementModal,
         setNodes,
+        commentGuard,
       ]
     );
 

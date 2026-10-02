@@ -28,7 +28,12 @@ const DISCONNECTED = { ...CONNECTED, connected: false };
 function renderZone(
   onReorder: ReturnType<typeof vi.fn>,
   connection: typeof CONNECTED,
-  extra?: { selected?: boolean; canEdit?: boolean; onUpdate?: ReturnType<typeof vi.fn> }
+  extra?: {
+    selected?: boolean;
+    canEdit?: boolean;
+    onUpdate?: ReturnType<typeof vi.fn>;
+    beginBoardWrite?: ReturnType<typeof vi.fn>;
+  }
 ) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <ConnectionProvider value={connection}>
@@ -52,6 +57,7 @@ function renderZone(
         canEdit: extra?.canEdit,
         onUpdate: extra?.onUpdate,
         onReorder,
+        beginBoardWrite: extra?.beginBoardWrite,
       }}
     />,
     { wrapper }
@@ -158,6 +164,28 @@ describe('CommentNode reconnect rehydration', () => {
 describe('ZoneNode settings modal', () => {
   beforeEach(() => {
     zoneConfigModalRenderSpy.mockClear();
+  });
+
+  it('writes from the settings dialog and the label editor under the ticket captured when they opened', () => {
+    const opened = { boardId: 'board-1', partition: null, authGeneration: 1 };
+    const later = { boardId: 'board-1', partition: null, authGeneration: 2 };
+    const beginBoardWrite = vi.fn().mockReturnValueOnce(opened).mockReturnValue(later);
+    const onUpdate = vi.fn();
+    renderZone(vi.fn(), CONNECTED, { onUpdate, beginBoardWrite });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Zone settings' }));
+    const modalProps = zoneConfigModalRenderSpy.mock.calls.at(-1)?.[0] as {
+      onUpdate: (objectId: string, objectData: unknown) => unknown;
+    };
+    modalProps.onUpdate('zone-1', { type: 'zone', label: 'Renamed' });
+    expect(onUpdate).toHaveBeenLastCalledWith('zone-1', { type: 'zone', label: 'Renamed' }, opened);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename zone' }));
+    const input = screen.getByDisplayValue('My Zone');
+    fireEvent.change(input, { target: { value: 'Renamed' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onUpdate.mock.calls.at(-1)?.[2]).toBe(later);
+    expect(beginBoardWrite).toHaveBeenCalledTimes(2);
   });
 
   it('mounts the settings modal only when the user opens it', () => {

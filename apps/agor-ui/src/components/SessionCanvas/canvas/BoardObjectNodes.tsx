@@ -22,6 +22,7 @@ import type { Color } from 'antd/es/color-picker';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { NodeResizer, useViewport } from 'reactflow';
 import { useMutationGate } from '../../../contexts/ConnectionContext';
+import type { BoardWriteTicket } from '../../../store/boardMutationGuard';
 import { getContrastingTextColor } from '../../../utils/theme';
 import { getUserInitials } from '../../UserIdentityAvatar';
 import { DeleteZoneModal } from './DeleteZoneModal';
@@ -56,9 +57,23 @@ type BoardObjectUpdateResult = boolean | undefined | Promise<boolean | undefined
 interface ZoneNodeData extends Omit<ZoneBoardObject, 'type'> {
   objectId: string;
   pinnedItemCount?: number;
-  onUpdate?: (objectId: string, objectData: BoardObject) => BoardObjectUpdateResult;
-  onDelete?: (objectId: string, deleteAssociatedSessions: boolean) => void;
+  /** `ticket`: the one an edit captured when it began (omitted: an immediate action). */
+  onUpdate?: (
+    objectId: string,
+    objectData: BoardObject,
+    ticket?: BoardWriteTicket | null
+  ) => BoardObjectUpdateResult;
+  onDelete?: (
+    objectId: string,
+    deleteAssociatedSessions: boolean,
+    ticket?: BoardWriteTicket | null
+  ) => void;
   onReorder?: (objectId: string, op: LayerOp) => void;
+  /**
+   * Capture the board write ticket when an edit begins (label editor, config
+   * or delete dialog): a write from before a board reload is then dropped.
+   */
+  beginBoardWrite?: () => BoardWriteTicket | null;
   /** Effective board.edit capability. Omitted only by isolated tests/fixtures. */
   canEdit?: boolean;
   /** Number of other zones whose rectangles intersect this zone. */
@@ -101,6 +116,9 @@ const ZoneNodeComponent = ({ data, selected }: { data: ZoneNodeData; selected?: 
   const [label, setLabel] = useState(data.label);
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  // The write ticket of the edit in progress (label, config or delete dialog).
+  const [editTicket, setEditTicket] = useState<BoardWriteTicket | null | undefined>(undefined);
+  const beginEdit = () => setEditTicket(data.beginBoardWrite?.());
   const [recentColors, setRecentColors] = useState<string[]>(getRecentColors());
   const labelInputRef = useRef<HTMLInputElement>(null);
   const colors = getColorPalette(token);
@@ -171,7 +189,7 @@ const ZoneNodeComponent = ({ data, selected }: { data: ZoneNodeData; selected?: 
     setIsEditingLabel(false);
     if (mutationDisabled) return;
     if (label !== data.label && data.onUpdate) {
-      data.onUpdate(data.objectId, createObjectData({ label }));
+      data.onUpdate(data.objectId, createObjectData({ label }), editTicket);
     }
   };
 
@@ -320,7 +338,10 @@ const ZoneNodeComponent = ({ data, selected }: { data: ZoneNodeData; selected?: 
               title="Rename zone"
               icon={<EditOutlined />}
               disabled={mutationDisabled}
-              onClick={() => setIsEditingLabel(true)}
+              onClick={() => {
+                beginEdit();
+                setIsEditingLabel(true);
+              }}
               style={{ width: 32, height: 32 }}
             />
 
@@ -471,7 +492,10 @@ const ZoneNodeComponent = ({ data, selected }: { data: ZoneNodeData; selected?: 
               title="Zone settings"
               icon={<SettingOutlined />}
               disabled={mutationDisabled}
-              onClick={() => setConfigModalOpen(true)}
+              onClick={() => {
+                beginEdit();
+                setConfigModalOpen(true);
+              }}
               style={{ width: 32, height: 32 }}
             />
 
@@ -521,6 +545,7 @@ const ZoneNodeComponent = ({ data, selected }: { data: ZoneNodeData; selected?: 
                   domEvent.stopPropagation();
                   if (mutationDisabled) return;
                   if (key === 'delete') {
+                    beginEdit();
                     setDeleteModalOpen(true);
                     return;
                   }
@@ -558,6 +583,7 @@ const ZoneNodeComponent = ({ data, selected }: { data: ZoneNodeData; selected?: 
           }}
           onDoubleClick={() => {
             if (mutationDisabled) return;
+            beginEdit();
             setIsEditingLabel(true);
           }}
         >
@@ -635,7 +661,9 @@ const ZoneNodeComponent = ({ data, selected }: { data: ZoneNodeData; selected?: 
           onCancel={() => setConfigModalOpen(false)}
           zoneName={data.label}
           objectId={data.objectId}
-          onUpdate={data.onUpdate || (() => undefined)}
+          onUpdate={(objectId, objectData) =>
+            data.onUpdate ? data.onUpdate(objectId, objectData, editTicket) : undefined
+          }
           zoneData={zoneData}
           canEdit={data.canEdit !== false}
         />
@@ -647,7 +675,7 @@ const ZoneNodeComponent = ({ data, selected }: { data: ZoneNodeData; selected?: 
           onConfirm={() => {
             setDeleteModalOpen(false);
             if (data.onDelete) {
-              data.onDelete(data.objectId, false);
+              data.onDelete(data.objectId, false, editTicket);
             }
           }}
           zoneName={data.label}

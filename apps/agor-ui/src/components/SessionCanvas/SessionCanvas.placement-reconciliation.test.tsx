@@ -6,8 +6,9 @@ import type {
   CardWithType,
   Repo,
   Session,
+  User,
 } from '@agor-live/client';
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { App } from 'antd';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -43,8 +44,10 @@ vi.mock('reactflow', async () => {
   return {
     Background: () => null,
     Controls: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-    ControlButton: ({ children }: { children?: ReactNode }) => (
-      <button type="button">{children}</button>
+    ControlButton: ({ children, ...props }: { children?: ReactNode }) => (
+      <button type="button" {...props}>
+        {children}
+      </button>
     ),
     MiniMap: () => null,
     ReactFlow: (
@@ -79,9 +82,18 @@ vi.mock('../BranchCard', () => ({
   default: () => <div />,
 }));
 
+let triggerPickerExecute: ((params: Record<string, unknown>) => Promise<void>) | null = null;
 vi.mock('./canvas/ZoneTriggerModal', () => ({
-  ZoneTriggerModal: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="zone-trigger-picker" /> : null,
+  ZoneTriggerModal: ({
+    open,
+    onExecute,
+  }: {
+    open: boolean;
+    onExecute: (params: Record<string, unknown>) => Promise<void>;
+  }) => {
+    if (open) triggerPickerExecute = onExecute;
+    return open ? <div data-testid="zone-trigger-picker" /> : null;
+  },
 }));
 
 const BOARD_ID = 'board-placement-fixture';
@@ -168,6 +180,9 @@ const reviewingCardPlacement = {
   size: { width: 380, height: 120 },
 } as unknown as BoardEntityObject;
 
+// Board edits need board.edit; an admin has it without a policy read.
+const adminUser = { user_id: 'user-admin', role: 'admin' } as unknown as User;
+
 const connected = {
   authGeneration: 1,
   connected: true,
@@ -176,6 +191,15 @@ const connected = {
   capturedSha: null,
   currentSha: null,
 };
+
+/** A (re)load of the fixture board's partition: a new partition lifetime. */
+function markFixtureLoaded() {
+  agorStore.getState().setBoardPartition(BOARD_ID, {
+    status: 'loaded',
+    authorityScope: 'fixture',
+    loadEpoch: 0,
+  });
+}
 
 function currentNode(id: string): FlowNode {
   const node = flowProps?.nodes.find((candidate) => candidate.id === id);
@@ -191,6 +215,7 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
       repoById: new Map([[repo.repo_id, repo]]),
       branchById: new Map([[BRANCH_ID, branch]]),
       cardById: new Map([[card.card_id, card]]),
+      userById: new Map([[adminUser.user_id, adminUser]]),
       boardObjectsByBoardId: new Map([[BOARD_ID, [implementingPlacement, reviewingCardPlacement]]]),
       // Structural edits need the board's partition loaded (see `boardReady`).
       boardPartitions: new Map([
@@ -209,7 +234,12 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
     const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
     render(
       <ConnectionProvider value={connected}>
-        <SessionCanvas board={leanBoard} client={client} branches={[branch]} />
+        <SessionCanvas
+          currentUserId={adminUser.user_id}
+          board={leanBoard}
+          client={client}
+          branches={[branch]}
+        />
       </ConnectionProvider>
     );
     await act(async () => {});
@@ -236,7 +266,12 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
     render(
       <App>
         <ConnectionProvider value={connected}>
-          <SessionCanvas board={board} client={client} branches={[branch]} />
+          <SessionCanvas
+            currentUserId={adminUser.user_id}
+            board={board}
+            client={client}
+            branches={[branch]}
+          />
         </ConnectionProvider>
       </App>
     );
@@ -277,7 +312,12 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
     render(
       <App>
         <ConnectionProvider value={connected}>
-          <SessionCanvas board={board} client={client} branches={[branch]} />
+          <SessionCanvas
+            currentUserId={adminUser.user_id}
+            board={board}
+            client={client}
+            branches={[branch]}
+          />
         </ConnectionProvider>
       </App>
     );
@@ -301,7 +341,12 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
     render(
       <App>
         <ConnectionProvider value={connected}>
-          <SessionCanvas board={board} client={client} branches={[branch]} />
+          <SessionCanvas
+            currentUserId={adminUser.user_id}
+            board={board}
+            client={client}
+            branches={[branch]}
+          />
         </ConnectionProvider>
       </App>
     );
@@ -318,6 +363,272 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
       vi.advanceTimersByTime(600);
     });
     expect(patch).not.toHaveBeenCalled();
+  });
+
+  it('never applies a resize queued before an unload, even after the board reloads without the zone', async () => {
+    vi.useFakeTimers();
+    const patch = vi.fn(async () => ({}));
+    const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
+    const view = render(
+      <App>
+        <ConnectionProvider value={connected}>
+          <SessionCanvas
+            currentUserId={adminUser.user_id}
+            board={board}
+            client={client}
+            branches={[branch]}
+          />
+        </ConnectionProvider>
+      </App>
+    );
+    await act(async () => {});
+    act(() => {
+      flowProps?.onNodesChange?.([
+        { type: 'dimensions', id: IMPLEMENTING_ZONE_ID, dimensions: { width: 2000, height: 900 } },
+      ]);
+    });
+    // Unload and reload inside the 500 ms debounce; the zone was deleted while
+    // the board was unloaded, so the reloaded record no longer has it.
+    act(() => agorStore.getState().resetBoardPartitions());
+    const { [IMPLEMENTING_ZONE_ID]: _deleted, ...remaining } = board.objects ?? {};
+    const reloaded = { ...board, objects: remaining } as Board;
+    act(() => {
+      agorStore.setState({ boardById: new Map([[BOARD_ID, reloaded]]) });
+      markFixtureLoaded();
+    });
+    view.rerender(
+      <App>
+        <ConnectionProvider value={connected}>
+          <SessionCanvas
+            currentUserId={adminUser.user_id}
+            board={reloaded}
+            client={client}
+            branches={[branch]}
+          />
+        </ConnectionProvider>
+      </App>
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+    });
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it('stops a resize batch at the next zone when the board unloads during a PATCH', async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const patch = vi.fn(async () => {
+      if (patch.mock.calls.length === 1) await pending;
+      return {};
+    });
+    const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
+    render(
+      <App>
+        <ConnectionProvider value={connected}>
+          <SessionCanvas
+            currentUserId={adminUser.user_id}
+            board={board}
+            client={client}
+            branches={[branch]}
+          />
+        </ConnectionProvider>
+      </App>
+    );
+    await act(async () => {});
+    act(() => {
+      flowProps?.onNodesChange?.([
+        { type: 'dimensions', id: IMPLEMENTING_ZONE_ID, dimensions: { width: 2000, height: 900 } },
+        { type: 'dimensions', id: REVIEWING_ZONE_ID, dimensions: { width: 900, height: 900 } },
+      ]);
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(501);
+    });
+    expect(patch).toHaveBeenCalledTimes(1);
+    act(() => agorStore.getState().resetBoardPartitions());
+    act(() => markFixtureLoaded());
+    await act(async () => {
+      release();
+    });
+    expect(patch).toHaveBeenCalledTimes(1);
+  });
+
+  it('never applies a move queued before an unload, even after the board reloads', async () => {
+    vi.useFakeTimers();
+    const patch = vi.fn(async () => implementingPlacement);
+    const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
+    render(
+      <App>
+        <ConnectionProvider value={connected}>
+          <SessionCanvas
+            currentUserId={adminUser.user_id}
+            board={board}
+            client={client}
+            branches={[branch]}
+          />
+        </ConnectionProvider>
+      </App>
+    );
+    await act(async () => {});
+    act(() => {
+      const node = { ...currentNode(BRANCH_ID), positionAbsolute: { x: 1800, y: 200 } };
+      flowProps?.onNodeDragStart?.({}, node);
+      flowProps?.onNodeDrag?.({}, node);
+      flowProps?.onNodeDragStop?.({}, node);
+    });
+    act(() => agorStore.getState().resetBoardPartitions());
+    act(() => markFixtureLoaded());
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+    });
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it.each(['unload', 'unload-reload'])(
+    'a zone-trigger picker opened before an %s dispatches nothing',
+    async (change) => {
+      vi.useFakeTimers();
+      triggerPickerExecute = null;
+      agorStore.setState({
+        boardObjectsByBoardId: new Map([[BOARD_ID, [{ ...implementingPlacement, zone_id: null }]]]),
+      });
+      const triggerBoard = {
+        ...board,
+        objects: {
+          ...board.objects,
+          [IMPLEMENTING_ZONE_ID]: {
+            ...board.objects?.[IMPLEMENTING_ZONE_ID],
+            trigger: { behavior: 'show_picker', prompt_template: 'Review this fixture.' },
+          },
+        },
+      } as Board;
+      const patch = vi.fn(async () => ({}));
+      const create = vi.fn(async () => ({ session_id: 'session-new' }));
+      const prompt = vi.fn(async () => ({}));
+      const client = {
+        service: vi.fn(() => ({ patch, create })),
+        sessions: { prompt },
+      } as unknown as AgorClient;
+      render(
+        <App>
+          <ConnectionProvider value={connected}>
+            <SessionCanvas
+              currentUserId={adminUser.user_id}
+              board={triggerBoard}
+              client={client}
+              branches={[branch]}
+            />
+          </ConnectionProvider>
+        </App>
+      );
+      await act(async () => {});
+      act(() => {
+        const node = { ...currentNode(BRANCH_ID), positionAbsolute: { x: 1800, y: 200 } };
+        flowProps?.onNodeDragStart?.({}, node);
+        flowProps?.onNodeDrag?.({}, node);
+        flowProps?.onNodeDragStop?.({}, node);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(501);
+      });
+      expect(screen.getByTestId('zone-trigger-picker')).toBeTruthy();
+      expect(triggerPickerExecute).not.toBeNull();
+      act(() => agorStore.getState().resetBoardPartitions());
+      if (change === 'unload-reload') act(() => markFixtureLoaded());
+      create.mockClear();
+      await act(async () => {
+        await triggerPickerExecute?.({
+          sessionId: 'new',
+          action: 'prompt',
+          renderedTemplate: 'Review this fixture.',
+          agent: 'claude-code',
+        });
+      });
+      expect(create).not.toHaveBeenCalled();
+      expect(prompt).not.toHaveBeenCalled();
+    }
+  );
+
+  // A reconnect resync resets every partition and marks the displayed board
+  // loaded in one synchronous step: no render ever sees the board unloaded.
+  const resyncReload = () =>
+    act(() => {
+      agorStore.getState().resetBoardPartitions();
+      markFixtureLoaded();
+    });
+
+  it('drops a markdown note save whose editor opened before a resync reload', async () => {
+    const noteBoard = {
+      ...board,
+      objects: {
+        ...board.objects,
+        'markdown-1': { type: 'markdown', x: 0, y: 0, width: 300, content: 'Old note' },
+      },
+    } as Board;
+    const patch = vi.fn(async () => ({}));
+    const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
+    render(
+      <App>
+        <ConnectionProvider value={connected}>
+          <SessionCanvas
+            currentUserId={adminUser.user_id}
+            board={noteBoard}
+            client={client}
+            branches={[branch]}
+          />
+        </ConnectionProvider>
+      </App>
+    );
+    await act(async () => {});
+    const note = currentNode('markdown-1') as FlowNode & {
+      data: { onEdit: (id: string, content: string, width: number) => void };
+    };
+    act(() => note.data.onEdit('markdown-1', 'Old note', 300));
+    expect(await screen.findByText('Edit Markdown Note')).toBeTruthy();
+    resyncReload();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    });
+    expect(patch).not.toHaveBeenCalled();
+    expect(await screen.findByText(/reloaded while the note was open/)).toBeTruthy();
+  });
+
+  it('drops a comment placed before a resync reload', async () => {
+    const create = vi.fn(async () => ({}));
+    const client = {
+      service: vi.fn(() => ({ create, patch: vi.fn(), find: vi.fn(async () => []) })),
+    } as unknown as AgorClient;
+    render(
+      <App>
+        <ConnectionProvider value={connected}>
+          <SessionCanvas
+            currentUserId={adminUser.user_id}
+            board={board}
+            client={client}
+            branches={[branch]}
+          />
+        </ConnectionProvider>
+      </App>
+    );
+    await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: 'Add Comment' }));
+    act(() => {
+      (flowProps as unknown as { onPaneClick: (event: unknown) => void }).onPaneClick({
+        clientX: 50,
+        clientY: 60,
+      });
+    });
+    fireEvent.change(await screen.findByPlaceholderText(/Add a comment/), {
+      target: { value: 'Pinned to a zone that may be gone' },
+    });
+    resyncReload();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    });
+    expect(create).not.toHaveBeenCalled();
   });
 
   afterEach(() => {
@@ -340,7 +651,12 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
     const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
     render(
       <ConnectionProvider value={connected}>
-        <SessionCanvas board={board} client={client} branches={[branch]} />
+        <SessionCanvas
+          currentUserId={adminUser.user_id}
+          board={board}
+          client={client}
+          branches={[branch]}
+        />
       </ConnectionProvider>
     );
     await act(async () => {});
@@ -405,7 +721,12 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
       const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
       render(
         <ConnectionProvider value={connected}>
-          <SessionCanvas board={board} client={client} branches={[branch]} />
+          <SessionCanvas
+            currentUserId={adminUser.user_id}
+            board={board}
+            client={client}
+            branches={[branch]}
+          />
         </ConnectionProvider>
       );
       await act(async () => {});
@@ -481,7 +802,12 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
     const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
     const canvas = (nextBoard = board, generation = 1) => (
       <ConnectionProvider value={{ ...connected, authGeneration: generation }}>
-        <SessionCanvas board={nextBoard} client={client} branches={[branch]} />
+        <SessionCanvas
+          currentUserId={adminUser.user_id}
+          board={nextBoard}
+          client={client}
+          branches={[branch]}
+        />
       </ConnectionProvider>
     );
     const view = render(canvas());
@@ -573,7 +899,12 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
       const client = { service: () => ({ patch }) } as unknown as AgorClient;
       render(
         <ConnectionProvider value={connected}>
-          <SessionCanvas board={board} client={client} branches={[branch]} />
+          <SessionCanvas
+            currentUserId={adminUser.user_id}
+            board={board}
+            client={client}
+            branches={[branch]}
+          />
         </ConnectionProvider>
       );
       await act(async () => {});
@@ -601,7 +932,12 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
 
     render(
       <ConnectionProvider value={connected}>
-        <SessionCanvas board={board} client={client} branches={[branch]} />
+        <SessionCanvas
+          currentUserId={adminUser.user_id}
+          board={board}
+          client={client}
+          branches={[branch]}
+        />
       </ConnectionProvider>
     );
     await act(async () => {});
@@ -678,7 +1014,12 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
       const client = { service: vi.fn(() => ({ patch, create })) } as unknown as AgorClient;
       render(
         <ConnectionProvider value={connected}>
-          <SessionCanvas board={board} client={client} branches={[branch]} />
+          <SessionCanvas
+            currentUserId={adminUser.user_id}
+            board={board}
+            client={client}
+            branches={[branch]}
+          />
         </ConnectionProvider>
       );
       await act(async () => {});
@@ -732,7 +1073,14 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
 
   it.each(
     (['always_new', 'show_picker'] as const).flatMap((behavior) =>
-      ['board-switch', 'placement-changed', 'new-placement', 'unchanged'].map((change) => ({
+      [
+        'board-switch',
+        'placement-changed',
+        'new-placement',
+        'unchanged',
+        'unload',
+        'unload-reload',
+      ].map((change) => ({
         behavior,
         change,
       }))
@@ -770,7 +1118,12 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
       const view = render(
         <App>
           <ConnectionProvider value={connected}>
-            <SessionCanvas board={triggerBoard} client={client} branches={[branch]} />
+            <SessionCanvas
+              currentUserId={adminUser.user_id}
+              board={triggerBoard}
+              client={client}
+              branches={[branch]}
+            />
           </ConnectionProvider>
         </App>
       );
@@ -798,6 +1151,7 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
           <App>
             <ConnectionProvider value={connected}>
               <SessionCanvas
+                currentUserId={adminUser.user_id}
                 board={{ ...triggerBoard, board_id: 'board-other' } as Board}
                 client={client}
                 branches={[branch]}
@@ -805,6 +1159,11 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
             </ConnectionProvider>
           </App>
         );
+      } else if (change === 'unload' || change === 'unload-reload') {
+        // The board unloads (a reconnect) while the batch awaits the card's
+        // PATCH; a reload is a new partition lifetime, never the old one.
+        act(() => agorStore.getState().resetBoardPartitions());
+        if (change === 'unload-reload') act(() => markFixtureLoaded());
       } else if (change !== 'unchanged') {
         act(() =>
           boardObjectPatched({
@@ -842,7 +1201,12 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
     const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
     const view = render(
       <ConnectionProvider value={connected}>
-        <SessionCanvas board={board} client={client} branches={[branch]} />
+        <SessionCanvas
+          currentUserId={adminUser.user_id}
+          board={board}
+          client={client}
+          branches={[branch]}
+        />
       </ConnectionProvider>
     );
     await act(async () => {});
@@ -861,7 +1225,12 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
     } as Board;
     view.rerender(
       <ConnectionProvider value={connected}>
-        <SessionCanvas board={movedBoard} client={client} branches={[branch]} />
+        <SessionCanvas
+          currentUserId={adminUser.user_id}
+          board={movedBoard}
+          client={client}
+          branches={[branch]}
+        />
       </ConnectionProvider>
     );
     await act(async () => {
@@ -881,7 +1250,12 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
 
     render(
       <ConnectionProvider value={connected}>
-        <SessionCanvas board={board} client={client} branches={[branch]} />
+        <SessionCanvas
+          currentUserId={adminUser.user_id}
+          board={board}
+          client={client}
+          branches={[branch]}
+        />
       </ConnectionProvider>
     );
     await act(async () => {});
@@ -921,7 +1295,12 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
 
     const view = render(
       <ConnectionProvider value={connected}>
-        <SessionCanvas board={board} client={client} branches={[branch]} />
+        <SessionCanvas
+          currentUserId={adminUser.user_id}
+          board={board}
+          client={client}
+          branches={[branch]}
+        />
       </ConnectionProvider>
     );
 
@@ -1012,7 +1391,12 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
     } as unknown as Board;
     view.rerender(
       <ConnectionProvider value={connected}>
-        <SessionCanvas board={movedBoard} client={client} branches={[branch]} />
+        <SessionCanvas
+          currentUserId={adminUser.user_id}
+          board={movedBoard}
+          client={client}
+          branches={[branch]}
+        />
       </ConnectionProvider>
     );
     await act(async () => {});
@@ -1034,6 +1418,7 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
     view.rerender(
       <ConnectionProvider value={connected}>
         <SessionCanvas
+          currentUserId={adminUser.user_id}
           board={movedBoard}
           client={client}
           branches={[{ ...branch, notes: 'patched' }]}
@@ -1052,7 +1437,12 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
     // same parent/relative geometry solely from the board-object row.
     render(
       <ConnectionProvider value={connected}>
-        <SessionCanvas board={movedBoard} client={client} branches={[branch]} />
+        <SessionCanvas
+          currentUserId={adminUser.user_id}
+          board={movedBoard}
+          client={client}
+          branches={[branch]}
+        />
       </ConnectionProvider>
     );
     await act(async () => {});
