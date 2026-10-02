@@ -96,8 +96,17 @@ function createCardsCoordinator(
     }
     inflight = true;
     superseded = false;
+    // This read covers any reconcile still waiting in its debounce (it was
+    // requested before now), so the trailing read consumes it.
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
     touched.clear();
     const readAuthority = authority;
+    // Every read after the first is a reconcile (reconnect, re-authentication):
+    // cached zone boards may have missed events too, so they are read again.
+    const reconcile = loaded;
     let rerun = false;
     try {
       const [cardRows, placementRows] = await Promise.all([
@@ -140,9 +149,15 @@ function createCardsCoordinator(
       loaded = true;
       output.setError(false);
       publish();
+      const zoned = new Set<string>();
       for (const placement of placements.values()) {
-        if (placement.zone_id) ensureZoneBoard(placement.board_id);
+        if (placement.zone_id) zoned.add(placement.board_id);
       }
+      // Boards no placement pins into a zone any more are dropped.
+      for (const boardId of zoneBoards.keys()) {
+        if (!zoned.has(boardId)) zoneBoards.delete(boardId);
+      }
+      for (const boardId of zoned) ensureZoneBoard(boardId, reconcile);
     } catch (err) {
       if (disposed) return;
       console.warn('[settings] failed to load cards:', err);
@@ -266,10 +281,11 @@ function createCardsCoordinator(
  * After that the dataset is patched from realtime events: card events, card
  * placement events (branch placements are ignored) and board record events
  * (zone labels, fenced per board against older `boards.get` responses). It is
- * reconciled in full only after a socket reconnect or a re-authentication;
- * both go through one coordinator: debounced with a bounded wait, at most one
- * read in flight, and a read superseded in flight is discarded and read
- * again. A different user starts over with an empty dataset.
+ * reconciled in full only after a socket reconnect or a re-authentication,
+ * zone boards included; both go through one coordinator: debounced with a
+ * bounded wait, at most one read in flight, a read superseded in flight is
+ * discarded and read again, and a read that starts consumes a reconcile still
+ * waiting in its debounce. A different user starts over with an empty dataset.
  */
 export function useSettingsCards(
   client: AgorClient | null,

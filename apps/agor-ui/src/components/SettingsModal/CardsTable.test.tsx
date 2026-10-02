@@ -291,4 +291,51 @@ describe('CardsTable', () => {
     await act(async () => stats.gates.shift()?.());
     expect(await screen.findByText('Bob card')).toBeVisible();
   });
+
+  it.each(['reauthentication', 'reconnect'])(
+    're-reads cached zone boards on a %s reconcile',
+    async (trigger) => {
+      const { client, emit, cardsFindAll, boardsGet } = makeClient([card('k-1', 'Fix login')]);
+      renderTable(client);
+      expect(await screen.findByText('Review')).toBeVisible();
+      expect(boardsGet).toHaveBeenCalledTimes(1);
+      // Renamed while disconnected (or visible under the new authority only).
+      boardsGet.mockImplementation(async () => fullBoard('Renamed while away'));
+      if (trigger === 'reauthentication') {
+        act(() => setRealtimeAuthorityScope(null));
+        act(() => setRealtimeAuthorityScope('user-a:admin:2'));
+      } else {
+        emit('io', 'connect');
+      }
+      await waitFor(() => expect(cardsFindAll).toHaveBeenCalledTimes(2), { timeout: 2000 });
+      expect(await screen.findByText('Renamed while away')).toBeVisible();
+      expect(boardsGet).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it('a trailing read consumes a reconcile still waiting in its debounce', async () => {
+    const { client, emit, cardsFindAll } = makeClient([]);
+    const stats = trackConcurrency(cardsFindAll, () => [card('k-1', 'Fix login')]);
+    renderTable(client);
+    await waitFor(() => expect(cardsFindAll).toHaveBeenCalledTimes(1));
+    await act(async () => stats.gates.shift()?.());
+    await screen.findByText('Fix login');
+
+    // A reconnect reconcile starts and stays in flight.
+    emit('io', 'connect');
+    await waitFor(() => expect(cardsFindAll).toHaveBeenCalledTimes(2));
+    // A second reconnect's debounce fires during it: the read is superseded.
+    emit('io', 'connect');
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 400)));
+    // A third is still in its debounce when the superseded read returns and
+    // the trailing read starts at once.
+    emit('io', 'connect');
+    await act(async () => stats.gates.shift()?.());
+    await waitFor(() => expect(cardsFindAll).toHaveBeenCalledTimes(3));
+    await act(async () => stats.gates.shift()?.());
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 600)));
+    // The trailing read covered the pending request: one active, one trailing.
+    expect(cardsFindAll).toHaveBeenCalledTimes(3);
+    expect(stats.max).toBe(1);
+  });
 });
