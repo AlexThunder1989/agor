@@ -388,6 +388,8 @@ describe('weak-network recovery', () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.clearAllMocks();
+    refreshTokensMock.mockReset();
+    localStorage.clear();
   });
 
   async function connectedSeam() {
@@ -478,6 +480,43 @@ describe('weak-network recovery', () => {
     await act(() => vi.advanceTimersByTimeAsync(30_000));
     expect(io.connect).toHaveBeenCalledTimes(count + 1);
   });
+  it('starts a fresh reconnect budget on Retry after exhaustion and recovers from a transient failure', async () => {
+    vi.useFakeTimers();
+    const { io, fireIo, result, rejectNextConnect } = await connectedSeam();
+    const kick = () =>
+      act(() => {
+        io.connected = false;
+        fireIo('disconnect', 'io server disconnect');
+      });
+
+    // Brief successful handshakes must not reset the ten-attempt budget.
+    for (let attempt = 0; attempt < 10; attempt++) {
+      kick();
+      await act(() => vi.advanceTimersByTimeAsync(Math.min(500 * 2 ** attempt, 30_000)));
+    }
+    kick();
+    expect(io.connect).toHaveBeenCalledTimes(11);
+    expect(result.current.connecting).toBe(false);
+    expect(result.current.error).toContain('after multiple attempts');
+
+    // A rejected namespace cannot auto-reconnect; a transient REST refresh
+    // failure must schedule another handshake rather than give up again.
+    localStorage.setItem('agor-refresh-token', 'refresh');
+    vi.mocked(createRestClient).mockResolvedValue({} as never);
+    refreshTokensMock.mockRejectedValueOnce(new Error('network error'));
+    rejectNextConnect(Object.assign(new Error('expired'), { code: 401 }));
+    await act(async () => result.current.retryConnection());
+    expect(io.connect).toHaveBeenCalledTimes(12);
+    expect(result.current.error).toBeNull();
+    expect(result.current.connecting).toBe(true);
+
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    expect(io.connect).toHaveBeenCalledTimes(13);
+    expect(result.current.connected).toBe(true);
+    expect(result.current.connecting).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
+
   it('pauses manual retries offline and resumes without replacing the client', async () => {
     vi.useFakeTimers();
     const { io, fireIo, result } = await connectedSeam();

@@ -39,6 +39,7 @@ interface BoundAgorClient {
   url: string;
   authorityGeneration: number;
   accessTokenRef: { current: string | null | undefined };
+  resetReconnectBudget: () => void;
 }
 
 /**
@@ -97,7 +98,7 @@ export function useAgorClient(options: UseAgorClientOptions): UseAgorClientResul
     // socket.io does NOT auto-reconnect for that reason, so we kick it
     // ourselves — but without backoff+cap the loop can run at network speed
     // if the server keeps closing the socket (e.g. auth failures, crash loop,
-    // config mismatch). Reset only after a stable connection.
+    // config mismatch). Reset after a stable connection or explicit user Retry.
     let manualReconnectAttempts = 0;
     let stableConnectionTimer: ReturnType<typeof setTimeout> | null = null;
     const clearStableConnectionTimer = () => {
@@ -226,6 +227,11 @@ export function useAgorClient(options: UseAgorClientOptions): UseAgorClientResul
         url,
         authorityGeneration,
         accessTokenRef: connectionAccessTokenRef,
+        resetReconnectBudget: () => {
+          manualReconnectAttempts = 0;
+          clearManualReconnectTimer();
+          resumeManualReconnect = null;
+        },
       };
       clientBindingRef.current = binding;
 
@@ -418,8 +424,12 @@ export function useAgorClient(options: UseAgorClientOptions): UseAgorClientResul
    * Useful when auto-reconnect fails or user wants to force reconnect
    */
   const retryConnection = () => {
-    const client = visibleBinding?.client;
+    if (!visibleBinding) return;
+    const client = visibleBinding.client;
     if (!client?.io) return;
+
+    // Reset only this authority's client, including any pending retry timer.
+    visibleBinding.resetReconnectBudget();
 
     // If already connected, disconnect first
     if (client.io.connected) {
