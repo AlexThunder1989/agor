@@ -1,10 +1,11 @@
-import { act, renderHook, screen } from '@testing-library/react';
+import { act, render, renderHook, screen } from '@testing-library/react';
 import { App } from 'antd';
 import type { ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectionProvider } from '../contexts/ConnectionContext';
 import { agorStore } from '../store/agorStore';
 import { captureBoardWriteTicket, isBoardWriteTicketCurrent } from '../store/boardMutationGuard';
+import { publishConnectionSnapshot, withdrawConnectionSnapshot } from '../store/connectionSnapshot';
 import { useBoardMutationGuard } from './useBoardMutationGuard';
 
 const BOARD = 'board-guard';
@@ -33,43 +34,58 @@ function unload() {
 }
 
 describe('board write tickets', () => {
+  const publisher = {};
+  const owner = { alive: true };
+  const capture = (requirePartition: boolean) =>
+    captureBoardWriteTicket(BOARD, { requirePartition, owner });
+
   beforeEach(() => {
     agorStore.setState({ boardPartitions: new Map() });
+    owner.alive = true;
+    publishConnectionSnapshot(publisher, connection());
   });
+  afterEach(() => withdrawConnectionSnapshot(publisher));
 
   it('captures nothing for an unloaded board unless the write needs no partition', () => {
-    expect(captureBoardWriteTicket(BOARD, { requirePartition: true, authGeneration: 1 })).toBe(
-      null
-    );
+    expect(capture(true)).toBe(null);
     agorStore.getState().setBoardPartition(BOARD, {
       status: 'loading',
       authorityScope: 'fixture',
       loadEpoch: 0,
       loadId: 1,
     });
-    expect(captureBoardWriteTicket(BOARD, { requirePartition: true, authGeneration: 1 })).toBe(
-      null
-    );
-    const free = captureBoardWriteTicket(BOARD, { requirePartition: false, authGeneration: 1 });
-    expect(isBoardWriteTicketCurrent(free, 1)).toBe(true);
+    expect(capture(true)).toBe(null);
+    expect(isBoardWriteTicketCurrent(capture(false))).toBe(true);
   });
 
   it('a ticket from before an unload is never current again, even after the board reloads', () => {
     load();
-    const ticket = captureBoardWriteTicket(BOARD, { requirePartition: true, authGeneration: 1 });
-    expect(isBoardWriteTicketCurrent(ticket, 1)).toBe(true);
+    const ticket = capture(true);
+    expect(isBoardWriteTicketCurrent(ticket)).toBe(true);
     unload();
-    expect(isBoardWriteTicketCurrent(ticket, 1)).toBe(false);
+    expect(isBoardWriteTicketCurrent(ticket)).toBe(false);
     load();
-    expect(isBoardWriteTicketCurrent(ticket, 1)).toBe(false);
-    const fresh = captureBoardWriteTicket(BOARD, { requirePartition: true, authGeneration: 1 });
-    expect(isBoardWriteTicketCurrent(fresh, 1)).toBe(true);
+    expect(isBoardWriteTicketCurrent(ticket)).toBe(false);
+    expect(isBoardWriteTicketCurrent(capture(true))).toBe(true);
   });
 
-  it('a re-authentication ends a ticket', () => {
+  it('a re-authentication or an unusable connection ends a ticket', () => {
     load();
-    const ticket = captureBoardWriteTicket(BOARD, { requirePartition: true, authGeneration: 1 });
-    expect(isBoardWriteTicketCurrent(ticket, 2)).toBe(false);
+    const ticket = capture(false);
+    publishConnectionSnapshot(publisher, connection({ connected: false }));
+    expect(isBoardWriteTicketCurrent(ticket)).toBe(false);
+    expect(capture(false)).toBe(null);
+    publishConnectionSnapshot(publisher, connection({ authGeneration: 2 }));
+    expect(isBoardWriteTicketCurrent(ticket)).toBe(false);
+    expect(isBoardWriteTicketCurrent(capture(false))).toBe(true);
+  });
+
+  it("an owner's end ends its tickets", () => {
+    load();
+    const ticket = capture(true);
+    owner.alive = false;
+    expect(isBoardWriteTicketCurrent(ticket)).toBe(false);
+    expect(capture(true)).toBe(null);
   });
 });
 
@@ -78,7 +94,10 @@ describe('useBoardMutationGuard', () => {
     agorStore.setState({ boardPartitions: new Map() });
   });
 
-  function renderGuard(initial: { boardId?: string; allowed?: boolean; connected?: boolean }) {
+  function renderGuard(
+    initial: { boardId?: string; allowed?: boolean; connected?: boolean },
+    options: { requirePartition?: boolean } = {}
+  ) {
     let props = { boardId: BOARD, allowed: true, connected: true, ...initial };
     const wrapper = ({ children }: { children: ReactNode }) => (
       <App>
@@ -87,7 +106,7 @@ describe('useBoardMutationGuard', () => {
         </ConnectionProvider>
       </App>
     );
-    const view = renderHook(() => useBoardMutationGuard(props.boardId, props.allowed), {
+    const view = renderHook(() => useBoardMutationGuard(props.boardId, props.allowed, options), {
       wrapper,
     });
     return {
@@ -146,5 +165,40 @@ describe('useBoardMutationGuard', () => {
     }
     view.update({ boardId: BOARD, allowed: true, connected: true });
     expect(view.result.current.isCurrent(ticket)).toBe(true);
+  });
+
+  it.each([true, false])(
+    'ends every ticket when the guard unmounts (requirePartition: %s)',
+    async (requirePartition) => {
+      act(() => load());
+      const view = renderGuard({}, { requirePartition });
+      const ticket = view.result.current.capture();
+      expect(view.result.current.isCurrent(ticket)).toBe(true);
+      const { isCurrent, write } = view.result.current;
+      view.unmount();
+      // Nothing else changed: same board lifetime, connection and generation.
+      expect(isCurrent(ticket)).toBe(false);
+      const dispatch = vi.fn(async () => {});
+      await act(async () => {
+        expect(await write(ticket, dispatch)).toBe(false);
+      });
+      expect(dispatch).not.toHaveBeenCalled();
+    }
+  );
+
+  it('judges a held ticket against the connection published now, not the last render', () => {
+    act(() => load());
+    const view = renderGuard({}, { requirePartition: false });
+    const ticket = view.result.current.capture();
+    const { isCurrent, capture } = view.result.current;
+    // Another provider (the app after a re-authentication) publishes generation 2.
+    render(
+      <ConnectionProvider value={connection({ authGeneration: 2 })}>
+        <div />
+      </ConnectionProvider>
+    );
+    expect(isCurrent(ticket)).toBe(false);
+    // Its owner still renders generation 1: nothing is captured until both agree.
+    expect(capture()).toBe(null);
   });
 });

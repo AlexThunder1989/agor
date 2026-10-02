@@ -24,7 +24,7 @@ import {
   SaveOutlined,
 } from '@ant-design/icons';
 import { Button, Collapse, Input, Modal, Space, Tag, Tooltip, Typography, theme } from 'antd';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useBoardMutationGuard } from '../../hooks/useBoardMutationGuard';
 import { useAgorStore } from '../../store/agorStore';
 import type { BoardWriteTicket } from '../../store/boardMutationGuard';
@@ -134,6 +134,18 @@ const CardModalComponent = ({
     setTicket(open && cardId ? guard.capture() : null);
   }, [open, cardId]);
   const ticketCurrent = guard.isCurrent(ticket);
+  // Confirmations are static dialogs outside this tree; they belong to this
+  // modal on this card, so closing it, switching cards or unmounting destroys
+  // any still open.
+  const confirmRef = useRef<{ destroy: () => void } | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: torn down per open card
+  useEffect(
+    () => () => {
+      confirmRef.current?.destroy();
+      confirmRef.current = null;
+    },
+    [open, cardId]
+  );
 
   const hasEditAccess = Boolean(boardAccess?.capabilities.includes('board.edit'));
   const canEdit = !readOnlyReason && hasEditAccess && ticketCurrent;
@@ -182,7 +194,7 @@ const CardModalComponent = ({
 
   const handleArchive = useCallback(async () => {
     if (!card || !client || !canEdit) return;
-    Modal.confirm({
+    confirmRef.current = Modal.confirm({
       title: 'Archive card?',
       content: `This will hide "${card.title}" from the board while preserving its data.`,
       okText: 'Archive',
@@ -213,7 +225,7 @@ const CardModalComponent = ({
 
   const handleDelete = useCallback(async () => {
     if (!card || !client || !canEdit) return;
-    Modal.confirm({
+    confirmRef.current = Modal.confirm({
       title: 'Delete card?',
       content: `This will permanently delete "${card.title}".`,
       okText: 'Delete',

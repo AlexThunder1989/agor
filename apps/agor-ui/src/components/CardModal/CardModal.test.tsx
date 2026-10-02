@@ -219,6 +219,57 @@ describe('CardModal permission gating', () => {
     }
   );
 
+  it.each(['Archive', 'Delete'])(
+    'a Settings card %s confirmation outliving its modal dispatches nothing',
+    async (action) => {
+      // Settings → Cards: the ticket needs no partition, only the auth generation.
+      const { client, patch, remove, effectiveAccessFind } = makeClient([
+        'board.view',
+        'board.edit',
+      ]);
+      const view = renderWithApp(
+        <CardModal open card={card} board={board} client={client} onClose={vi.fn()} />
+      );
+      await waitFor(() => expect(effectiveAccessFind).toHaveBeenCalled());
+      await waitFor(() => expect(screen.getByText(action).closest('button')).not.toBeDisabled());
+      fireEvent.click(screen.getByText(action).closest('button') as HTMLButtonElement);
+      expect((await screen.findAllByText(`${action} card?`)).length).toBeGreaterThan(0);
+      const okButtons = Array.from(
+        document.querySelectorAll<HTMLButtonElement>('.ant-modal-confirm-btns button')
+      );
+      // The owner unmounts; partitions reset and the app re-authenticates.
+      view.unmount();
+      // Its confirmation goes with it.
+      await waitFor(() => expect(screen.queryAllByText(`${action} card?`)).toHaveLength(0));
+      act(() => agorStore.getState().resetBoardPartitions());
+      render(
+        <ConnectionProvider value={{ ...CONNECTED, authGeneration: 2 }}>
+          <div />
+        </ConnectionProvider>
+      );
+      await act(async () => {
+        fireEvent.click(okButtons[okButtons.length - 1]);
+      });
+      expect(patch).not.toHaveBeenCalled();
+      expect(remove).not.toHaveBeenCalled();
+    }
+  );
+
+  it('a re-authentication while open makes the card read-only at once', async () => {
+    const { client, effectiveAccessFind } = makeClient(['board.view', 'board.edit']);
+    const ui = (connection = CONNECTED) =>
+      withApp(
+        <CardModal open card={card} board={board} client={client} onClose={vi.fn()} />,
+        connection
+      );
+    const view = render(ui());
+    await waitFor(() => expect(effectiveAccessFind).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByText('Archive').closest('button')).not.toBeDisabled());
+    view.rerender(ui({ ...CONNECTED, authGeneration: 2 }));
+    expect(screen.getByText('Archive').closest('button')).toBeDisabled();
+    expect(screen.getByText('Delete').closest('button')).toBeDisabled();
+  });
+
   it('a card opened before a board reload stays read-only until reopened', async () => {
     loadBoard();
     const { client, effectiveAccessFind } = makeClient(['board.view', 'board.edit']);
