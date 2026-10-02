@@ -27,6 +27,7 @@ vi.mock('../AgenticToolConfigurationPicker', () => ({
   INLINE_AGENTIC_CONFIGURATION: '__inline__',
   persistUserDefaultFromForm,
 }));
+const HiddenField = (_props: { value?: unknown; onChange?: (value: unknown) => void }) => null;
 // Chip-row stub that drives the shared `agenticToolPresetId` field.
 vi.mock('../AgenticConfigChipRow', () => ({
   AgenticConfigChipRow: ({
@@ -37,11 +38,20 @@ vi.mock('../AgenticConfigChipRow', () => ({
     mcpLoading?: boolean;
   }) => {
     const form = Form.useFormInstance();
+    const mcp = Form.useWatch('mcpServerIds', form) as string[] | undefined;
     return (
-      <div data-mcp-loading={String(mcpLoading)} data-testid="chip-row">
+      <div
+        data-mcp-loading={String(mcpLoading)}
+        data-mcp={(mcp ?? []).join(',')}
+        data-testid="chip-row"
+      >
         {showEffort && <div data-testid="effort-chip" />}
         <Form.Item name="agenticToolPresetId" hidden>
           <input />
+        </Form.Item>
+        {/* Registers the field like the real chip row, so useWatch sees it. */}
+        <Form.Item name="mcpServerIds" noStyle>
+          <HiddenField />
         </Form.Item>
         <button
           type="button"
@@ -144,12 +154,13 @@ describe('SessionSettingsModal configuration', { timeout: 10_000 }, () => {
     expect(onUpdateSessionMcpServers).not.toHaveBeenCalled();
   });
 
-  it('seeds the MCP field when the links load while open, so saving keeps them', async () => {
+  it('seeds the MCP field when the links load while open, and sends nothing unless edited', async () => {
     mcpLinks.value = { ids: [], loaded: false };
+    const onClose = vi.fn();
     const onUpdateSessionMcpServers = vi.fn();
     const props = {
       open: true,
-      onClose: vi.fn(),
+      onClose,
       session: claudeSession,
       client: null,
       currentUser: null,
@@ -160,9 +171,62 @@ describe('SessionSettingsModal configuration', { timeout: 10_000 }, () => {
     mcpLinks.value = { ids: ['a', 'b'], loaded: true };
     rerender(<SessionSettingsModal {...props} />);
     expect(screen.getByTestId('chip-row')).toHaveAttribute('data-mcp-loading', 'false');
+    await waitFor(() => expect(screen.getByTestId('chip-row')).toHaveAttribute('data-mcp', 'a,b'));
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(onUpdateSessionMcpServers).toHaveBeenCalledWith('s1', ['a', 'b']));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(onUpdateSessionMcpServers).not.toHaveBeenCalled();
+  });
+
+  it('reseeds an untouched selection when the links reload, so Save never detaches unseen links', async () => {
+    mcpLinks.value = { ids: ['a'], loaded: true };
+    const onClose = vi.fn();
+    const onUpdateSessionMcpServers = vi.fn();
+    const props = {
+      open: true,
+      onClose,
+      session: claudeSession,
+      client: null,
+      currentUser: null,
+      onUpdateSessionMcpServers,
+    };
+    const { rerender } = render(<SessionSettingsModal {...props} />);
+    // A reconnect unloads the links; they reload with a link added meanwhile.
+    mcpLinks.value = { ids: ['a'], loaded: false };
+    rerender(<SessionSettingsModal {...props} />);
+    mcpLinks.value = { ids: ['a', 'b'], loaded: true };
+    rerender(<SessionSettingsModal {...props} />);
+    await waitFor(() => expect(screen.getByTestId('chip-row')).toHaveAttribute('data-mcp', 'a,b'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(onUpdateSessionMcpServers).not.toHaveBeenCalled();
+  });
+
+  it('keeps an edit across a reload and diffs it against the links the user saw', async () => {
+    mcpLinks.value = { ids: ['a'], loaded: true };
+    const onUpdateSessionMcpServers = vi.fn();
+    const props = {
+      open: true,
+      onClose: vi.fn(),
+      session: claudeSession,
+      client: null,
+      currentUser: null,
+      onUpdateSessionMcpServers,
+    };
+    const { rerender } = render(<SessionSettingsModal {...props} />);
+    fireEvent.click(screen.getByTestId('pick-mcp')); // ['a'] -> ['mcp-1']
+    mcpLinks.value = { ids: ['a', 'b'], loaded: true };
+    rerender(<SessionSettingsModal {...props} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('chip-row')).toHaveAttribute('data-mcp', 'mcp-1')
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    // Baseline ['a']: attach mcp-1, detach a; b was never shown, so it stays.
+    await waitFor(() =>
+      expect(onUpdateSessionMcpServers).toHaveBeenCalledWith('s1', ['mcp-1'], ['a'])
+    );
   });
 
   it('shows historical removed-runtime sessions as read-only', () => {
@@ -198,7 +262,7 @@ describe('SessionSettingsModal configuration', { timeout: 10_000 }, () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
-      expect(onUpdateSessionMcpServers).toHaveBeenCalledWith('s1', ['mcp-1']);
+      expect(onUpdateSessionMcpServers).toHaveBeenCalledWith('s1', ['mcp-1'], []);
     });
   });
 

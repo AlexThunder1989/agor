@@ -69,7 +69,12 @@ export interface SessionSettingsModalProps {
   onClose: () => void;
   session: Session;
   onUpdate?: (sessionId: string, updates: Partial<Session>) => void;
-  onUpdateSessionMcpServers?: (sessionId: string, mcpServerIds: string[]) => void;
+  onUpdateSessionMcpServers?: (
+    sessionId: string,
+    mcpServerIds: string[],
+    /** The links the user was shown; the change is diffed against them. */
+    baselineIds?: string[]
+  ) => void;
   /**
    * Called on save with the new list of env var names the session creator has
    * selected to export into the session's executor process. Only the session's
@@ -104,6 +109,10 @@ interface FormValues {
 
 function formatCustomContext(customContext: Session['custom_context']): string {
   return customContext ? JSON.stringify(customContext, null, 2) : '';
+}
+
+function sameIds(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((id) => b.includes(id));
 }
 
 function buildInitialValues(session: Session, sessionMcpServerIds: string[]): FormValues {
@@ -317,16 +326,25 @@ export const SessionSettingsModal: React.FC<SessionSettingsModalProps> = ({
     }
   }, [open, session, sessionMcpServerIds, form, fullSession]);
 
-  // Seed the MCP field once this session's links load while the modal is open.
-  // The chip is read-only until then, so there is no edit to preserve.
-  const seededMcpSessionRef = React.useRef<string | null>(null);
+  // The MCP selection the user was shown, seeded from this session's loaded
+  // links. While the field still equals it, a reload (e.g. after a
+  // reconnect) reseeds both; an edit is kept, and so is the baseline it was
+  // made against. Save sends an MCP change only for an edit, diffed against
+  // this baseline, so links the user never saw are never detached.
+  const mcpBaselineRef = React.useRef<{ sessionId: string; ids: string[] } | null>(null);
   React.useEffect(() => {
     if (!open) {
-      seededMcpSessionRef.current = null;
+      mcpBaselineRef.current = null;
       return;
     }
-    if (!sessionMcpLoaded || seededMcpSessionRef.current === session.session_id) return;
-    seededMcpSessionRef.current = session.session_id;
+    if (!sessionMcpLoaded) return;
+    const baseline = mcpBaselineRef.current;
+    if (baseline?.sessionId === session.session_id) {
+      if (sameIds(baseline.ids, sessionMcpServerIds)) return;
+      const field = (form.getFieldValue('mcpServerIds') as string[] | undefined) ?? [];
+      if (!sameIds(field, baseline.ids)) return; // edited: keep the edit and its baseline
+    }
+    mcpBaselineRef.current = { sessionId: session.session_id, ids: sessionMcpServerIds };
     setInitialValues((previous) => ({ ...previous, mcpServerIds: sessionMcpServerIds }));
     form.setFieldValue('mcpServerIds', sessionMcpServerIds);
   }, [open, sessionMcpLoaded, sessionMcpServerIds, session.session_id, form]);
@@ -409,8 +427,14 @@ export const SessionSettingsModal: React.FC<SessionSettingsModalProps> = ({
         );
       }
 
-      if (onUpdateSessionMcpServers && sessionMcpLoaded) {
-        onUpdateSessionMcpServers(session.session_id, values.mcpServerIds || []);
+      const mcpBaseline = mcpBaselineRef.current;
+      const nextMcpServerIds = values.mcpServerIds || [];
+      if (
+        onUpdateSessionMcpServers &&
+        mcpBaseline?.sessionId === session.session_id &&
+        !sameIds(nextMcpServerIds, mcpBaseline.ids)
+      ) {
+        onUpdateSessionMcpServers(session.session_id, nextMcpServerIds, mcpBaseline.ids);
       }
 
       if (canEditEnvSelections && onUpdateSessionEnvSelections) {

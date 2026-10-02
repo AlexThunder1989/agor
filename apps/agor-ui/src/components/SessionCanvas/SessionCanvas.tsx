@@ -145,7 +145,12 @@ interface SessionCanvasProps {
   onSessionDelete?: (sessionId: string) => void;
   onForkSession?: (sessionId: string, prompt: string) => Promise<void>;
   onSpawnSession?: (sessionId: string, config: string | Partial<SpawnConfig>) => Promise<void>;
-  onUpdateSessionMcpServers?: (sessionId: string, mcpServerIds: string[]) => void;
+  onUpdateSessionMcpServers?: (
+    sessionId: string,
+    mcpServerIds: string[],
+    /** The links the user was shown; the change is diffed against them. */
+    baselineIds?: string[]
+  ) => void;
   onOpenSettings?: (sessionId: string) => void;
   onCreateSessionForBranch?: (branchId: string) => void;
   onOpenBranch?: (branchId: string) => void;
