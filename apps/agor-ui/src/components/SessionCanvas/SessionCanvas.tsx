@@ -68,6 +68,7 @@ import { useCanManageBoard } from '../../hooks/useCanManageBoard';
 import { useCursorTracking } from '../../hooks/useCursorTracking';
 import { useStableCallback } from '../../hooks/useStableCallback';
 import { agorStore, useAgorStore } from '../../store/agorStore';
+import { makeBoardReadySelector } from '../../store/boardPartitions';
 import {
   makeBoardObjectsForBoardSelector,
   makeSessionsForBranchSelector,
@@ -488,15 +489,26 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
     const userById = useAgorStore(selectUserById);
     const currentUser = currentUserId ? userById.get(currentUserId) : undefined;
     const canEditBoard = useCanManageBoard(client, board ?? undefined, currentUser);
-    const canMutateBoard = canEditBoard && mutationGate.canMutate;
+    // Until this board's partition is loaded (e.g. right after a reconnect
+    // unloaded it), its cached placements may be stale and its record may be
+    // the lean one without zone geometry: a drag would then persist
+    // `zone_id: null` for a pinned branch. Structural edits wait (invariant I1).
+    const boardReady = useAgorStore(
+      useMemo(() => makeBoardReadySelector(board?.board_id), [board?.board_id])
+    );
+    const boardReadyRef = useRef(boardReady);
+    boardReadyRef.current = boardReady;
+    const canMutateBoard = canEditBoard && mutationGate.canMutate && boardReady;
     // Board Viewers may collaborate through comments even though structural
     // canvas mutations require board.edit. The daemon applies the same global
     // member floor plus board-view authorization on comment creation.
     const canComment = Boolean(currentUser && hasMinimumRole(currentUser.role, ROLES.MEMBER));
-    const canMutateComments = canComment && mutationGate.canMutate;
-    const boardMutationMessage = canEditBoard
-      ? mutationGate.message
-      : 'You do not have permission to edit this board';
+    const canMutateComments = canComment && mutationGate.canMutate && boardReady;
+    const boardMutationMessage = !canEditBoard
+      ? 'You do not have permission to edit this board'
+      : !boardReady
+        ? 'This board is still loading'
+        : mutationGate.message;
     const commentMutationMessage = canComment
       ? mutationGate.message
       : 'You do not have permission to comment on this board';
@@ -1384,7 +1396,8 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
           position,
           parentId, // Set parent for relative positioning (moves with parent)
           // No extent constraint - comments can be dragged anywhere and re-pinned
-          draggable: mutationGate.canMutate && canRepositionBoardComment(comment, currentUser),
+          draggable:
+            mutationGate.canMutate && boardReady && canRepositionBoardComment(comment, currentUser),
           selectable: true,
           zIndex: 1000, // Always on top (elevateNodesOnSelect is disabled)
           data: {
@@ -1421,6 +1434,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
       onCommentSelect,
       currentUser,
       mutationGate.canMutate,
+      boardReady,
     ]);
 
     // Helper: Apply local position overrides to a set of incoming nodes (branches or cards).
@@ -1932,6 +1946,8 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
 
         // Reset dragging flag immediately to allow node sync effects to run
         isDraggingRef.current = false;
+        // Never derive a zone from a board that isn't loaded (see `boardReady`).
+        if (!boardReadyRef.current) return;
 
         // Track final position locally
         // IMPORTANT: Store ABSOLUTE position, not relative!
@@ -1962,6 +1978,12 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
         layoutUpdateTimerRef.current = setTimeout(async () => {
           const updates = pendingLayoutUpdatesRef.current;
           pendingLayoutUpdatesRef.current = {};
+          // The board was unloaded during the debounce (a reconnect): its zone
+          // geometry may be gone, so these moves are dropped, not persisted.
+          if (!boardReadyRef.current) {
+            showWarning('This board is reloading; your last move was not saved.');
+            return;
+          }
 
           try {
             // Separate updates for branches vs zones vs markdown vs comments

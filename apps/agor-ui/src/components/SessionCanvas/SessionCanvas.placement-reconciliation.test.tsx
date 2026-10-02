@@ -191,7 +191,65 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
       branchById: new Map([[BRANCH_ID, branch]]),
       cardById: new Map([[card.card_id, card]]),
       boardObjectsByBoardId: new Map([[BOARD_ID, [implementingPlacement, reviewingCardPlacement]]]),
+      // Structural edits need the board's partition loaded (see `boardReady`).
+      boardPartitions: new Map([
+        [BOARD_ID, { status: 'loaded', authorityScope: 'fixture', loadEpoch: 0 }],
+      ]),
     });
+  });
+
+  it('persists no move on a board whose partition is not loaded (lean record, no zones)', async () => {
+    vi.useFakeTimers();
+    // A reconnect unloaded this board; its cached placement is pinned to a
+    // zone, but the lean record has no zone geometry to drop it into.
+    agorStore.setState({ boardPartitions: new Map() });
+    const leanBoard = { ...board, objects: undefined } as unknown as Board;
+    const patch = vi.fn(async () => implementingPlacement);
+    const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
+    render(
+      <ConnectionProvider value={connected}>
+        <SessionCanvas board={leanBoard} client={client} branches={[branch]} />
+      </ConnectionProvider>
+    );
+    await act(async () => {});
+    expect((currentNode(BRANCH_ID) as FlowNode & { draggable?: boolean }).draggable).toBe(false);
+    act(() => {
+      const node = { ...currentNode(BRANCH_ID), positionAbsolute: { x: 1800, y: 200 } };
+      flowProps?.onNodeDragStart?.({}, node);
+      flowProps?.onNodeDrag?.({}, node);
+      flowProps?.onNodeDragStop?.({}, node);
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+    });
+    expect(patch).not.toHaveBeenCalled();
+    expect(screen.getByTestId('board-syncing-pill')).toHaveTextContent('read-only');
+  });
+
+  it('drops a pending move when the board unloads before it is saved', async () => {
+    vi.useFakeTimers();
+    const patch = vi.fn(async () => implementingPlacement);
+    const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
+    render(
+      <App>
+        <ConnectionProvider value={connected}>
+          <SessionCanvas board={board} client={client} branches={[branch]} />
+        </ConnectionProvider>
+      </App>
+    );
+    await act(async () => {});
+    act(() => {
+      const node = { ...currentNode(BRANCH_ID), positionAbsolute: { x: 1800, y: 200 } };
+      flowProps?.onNodeDragStart?.({}, node);
+      flowProps?.onNodeDrag?.({}, node);
+      flowProps?.onNodeDragStop?.({}, node);
+    });
+    // A reconnect unloads the board inside the 500 ms save debounce.
+    act(() => agorStore.getState().resetBoardPartitions());
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+    });
+    expect(patch).not.toHaveBeenCalled();
   });
 
   afterEach(() => {

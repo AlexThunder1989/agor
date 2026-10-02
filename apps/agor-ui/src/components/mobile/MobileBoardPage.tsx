@@ -162,9 +162,14 @@ export const MobileBoardPage: React.FC<MobileBoardPageProps> = ({
   const primaryTeammate = board.primary_teammate_id
     ? branchById.get(board.primary_teammate_id)
     : undefined;
-  const placements = [...(boardObjectsByBoardId.get(board.board_id) ?? [])].sort((a, b) =>
-    spatialSort(a.position, b.position)
-  );
+  // Until the partition loads, cached rows may be stale and the board record
+  // may be the lean one (no zones): render none of them rather than wrong
+  // zone groupings (a skeleton shows instead).
+  const placements = boardReady
+    ? [...(boardObjectsByBoardId.get(board.board_id) ?? [])].sort((a, b) =>
+        spatialSort(a.position, b.position)
+      )
+    : [];
   const branches = placements.flatMap((placement) => {
     const branch = placement.branch_id ? branchById.get(placement.branch_id) : undefined;
     return branch && branch.branch_id !== primaryTeammate?.branch_id ? [{ branch, placement }] : [];
@@ -173,7 +178,9 @@ export const MobileBoardPage: React.FC<MobileBoardPageProps> = ({
     const card = placement.card_id ? cardById.get(placement.card_id) : undefined;
     return card && !card.archived ? [{ card, placement }] : [];
   });
-  const annotations = Object.entries(board.objects ?? {}).sort(([, a], [, b]) => spatialSort(a, b));
+  const annotations = boardReady
+    ? Object.entries(board.objects ?? {}).sort(([, a], [, b]) => spatialSort(a, b))
+    : [];
   const zones = annotations.filter(
     (entry): entry is [string, Extract<BoardObject, { type: 'zone' }>] => entry[1].type === 'zone'
   );
@@ -321,7 +328,7 @@ export const MobileBoardPage: React.FC<MobileBoardPageProps> = ({
         }}
       >
         <Flex vertical gap={token.marginMD} style={{ maxWidth: 680, margin: '0 auto' }}>
-          {primaryTeammate && renderBranchCard(primaryTeammate, true)}
+          {boardReady && primaryTeammate && renderBranchCard(primaryTeammate, true)}
           {board.description?.trim() && (
             <Paragraph type="secondary" style={{ margin: 0, overflowWrap: 'anywhere' }}>
               {board.description}

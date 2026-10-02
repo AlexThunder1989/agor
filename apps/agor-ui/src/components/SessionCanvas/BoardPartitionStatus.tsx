@@ -10,7 +10,8 @@ import {
 /**
  * Canvas overlay for a board whose partition is not complete yet (invariant
  * I1): a centered spinner while the board has no placements at all, otherwise
- * a small "Syncing" pill over the partially known board; an inline retry when
+ * a small "Syncing · read-only" pill over the partially known board (the
+ * canvas pauses structural edits until it is loaded); an inline retry when
  * the load failed. Self-subscribes so the canvas never re-renders for it.
  */
 export const BoardPartitionStatus = memo(function BoardPartitionStatus({
@@ -81,7 +82,7 @@ export const BoardPartitionStatus = memo(function BoardPartitionStatus({
     <div style={pillStyle} data-testid="board-syncing-pill" aria-live="polite">
       <Spin size="small" />
       <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
-        Syncing
+        Syncing · read-only
       </Typography.Text>
     </div>
   );
