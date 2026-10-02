@@ -1,4 +1,4 @@
-const CONSOLE_ORIGIN = 'https://console.cloud.agor.live';
+const CONSOLE_ORIGIN = 'https://console.agor.cloud';
 
 export const TEAM_SIGNUP_STATUS_URL = `${CONSOLE_ORIGIN}/api/team-signup/status`;
 
@@ -69,4 +69,15 @@ export function cloudCtaFor(status: TeamSignupStatus | null, placement: string):
     ...cta,
     href: `${cta.href}?${CTA_UTM_BASE}&utm_content=${encodeURIComponent(placement)}`,
   };
+}
+
+/**
+ * The visitor's HubSpot token (hubspotutk cookie), so the console can tie a
+ * sign-up to their agor.live history. Read at click time: HubSpot's script
+ * sets the cookie after hydration.
+ */
+export function hubspotVisitorToken(): string | null {
+  const match = document.cookie.match(/(?:^|;\s*)hubspotutk=([^;]+)/);
+  const token = match ? decodeURIComponent(match[1]) : null;
+  return token && /^[a-f0-9]{32}$/.test(token) ? token : null;
 }

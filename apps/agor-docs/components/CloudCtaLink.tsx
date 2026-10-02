@@ -8,6 +8,7 @@ import {
   type CloudCtaVariant,
   COMPACT_CTA_LABELS,
   cloudCtaFor,
+  hubspotVisitorToken,
   isTeamSignupStatus,
   TEAM_SIGNUP_STATUS_URL,
   type TeamSignupStatus,
@@ -106,6 +107,15 @@ export function CloudCtaLink({ placement, className, compact, labels }: CloudCta
     if (variant === 'hubspot_modal') {
       event.preventDefault();
       setIsFormOpen(true);
+      return;
+    }
+    // Console links carry the HubSpot visitor token (the console prefers
+    // ?hutk= over its own cookie); utm_content still names the placement.
+    const token = hubspotVisitorToken();
+    if (token) {
+      const url = new URL(event.currentTarget.href);
+      url.searchParams.set('hutk', token);
+      event.currentTarget.href = url.toString();
     }
   };
 
