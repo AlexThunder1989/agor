@@ -184,4 +184,111 @@ describe('CardsTable', () => {
     emit('boards', 'patched', fullBoard('In review'));
     expect(await screen.findByText('In review')).toBeVisible();
   });
+
+  it('keeps a board event that lands during the initial zone read', async () => {
+    const { client, emit, boardsGet } = makeClient([card('k-1', 'Fix login')]);
+    let releaseGet!: () => void;
+    boardsGet.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseGet = () => resolve(fullBoard('Review (older read)'));
+        })
+    );
+    renderTable(client);
+    await screen.findByText('Fix login');
+    await waitFor(() => expect(boardsGet).toHaveBeenCalledTimes(1));
+    // The zone was renamed while the read was in flight.
+    emit('boards', 'patched', fullBoard('Renamed'));
+    await act(async () => releaseGet());
+    expect(await screen.findByText('Renamed')).toBeVisible();
+    expect(screen.queryByText('Review (older read)')).not.toBeInTheDocument();
+  });
+
+  it('never lets a refresh read overwrite a newer board event', async () => {
+    const { client, emit, boardsGet } = makeClient([card('k-1', 'Fix login')]);
+    renderTable(client);
+    expect(await screen.findByText('Review')).toBeVisible();
+    let releaseGet!: () => void;
+    boardsGet.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseGet = () => resolve(fullBoard('Stale refresh'));
+        })
+    );
+    // A lean event triggers a refresh read; a full event lands before it returns.
+    emit('boards', 'patched', leanBoard);
+    await waitFor(() => expect(boardsGet).toHaveBeenCalledTimes(2));
+    emit('boards', 'patched', fullBoard('Newest'));
+    await act(async () => releaseGet());
+    expect(await screen.findByText('Newest')).toBeVisible();
+    expect(screen.queryByText('Stale refresh')).not.toBeInTheDocument();
+  });
+
+  function trackConcurrency(cardsFindAll: ReturnType<typeof vi.fn>, rows: () => CardWithType[]) {
+    const stats = { inflight: 0, max: 0, gates: [] as Array<() => void> };
+    cardsFindAll.mockImplementation(async () => {
+      stats.inflight += 1;
+      stats.max = Math.max(stats.max, stats.inflight);
+      await new Promise<void>((resolve) => stats.gates.push(resolve));
+      stats.inflight -= 1;
+      return rows();
+    });
+    return stats;
+  }
+
+  it('coalesces five rapid re-authentications into one trailing reconcile', async () => {
+    const { client, cardsFindAll } = makeClient([]);
+    const stats = trackConcurrency(cardsFindAll, () => [card('k-1', 'Fix login')]);
+    renderTable(client);
+    await waitFor(() => expect(cardsFindAll).toHaveBeenCalledTimes(1));
+    await act(async () => stats.gates.shift()?.());
+    await screen.findByText('Fix login');
+
+    for (let generation = 2; generation <= 6; generation++) {
+      act(() => setRealtimeAuthorityScope(null));
+      act(() => setRealtimeAuthorityScope(`user-a:admin:${generation}`));
+    }
+    await waitFor(() => expect(cardsFindAll).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    await act(async () => stats.gates.shift()?.());
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 600)));
+    expect(cardsFindAll).toHaveBeenCalledTimes(2);
+    expect(stats.max).toBe(1);
+  });
+
+  it('keeps one read in flight when re-authentications land during the first read', async () => {
+    const { client, cardsFindAll } = makeClient([]);
+    const stats = trackConcurrency(cardsFindAll, () => [card('k-1', 'Fix login')]);
+    renderTable(client);
+    await waitFor(() => expect(cardsFindAll).toHaveBeenCalledTimes(1));
+    for (let generation = 2; generation <= 6; generation++) {
+      act(() => setRealtimeAuthorityScope(null));
+      act(() => setRealtimeAuthorityScope(`user-a:admin:${generation}`));
+    }
+    expect(cardsFindAll).toHaveBeenCalledTimes(1);
+    // The superseded read is discarded and read once more.
+    await act(async () => stats.gates.shift()?.());
+    await waitFor(() => expect(cardsFindAll).toHaveBeenCalledTimes(2));
+    await act(async () => stats.gates.shift()?.());
+    expect(await screen.findByText('Fix login')).toBeVisible();
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 600)));
+    expect(cardsFindAll).toHaveBeenCalledTimes(2);
+    expect(stats.max).toBe(1);
+  });
+
+  it("never shows the previous user's cards after an identity change", async () => {
+    const { client, cardsFindAll } = makeClient([]);
+    const stats = trackConcurrency(cardsFindAll, () =>
+      cardsFindAll.mock.calls.length === 1 ? [card('k-a', 'Alice card')] : [card('k-b', 'Bob card')]
+    );
+    renderTable(client);
+    await act(async () => stats.gates.shift()?.());
+    await screen.findByText('Alice card');
+
+    act(() => setRealtimeAuthorityScope('user-b:admin:1'));
+    // Cleared at once, before Bob's read returns.
+    await waitFor(() => expect(screen.queryByText('Alice card')).not.toBeInTheDocument());
+    await waitFor(() => expect(cardsFindAll).toHaveBeenCalledTimes(2));
+    await act(async () => stats.gates.shift()?.());
+    expect(await screen.findByText('Bob card')).toBeVisible();
+  });
 });
