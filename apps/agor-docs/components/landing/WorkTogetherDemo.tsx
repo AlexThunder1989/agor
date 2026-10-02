@@ -34,10 +34,17 @@ const PLAYBACK_RATE = 0.8;
 // Design-space board, scaled to fit its container.
 const BOARD_W = 1200;
 const BOARD_H = 700;
-// Once the cards have settled (and the clicks are done), the board eases down
-// to fit them, with the CTA just below the cards and Play again under it, so
-// the section doesn't leave dead space (the harness strip moves into view).
-const SETTLE_AT = 11.2;
+// Once the cards have collapsed, the board eases down to fit them, with the
+// CTA just below the cards and Play again under it, so the section doesn't
+// leave dead space (the harness strip moves into view). Then the three
+// cursors gather on the CTA, click it together, and leave together.
+const SETTLE_AT = 9.3;
+const CTA_IN: [number, number] = [9.6, 10.2];
+const GATHER_AT = 9.8; // first cursor sets off for the CTA; the others follow
+const GATHER_STAGGER = 0.2;
+const GATHER_TRAVEL = 0.8;
+const CLICK_AT = 11.4;
+const LEAVE: [number, number] = [11.9, 12.5];
 const BOARD_H_SETTLED = 440;
 const CTA_Y = 336;
 const REPLAY_Y = 404;
@@ -92,12 +99,10 @@ function scene(T: number) {
     [540, 0],
   ];
   const CX = [5.0, 5.6, 6.2];
-  const K = [9.8, 10.3, 10.8];
   const clean = ease(seg(8.2, 9.2));
   const k = 1 - clean;
   const H = lerp(H0, H1, clean);
   const inp = (i: number) => [FX[i] + 70, FY + H0 - 79];
-  const btn = (i: number) => [FX[i] + 90, FY + H - 42 - 116 * k];
   const below = (i: number) => [FX[i] + 250, FY + H + 36];
   const grip = [180, 14];
 
@@ -112,7 +117,6 @@ function scene(T: number) {
     const ans = qB + 0.6;
     const cA = CX[i];
     const cB = cA + 1.0;
-    const kk = K[i];
     let inText = 'Queue here… @ for mentions';
     let typist = '';
     if (T >= qA && T < qB + 0.1) {
@@ -148,9 +152,7 @@ function scene(T: number) {
       fShown,
       fOp: seg(cB + 0.1, cB + 0.3) * k,
       btnP: bs,
-      pressed: T >= kk && T < kk + 0.25,
-      ring: T >= kk ? 4 * (1 - seg(kk + 0.3, kk + 1.2)) : 0,
-      live: T >= kk,
+      live: T >= SETTLE_AT,
       typing: typist !== '',
       typist,
       inText,
@@ -209,17 +211,27 @@ function scene(T: number) {
   };
   const STRAIGHT = 1;
 
+  // Gather order: whoever finished their follow-up first heads over first.
+  const finishOrder = [0, 1, 2].sort((x, y) => CX[(x + 2) % 3] - CX[(y + 2) % 3]);
+  // Cursor tips on the CTA (its center is 600, CTA_Y), spread so the name
+  // chips don't stack.
+  const ctaTips = [
+    [535, CTA_Y - 6],
+    [600, CTA_Y + 6],
+    [665, CTA_Y - 2],
+  ];
+
   const cursors = USERS.map((u, i) => {
     const a = 0.2 + 0.3 * i;
     const qA = 1.2 + 0.45 * i;
     const qB = qA + 1.1;
     const c = (i + 2) % 3;
-    const kc = (i + 1) % 3;
     const Cx = CX[c];
-    const Kk = K[kc];
+    const rank = finishOrder.indexOf(i);
+    const go = GATHER_AT + GATHER_STAGGER * rank;
+    const tip = ctaTips[rank];
     const start = [FX[i] + S[i][0] + grip[0], FY + S[i][1] + grip[1]];
     const home = [FX[i] + grip[0], FY + grip[1]];
-    const b = btn(kc);
     const [x, y] = at([
       [0, ...start],
       [a, ...start],
@@ -231,38 +243,47 @@ function scene(T: number) {
       [Cx - 0.05, ...inp(c)],
       [Cx + 1.1, ...inp(c)],
       [Cx + 1.6, ...below(c)],
-      [Kk - 0.7, ...below(c)],
-      [Kk, ...b],
-      [Kk + 0.4, ...b],
-      [Kk + 1.2, b[0] + 60, b[1] + 160],
+      [go, ...below(c)],
+      [go + GATHER_TRAVEL, ...tip],
+      [CLICK_AT + 0.4, ...tip],
+      [LEAVE[1], tip[0] + 40 + (rank - 1) * 30, tip[1] + 110],
     ]);
     const wobble = Math.sin(T * 1.3 + i * 2) * 3;
     return {
       ...u,
       x: x + wobble,
       y: y + wobble * 0.6,
-      op: 1 - seg(Kk + 0.5, Kk + 1.2),
-      press: T >= Kk && T < Kk + 0.2,
+      op: 1 - seg(LEAVE[0], LEAVE[1]),
+      press: T >= CLICK_AT && T < CLICK_AT + 0.2,
     };
   });
 
-  const pulses = K.flatMap((kk, i) => {
-    if (T < kk || T >= kk + 0.8) return [];
-    const b = btn(i);
-    const q = seg(kk, kk + 0.8);
-    return [
-      { i, x: b[0] + 4, y: b[1] + 4, s: 0.3 + q * 1.4, op: 1 - q, color: USERS[(i + 2) % 3].color },
-    ];
-  });
+  // One click from each cursor, at its own tip, in its own color.
+  const pulses =
+    T >= CLICK_AT && T < CLICK_AT + 0.8
+      ? finishOrder.map((i, rank) => {
+          const q = seg(CLICK_AT, CLICK_AT + 0.8);
+          return {
+            i,
+            x: ctaTips[rank][0] + 4,
+            y: ctaTips[rank][1] + 4,
+            s: 0.3 + q * 1.4,
+            op: 1 - q,
+            color: USERS[i].color,
+          };
+        })
+      : [];
 
   const present = cursors.filter((c) => c.op > 0.5).length;
   return {
     cards,
     cursors,
     pulses,
-    ctaP: seg(12, 12.6),
-    ctaLive: T >= 12,
-    liveOp: 1 - seg(11.6, 12.2),
+    ctaP: seg(...CTA_IN),
+    ctaLive: T >= CTA_IN[1],
+    ctaPressed: T >= CLICK_AT && T < CLICK_AT + 0.25,
+    ctaRing: T >= CLICK_AT ? 6 * (1 - seg(CLICK_AT + 0.15, CLICK_AT + 1)) : 0,
+    liveOp: 1 - seg(LEAVE[0] + 0.1, LEAVE[1]),
     liveLabel:
       present === 1
         ? '1 person on this board'
@@ -487,11 +508,7 @@ export function WorkTogetherDemo() {
                     anchor={c.anchor}
                     placement="home-section"
                     className={styles.cardBtn}
-                    style={{
-                      background: c.pressed ? '#2bb8a5' : undefined,
-                      boxShadow: `0 0 0 ${c.ring}px rgba(63, 217, 196, 0.25)`,
-                      pointerEvents: c.live ? 'auto' : 'none',
-                    }}
+                    style={{ pointerEvents: c.live ? 'auto' : 'none' }}
                     tabIndex={c.live ? undefined : -1}
                   >
                     {c.btn}
@@ -602,6 +619,10 @@ export function WorkTogetherDemo() {
             style={{
               top: CTA_Y,
               opacity: s.ctaP,
+              background: s.ctaPressed ? 'rgba(63, 217, 196, 0.28)' : undefined,
+              boxShadow: s.ctaRing
+                ? `0 0 0 ${s.ctaRing}px rgba(63, 217, 196, 0.3), 0 20px 60px rgba(0, 0, 0, 0.45)`
+                : undefined,
               transform: `translate(-50%, calc(-50% + ${(1 - ease(s.ctaP)) * 12}px))`,
               pointerEvents: s.ctaLive ? 'auto' : 'none',
             }}
