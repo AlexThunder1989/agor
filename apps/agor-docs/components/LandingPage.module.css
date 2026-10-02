@@ -3350,24 +3350,38 @@ a.radarBlip .blipName {
   transform: translateY(2px);
 }
 
-/* ^word^ in hero copy: letters that can do a wave when the home page's
- * cursor troupe cues it (html[data-troupe-wave]). */
+/* ^word^ in hero copy: an accent-colored word whose letters wave every few
+ * seconds once the home page's cursor troupe cues it (html[data-troupe-wave]).
+ * Each letter carries its slice of the accent gradient, since background-clip
+ * text doesn't reach into inline-block children. */
 .waveWord,
 .waveWord > span {
   display: inline-block;
 }
 
-:global(html[data-troupe-wave]) .waveWord > span {
-  animation: letterWave 0.7s ease-in-out calc(var(--i) * 90ms) 2;
+.waveWord > span {
+  background: linear-gradient(110deg, #34e6c4, #7ad9ff);
+  background-size: calc(var(--n) * 100%) 100%;
+  background-position: calc(var(--i) / (var(--n) - 1) * 100%) 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 600;
 }
 
+:global(html[data-troupe-wave]) .waveWord > span {
+  animation: letterWave 4.2s ease-in-out calc(var(--i) * 90ms) infinite;
+}
+
+/* A quick wave (the first ~17%), then a rest until the next one. */
 @keyframes letterWave {
   0%,
+  17%,
   100% {
     transform: none;
   }
 
-  40% {
+  7% {
     transform: translateY(-0.32em);
   }
 }

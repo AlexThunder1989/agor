@@ -70,7 +70,7 @@ function parseHighlights(text: string, keyPrefix: string): ReactNode[] {
         <span key={`${keyPrefix}-${key++}`} className={styles.waveWord} data-wave-word="">
           {[...wave].map((letter, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: letters of a fixed word
-            <span key={i} style={{ '--i': i } as CSSProperties}>
+            <span key={i} style={{ '--i': i, '--n': wave.length } as CSSProperties}>
               {letter}
             </span>
           ))}

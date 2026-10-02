@@ -52,7 +52,7 @@ interface RectLike {
   getBoundingClientRect(): DOMRect;
 }
 type Anchor = (root: HTMLElement) => Element | RectLike | null | undefined;
-type Gesture = 'wave' | 'look' | 'jump' | 'heave' | 'tug' | 'click';
+type Gesture = 'wave' | 'look' | 'jump' | 'heave' | 'tugUp' | 'tugDown' | 'click';
 
 interface Mark {
   at: number;
@@ -164,6 +164,26 @@ function textRange(el: Element | null | undefined, text: string, char?: number):
 }
 
 let measure: CanvasRenderingContext2D | null = null;
+/** The ink box of a text range (where the glyphs actually draw), from font metrics. */
+function inkRect(range: Range | null): DOMRect | null {
+  const parent = range?.startContainer.parentElement;
+  if (!range || !parent) return null;
+  measure ??= document.createElement('canvas').getContext('2d');
+  if (!measure) return null;
+  const cs = getComputedStyle(parent);
+  measure.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  const m = measure.measureText(range.toString());
+  const box = range.getBoundingClientRect();
+  const content = m.fontBoundingBoxAscent + m.fontBoundingBoxDescent;
+  const baseline = box.top + (m.fontBoundingBoxAscent * box.height) / content;
+  return new DOMRect(
+    box.left - m.actualBoundingBoxLeft,
+    baseline - m.actualBoundingBoxAscent,
+    m.actualBoundingBoxLeft + m.actualBoundingBoxRight,
+    m.actualBoundingBoxAscent + m.actualBoundingBoxDescent
+  );
+}
+
 /** The counter (the hole) of a glyph like "o", from its font metrics. */
 function counterRect(range: Range | null): DOMRect | null {
   const parent = range?.startContainer.parentElement;
@@ -231,6 +251,8 @@ const ccHeading = q('h2');
 const LINKED_BLIP = 'a[class*="radarBlip"]';
 const blip = (i: number) => nth(LINKED_BLIP, i);
 const radarScope = q('[class*="radarScope"]');
+const rosterLink = q('a[href="/agent-roster"]');
+const ROSTER_PARK = 9.9;
 /** Just outside the radar, `lag` degrees behind its sweep. */
 const chaseSweep =
   (lag: number): Anchor =>
@@ -250,6 +272,12 @@ const chaseSweep =
   };
 // Governance
 const confidenceWord = q('h2 [class*="compoundWord"]');
+/** The ink box of the final "e" of "confidence" (it grows as they stretch it). */
+const lastE: Anchor = (root) => {
+  const range = textRange(confidenceWord(root) as Element | null, 'confidence', 9);
+  const rect = inkRect(range);
+  return rect ? { getBoundingClientRect: () => rect } : null;
+};
 const BUS_DOT = '[class*="busNodeDot"]';
 const busDot = (i: number) => nth(BUS_DOT, i);
 // Final
@@ -351,7 +379,7 @@ const BEATS: Record<SectionId, Beat> = {
     active: (r, vh) => r.bottom > vh * 0.45,
     mask: { anchor: pill, until: 1.4 },
     parts: [0, 1, 2, 3, 4, 5].map((i): Part => {
-      const spot = around(team, 74, 36, TEAM_SPOTS[i]);
+      const spot = around(team, 50, 24, TEAM_SPOTS[i]);
       if (i >= 3) {
         const appear = HERO_FRIENDS + (i - 3) * 0.3;
         return {
@@ -386,7 +414,6 @@ const BEATS: Record<SectionId, Beat> = {
       })),
       { at: HERO_GATHER + 0.2, run: (root: HTMLElement) => lightRow(root, null) },
       { at: HERO_GATHER + 0.9, run: () => setHtmlFlag('data-troupe-wave', true) },
-      { at: HERO_GATHER + 2.6, run: () => setHtmlFlag('data-troupe-wave', false) },
     ],
   },
   // Siloed: one trapped in each "o" of "Don’t let AI silo your", bouncing
@@ -500,7 +527,7 @@ const BEATS: Record<SectionId, Beat> = {
           fx: 0.18,
           fy: -0.05,
         })),
-        busy: [[0, 6]],
+        busy: [[0, 6]] as Array<[number, number]>,
       },
       ...[18, 44].map((lag) => ({
         marks: [
@@ -508,7 +535,16 @@ const BEATS: Record<SectionId, Beat> = {
           { at: 0.9, anchor: chaseSweep(lag), point: radarScope, lock: true },
         ],
       })),
-    ],
+    ].map(
+      (part, i): Part => ({
+        // Two laps of the sweep (4.5s each), then a tight huddle under the link.
+        ...part,
+        marks: [
+          ...part.marks,
+          { at: ROSTER_PARK + i * 0.15, anchor: rosterLink, fx: -0.3, dx: i * 14, fy: 0.5, dy: 18 },
+        ],
+      })
+    ),
     events: [
       ...[0, 1, 2, 3, 4].map((k) => ({
         at: 0.55 + k * 1.1,
@@ -529,17 +565,20 @@ const BEATS: Record<SectionId, Beat> = {
     drive: driveConfidence,
     parts: [
       ...[
-        { fx: 0.5, fy: 0, dx: -4 },
-        { fx: 0.5, fy: -0.5, dx: -6, dy: 8 },
+        { fy: -0.5, dy: -2 },
+        { fy: 0.5, dy: 2 },
       ].map(
         (grip, i): Part => ({
           marks: [
-            { at: 0, anchor: confidenceWord, ...grip },
-            { at: 1.1, anchor: confidenceWord, ...grip, lock: true },
+            { at: 0, anchor: lastE, ...grip, dy: i ? 40 : -40 },
+            { at: 1.1, anchor: lastE, ...grip, lock: true },
             { at: 4.8 + i * 0.4, anchor: busDot(1 + i * 2) },
           ],
           cues: [
-            ...STRETCH_PULLS.map(([a]) => ({ at: a - 0.3, gesture: 'tug' as const })),
+            ...STRETCH_PULLS.map(([a]) => ({
+              at: a - 0.3,
+              gesture: (i ? 'tugDown' : 'tugUp') as Gesture,
+            })),
             { at: 5.6 + i * 0.4, gesture: 'click' as const },
           ],
           busy: [[1.0, 6.4 + i * 0.4] as [number, number]],
@@ -604,7 +643,8 @@ const GESTURE_SECONDS: Record<Gesture, number> = {
   look: 1.0,
   jump: 0.5,
   heave: 0.9,
-  tug: 0.9,
+  tugUp: 0.9,
+  tugDown: 0.9,
   click: 0.8,
 };
 
@@ -630,10 +670,17 @@ function gestureAt(
       const ox = u < 0.3 ? 9 * (u / 0.3) : u < 0.55 ? 9 - 23 * ((u - 0.3) / 0.25) : -14 * fade;
       return { ox, oy: Math.sin(u * Math.PI) * 3, rot: u < 0.3 ? 8 * (u / 0.3) : 0 };
     }
-    case 'tug': {
-      // Lean in (left), then yank out to the right and up, then recover.
-      const ox = u < 0.3 ? -8 * (u / 0.3) : u < 0.55 ? -8 + 22 * ((u - 0.3) / 0.25) : 14 * fade;
-      return { ox, oy: -Math.sin(u * Math.PI) * 6, rot: u < 0.3 ? -8 * (u / 0.3) : 0 };
+    case 'tugUp':
+    case 'tugDown': {
+      // Ease in toward the letter, then yank outward (up or down), recover.
+      const dir = gesture === 'tugUp' ? -1 : 1;
+      const oy =
+        u < 0.3
+          ? -6 * dir * (u / 0.3)
+          : u < 0.55
+            ? dir * (-6 + 20 * ((u - 0.3) / 0.25))
+            : 14 * dir * fade;
+      return { ox: 0, oy, rot: 0 };
     }
     case 'click':
       return { ox: 0, oy: 0, rot: 0, press: u < 0.25 };
