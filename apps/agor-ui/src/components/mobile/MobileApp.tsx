@@ -222,7 +222,7 @@ export const MobileApp: React.FC<MobileAppProps> = ({
   }, [routeBoardId, currentBoardId, boardById, user?.preferences?.mainBoardId]);
 
   // Load the effective board's partition when it is not complete yet.
-  useBoardPartition(client, effectiveBoardId, {
+  const { boardReady } = useBoardPartition(client, effectiveBoardId, {
     canUseMemberWorkspaceServices: hasMinimumRole(user?.role, ROLES.MEMBER),
   });
 
@@ -533,6 +533,7 @@ export const MobileApp: React.FC<MobileAppProps> = ({
                 commentsBadge={boardCommentsBadge}
                 onOpenComments={openBoardComments}
                 userId={user?.user_id}
+                boardReady={boardReady}
               />
             }
           />

@@ -34,6 +34,7 @@ import {
   Flex,
   Layout,
   List,
+  Skeleton,
   Space,
   Tag,
   Typography,
@@ -76,6 +77,11 @@ interface MobileBoardPageProps {
   onOpenComments?: () => void;
   /** Keys the visit history this page records to the signed-in user. */
   userId?: string;
+  /**
+   * The board's partition is complete (`useBoardPartition`). Until then rows
+   * may be missing, so the page never infers "empty" from their absence.
+   */
+  boardReady?: boolean;
 }
 
 function statusColor(status: Branch['filesystem_status']): string {
@@ -113,6 +119,7 @@ export const MobileBoardPage: React.FC<MobileBoardPageProps> = ({
   commentsBadge,
   onOpenComments,
   userId,
+  boardReady = true,
 }) => {
   const { boardId = '' } = useParams<{ boardId: string }>();
   const navigate = useNavigate();
@@ -172,7 +179,11 @@ export const MobileBoardPage: React.FC<MobileBoardPageProps> = ({
   );
   const contentObjects = annotations.filter(([, object]) => object.type !== 'zone');
   const isEmpty =
-    !primaryTeammate && branches.length === 0 && cards.length === 0 && annotations.length === 0;
+    boardReady &&
+    !primaryTeammate &&
+    branches.length === 0 &&
+    cards.length === 0 &&
+    annotations.length === 0;
 
   // Group branch placements by their zone so the Board tab reads as collapsible
   // zones of branch cards. Branches outside any zone fall into `undefined`.
@@ -331,7 +342,9 @@ export const MobileBoardPage: React.FC<MobileBoardPageProps> = ({
             </Card>
           )}
 
-          {!primaryTeammate && !isEmpty && !boardHasSessions && (
+          {!boardReady && <Skeleton active paragraph={{ rows: 3 }} title={false} />}
+
+          {boardReady && !primaryTeammate && !isEmpty && !boardHasSessions && (
             <Card size="small">
               <Flex vertical gap={token.marginSM} align="flex-start">
                 <Text>Ready when you are. Kick things off with a first task.</Text>
