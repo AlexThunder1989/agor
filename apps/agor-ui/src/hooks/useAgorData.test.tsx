@@ -27,6 +27,7 @@ import { captureLoadLifetime } from '../store/loadLifetime';
 import { flushRealtimeNow } from '../store/realtimeBatch';
 import { loadSessionMcpServerIds } from '../store/sessionMcpLinks';
 import { useAgorData } from './useAgorData';
+import { useBoardPartition } from './useBoardPartition';
 
 // The opened-transcript prefetch retains a real reactive session; the mock
 // client doesn't model one. Default: ready at once (no deferral). Tests below
@@ -2180,5 +2181,45 @@ describe('useAgorData — reconnect follows the board the UI displays', () => {
       query: { board_id: 'board-art' },
     });
     expect(agorStore.getState().boardById.get('board-art')?.objects).toBeDefined();
+  });
+});
+
+describe('useAgorData — reauthentication reads the displayed board once', () => {
+  it('the partition hook does not race the resync for the displayed board', async () => {
+    window.history.pushState({}, '', '/b/board-one/');
+    onTestFinished(() => window.history.pushState({}, '', '/'));
+    const board = { board_id: 'board-1', slug: 'board-one', name: 'Board one' };
+    const { client, fetchArguments } = makeMockClient({
+      boards: [board],
+      'boards:get': board as never,
+    });
+    const options = (generation: number) => ({
+      authenticatedUserId: 'user-a',
+      authenticatedUserRole: 'member',
+      authGeneration: generation,
+      connectionReady: true,
+    });
+    const { result, rerender } = renderHook(
+      ({ generation }) => {
+        const data = useAgorData(client, options(generation));
+        useBoardPartition(client, 'board-1', { canUseMemberWorkspaceServices: true });
+        return data;
+      },
+      { initialProps: { generation: 1 } }
+    );
+    await waitForInitialLoad(result);
+    await flush();
+    const boardReads = () =>
+      (
+        fetchArguments('board-objects', 'findAll') as Array<{ query?: { board_id?: string } }>
+      ).filter((args) => args.query?.board_id === 'board-1').length;
+    const before = boardReads();
+
+    rerender({ generation: 2 }); // reauthenticated: partitions reset, silent resync
+    await waitFor(() =>
+      expect(agorStore.getState().boardPartitions.get('board-1')?.status).toBe('loaded')
+    );
+    await flush();
+    expect(boardReads() - before).toBe(1);
   });
 });

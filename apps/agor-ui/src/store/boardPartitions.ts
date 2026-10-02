@@ -124,6 +124,8 @@ export function markBoardPartitionLoaded(
   });
 }
 
+let loadSequence = 0;
+
 // The boards the UI currently displays (registered by `useBoardPartition`), in
 // registration order. The UI resolves its board from far more than the URL
 // (artifact routes, the mobile shell's fallbacks), so a reconnect resync
@@ -147,6 +149,35 @@ export function getDisplayedBoardId(): string | undefined {
   return latest;
 }
 
+/**
+ * A reconnect resync claims the displayed board's partition while it has no
+ * entry (an authority transition just unloaded every board), so
+ * `useBoardPartition` doesn't read the board a second time alongside the
+ * resync. The resync settles the entry; `releaseResyncClaim` frees it if the
+ * resync ends without doing so.
+ */
+export function claimDisplayedBoardForResync(
+  lifetime: LoadLifetime
+): { boardId: string; loadId: number } | null {
+  const boardId = getDisplayedBoardId();
+  if (!boardId || agorStore.getState().boardPartitions.has(boardId)) return null;
+  const loadId = ++loadSequence;
+  agorStore.getState().setBoardPartition(boardId, {
+    status: 'loading',
+    authorityScope: lifetime.authorityScope,
+    loadEpoch: lifetime.loadEpoch,
+    loadId,
+  });
+  return { boardId, loadId };
+}
+
+export function releaseResyncClaim(claim: { boardId: string; loadId: number } | null): void {
+  if (!claim) return;
+  if (agorStore.getState().boardPartitions.get(claim.boardId)?.loadId === claim.loadId) {
+    agorStore.getState().setBoardPartition(claim.boardId, null);
+  }
+}
+
 /** Forget a failed partition so `useBoardPartition` loads it again. */
 export function retryBoardPartition(boardId: string): void {
   const state = agorStore.getState().boardPartitions.get(boardId);
@@ -154,7 +185,6 @@ export function retryBoardPartition(boardId: string): void {
 }
 
 const inflight = new Map<string, Promise<void>>();
-let loadSequence = 0;
 
 async function fetchBoardPartition(
   client: AgorClient,

@@ -57,9 +57,11 @@ import {
 import * as realtime from '../store/agorRealtimeActions';
 import { agorStore, shallow, useStoreWithEqualityFn } from '../store/agorStore';
 import {
+  claimDisplayedBoardForResync,
   getDisplayedBoardId,
   markBoardPartitionLoaded,
   otherLoadedScopes,
+  releaseResyncClaim,
 } from '../store/boardPartitions';
 import {
   captureLoadLifetime,
@@ -568,6 +570,10 @@ export function useAgorData(
       // apply must keep them (a created row, a patch, a removal) rather than
       // replace them with the older snapshot. Released in `finally`.
       const firstPaintFence = beginPartitionLoad();
+      // A resync after an authority transition (every board unloaded) claims
+      // the displayed board so its partition hook doesn't read it a second
+      // time; the apply below settles it, `finally` releases it otherwise.
+      const resyncClaim = silent ? claimDisplayedBoardForResync(loadLifetime) : null;
 
       try {
         if (!silent) {
@@ -1316,6 +1322,7 @@ export function useAgorData(
         return true;
       } finally {
         endPartitionLoad();
+        releaseResyncClaim(resyncClaim);
         if (!silent && authorityIsCurrent()) {
           agorStore.getState().setLoading(false);
           agorStore.getState().setLoadingStage('idle');
