@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { useConnectionState, useMutationGate } from '../contexts/ConnectionContext';
 import { useAgorStore } from '../store/agorStore';
 import {
@@ -75,9 +75,11 @@ export function useBoardMutationGuard(
   live.current = { boardId, allowed, canMutate: gate.canMutate, authGeneration };
 
   // This guard's mounted lifetime: unmounting ends every ticket it captured.
-  // (A StrictMode remount starts a new lifetime.)
+  // (A StrictMode remount starts a new lifetime.) A layout cleanup runs in the
+  // unmount's commit, before its DOM removal is observable; a passive cleanup
+  // can run a task later, after a promise continuation already dispatched.
   const ownerRef = useRef({ alive: true });
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!ownerRef.current.alive) ownerRef.current = { alive: true };
     const owner = ownerRef.current;
     return () => {

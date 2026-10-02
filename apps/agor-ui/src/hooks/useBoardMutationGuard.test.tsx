@@ -1,6 +1,7 @@
 import { act, render, renderHook, screen } from '@testing-library/react';
 import { App } from 'antd';
-import type { ReactNode } from 'react';
+import { type ReactNode, useLayoutEffect } from 'react';
+import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectionProvider } from '../contexts/ConnectionContext';
 import { agorStore } from '../store/agorStore';
@@ -200,5 +201,76 @@ describe('useBoardMutationGuard', () => {
     expect(isCurrent(ticket)).toBe(false);
     // Its owner still renders generation 1: nothing is captured until both agree.
     expect(capture()).toBe(null);
+  });
+});
+
+describe('useBoardMutationGuard unmount commit', () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+  let previousActEnvironment: unknown;
+
+  beforeEach(() => {
+    agorStore.setState({ boardPartitions: new Map() });
+    // Real scheduling: a default-priority unmount commits, then React runs
+    // its passive effects in a later task. `act` would flush them at once.
+    previousActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: unknown })
+      .IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: unknown }).IS_REACT_ACT_ENVIRONMENT = false;
+  });
+  afterEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: unknown }).IS_REACT_ACT_ENVIRONMENT =
+      previousActEnvironment;
+  });
+
+  it('no write passes once the unmount has committed, even before passive cleanup runs', async () => {
+    load();
+    let guard: ReturnType<typeof useBoardMutationGuard> | null = null;
+    function Guarded() {
+      guard = useBoardMutationGuard(BOARD, true);
+      return <span data-testid="guarded" />;
+    }
+    const dispatch = vi.fn(async () => {});
+    const outcomes: boolean[] = [];
+    let ticket: ReturnType<ReturnType<typeof useBoardMutationGuard>['capture']> = null;
+    let removedFromDom = false;
+    // Runs in the commit that removes `Guarded`, after its DOM is gone: a
+    // microtask from here lands before React's passive effects.
+    function Probe({ show }: { show: boolean }) {
+      useLayoutEffect(() => {
+        if (show || !guard) return;
+        const held = guard;
+        removedFromDom = !container.querySelector('[data-testid="guarded"]');
+        queueMicrotask(() => {
+          void held.write(ticket, dispatch).then((sent) => outcomes.push(sent));
+        });
+      }, [show]);
+      return null;
+    }
+    const tree = (show: boolean) => (
+      <App>
+        <ConnectionProvider value={connection()}>
+          {show && <Guarded />}
+          <Probe show={show} />
+        </ConnectionProvider>
+      </App>
+    );
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      root.render(tree(true));
+      await settle();
+      ticket = guard!.capture();
+      expect(guard!.isCurrent(ticket)).toBe(true);
+
+      root.render(tree(false)); // default priority: not a discrete event
+      await settle();
+
+      expect(removedFromDom).toBe(true);
+      expect(outcomes).toEqual([false]);
+      expect(dispatch).not.toHaveBeenCalled();
+    } finally {
+      root.unmount();
+      container.remove();
+    }
   });
 });
