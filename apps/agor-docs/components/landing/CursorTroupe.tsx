@@ -4,12 +4,12 @@ import { useEffect, useRef, useState } from 'react';
 import styles from './CursorTroupe.module.css';
 
 /**
- * PROTOTYPE (behind a flag): Maya, Ari, and Sam follow the reader down the
- * home page and act out each section's point. A director picks the section
+ * PROTOTYPE (behind a flag): Three cursors (unnamed; Maya, Ari, and Sam in
+ * the code) follow the reader down the home page and act out each section's point. A director picks the section
  * on stage (sections mark themselves with data-troupe-section), plays its
  * beat once, then idles there; cursors spring toward targets anchored to
  * real elements, so they track scrolling and layout. Gestures are motion
- * only. Shown in dev, or after visiting with `?cursors` once; never under
+ * only. They idle at half size and grow to full size to do things. Shown in dev, or after visiting with `?cursors` once; never under
  * reduced motion or on touch.
  *
  * Beats so far: hero (they pop out of the Multiplayer AI pill and huddle
@@ -50,6 +50,9 @@ interface Part {
   appear?: number;
   /** Fades out from this time and stays gone. */
   vanish?: number;
+  /** Extra windows (beat seconds) when this cursor is at work, e.g. riding
+   * the problem cards through their crash. */
+  busy?: Array<[number, number]>;
 }
 
 interface Beat {
@@ -118,6 +121,7 @@ const BEATS: Record<SectionId, Beat> = {
     parts: [
       {
         marks: [{ at: 0, anchor: card(0), fx: 0.3, fy: 0.4 }],
+        busy: [[0, 1.4]],
         cues: [{ at: 3.9, gesture: 'shrug' }],
       },
       {
@@ -126,10 +130,12 @@ const BEATS: Record<SectionId, Beat> = {
           { at: 2.0, anchor: card(2), fx: 0.44, fy: 0.1 },
           { at: 3.3, anchor: card(2), fx: 0.3, fy: 0.4 },
         ],
+        busy: [[0, 1.4]],
         cues: [{ at: 2.4, gesture: 'nudge' }],
       },
       {
         marks: [{ at: 0, anchor: card(4), fx: 0.3, fy: 0.4 }],
+        busy: [[0, 1.4]],
         cues: [
           { at: 2.5, gesture: 'look' },
           { at: 4.0, gesture: 'shrug' },
@@ -149,6 +155,24 @@ const BEATS: Record<SectionId, Beat> = {
     ],
   },
 };
+
+/** Size while idling and travelling; they grow to full size to do things. */
+const IDLE_SCALE = 0.5;
+/** A purposeful move to a new mark counts as doing something for this long. */
+const MOVE_SECONDS = 1.1;
+
+/** Is this cursor doing something at beat time `t` (a gesture, a deliberate
+ * move to a later mark, or a part's own busy window)? Padded so the grow
+ * starts just before and the shrink waits just after. */
+function isBusy(part: Part, t: number): boolean {
+  const pad = 0.25;
+  const within = (a: number, b: number) => t >= a - pad && t < b + pad;
+  return (
+    (part.cues ?? []).some((cue) => within(cue.at, cue.at + GESTURE_SECONDS[cue.gesture])) ||
+    part.marks.slice(1).some((mark) => within(mark.at, mark.at + MOVE_SECONDS)) ||
+    (part.busy ?? []).some(([a, b]) => within(a, b))
+  );
+}
 
 const GESTURE_SECONDS: Record<Gesture, number> = { wave: 0.9, shrug: 0.7, nudge: 0.9, look: 1.0 };
 
@@ -178,6 +202,8 @@ interface CursorState {
   vy: number;
   opacity: number;
   scale: number;
+  /** Eases between IDLE_SCALE and 1. */
+  size: number;
 }
 
 export function CursorTroupe() {
@@ -211,6 +237,7 @@ export function CursorTroupe() {
       vy: 0,
       opacity: 0,
       scale: 1,
+      size: IDLE_SCALE,
     }));
     const played = new Set<SectionId>();
     let active: SectionId | null = null;
@@ -261,7 +288,9 @@ export function CursorTroupe() {
         let ox = 0;
         let oy = 0;
         let rot = 0;
+        let busy = false;
         if (part && root) {
+          busy = isBusy(part, t);
           const mark = [...part.marks].reverse().find((m) => m.at <= t) ?? part.marks[0];
           const anchorEl = mark.anchor(root);
           if (anchorEl) {
@@ -324,11 +353,14 @@ export function CursorTroupe() {
         }
         state.opacity += ((show ? 1 : 0) - state.opacity) * Math.min(1, dt * 8);
         state.scale += (1 - state.scale) * Math.min(1, dt * 9);
+        state.size += ((busy ? 1 : IDLE_SCALE) - state.size) * Math.min(1, dt * 6);
         const fidget = Math.sin(now / 760 + i * 2.1) * 2;
         el.style.opacity = state.opacity.toFixed(3);
         el.style.transform = `translate(${(state.x + ox + fidget).toFixed(1)}px, ${(
           state.y + oy + fidget * 0.6
-        ).toFixed(1)}px) rotate(${rot.toFixed(1)}deg) scale(${state.scale.toFixed(3)})`;
+        ).toFixed(
+          1
+        )}px) rotate(${rot.toFixed(1)}deg) scale(${(state.scale * state.size).toFixed(3)})`;
       });
       raf = requestAnimationFrame(frame);
     };
@@ -355,9 +387,6 @@ export function CursorTroupe() {
               strokeWidth="1.2"
             />
           </svg>
-          <span className={styles.name} style={{ background: member.color }}>
-            {member.name}
-          </span>
         </div>
       ))}
     </div>

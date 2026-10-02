@@ -16,20 +16,7 @@
   position: absolute;
   top: 0;
   left: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
   opacity: 0;
   transform-origin: 2px 1px;
   will-change: transform, opacity;
-}
-
-.name {
-  margin-left: 12px;
-  padding: 4px 10px;
-  border-radius: 6px;
-  color: #061010;
-  font: 600 13px var(--font-body-stack, system-ui);
-  white-space: nowrap;
 }
