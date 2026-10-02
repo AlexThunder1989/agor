@@ -217,7 +217,7 @@ const problemScatterSlots = [
 
 export function ProblemSection() {
   return (
-    <section className={styles.problemSection} data-reveal>
+    <section className={styles.problemSection} data-reveal data-troupe-section="problem">
       <h2 className={styles.liveStatement}>
         Don&rsquo;t let AI <span className={styles.headingAccentWarm}>silo</span> your{' '}
         <span className={styles.headingStrong}>team</span>

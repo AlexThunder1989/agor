@@ -1,0 +1,35 @@
+/* PROTOTYPE: see CursorTroupe.tsx. */
+.layer {
+  position: fixed;
+  inset: 0;
+  z-index: 35; /* under the nav island (40) */
+  pointer-events: none;
+  transition: filter 0.6s ease;
+}
+
+/* The problem section's register: the cast dims and warms toward amber. */
+.layer[data-problem] {
+  filter: saturate(0.35) sepia(0.55) brightness(0.8);
+}
+
+.cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  opacity: 0;
+  transform-origin: 2px 1px;
+  will-change: transform, opacity;
+}
+
+.name {
+  margin-left: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: #061010;
+  font: 600 13px var(--font-body-stack, system-ui);
+  white-space: nowrap;
+}

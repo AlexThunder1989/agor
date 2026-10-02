@@ -385,7 +385,7 @@ export function WorkTogetherDemo() {
   const s = scene(reduced ? END : t);
 
   return (
-    <div className={styles.demo} ref={sectionRef}>
+    <div className={styles.demo} ref={sectionRef} data-troupe-section="work-together">
       <div className={styles.head}>
         <div>
           <h2 className={landing.liveStatement}>
@@ -410,6 +410,7 @@ export function WorkTogetherDemo() {
       <div
         className={styles.board}
         ref={boardRef}
+        data-troupe="wt-board"
         style={{ height: scale * (s.settled ? BOARD_H_SETTLED : BOARD_H) }}
       >
         <div

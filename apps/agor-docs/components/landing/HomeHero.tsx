@@ -50,7 +50,7 @@ export function HomeHero() {
   };
 
   return (
-    <div className={styles.homeHero}>
+    <div className={styles.homeHero} data-troupe-section="hero">
       {/* Decorative loop; the poster is the layer's background image so it shows
           while loading, when paused, and under reduced motion. */}
       <div className={styles.homeHeroVideo} aria-hidden="true">

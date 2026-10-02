@@ -2,6 +2,7 @@
 
 import { BoardSection } from './landing/BoardSection';
 import { CommandCenterSection } from './landing/CommandCenterSection';
+import { CursorTroupe } from './landing/CursorTroupe';
 import { GovernanceSection } from './landing/GovernanceSection';
 import { HomeHero } from './landing/HomeHero';
 import { LandingShell } from './landing/LandingShell';
@@ -19,6 +20,8 @@ export function LandingPage() {
   return (
     <LandingShell ctaPrefix="landing">
       <HomeHero />
+      {/* PROTOTYPE, flagged: see CursorTroupe.tsx. */}
+      <CursorTroupe />
       {/* Positioning order: Multiplayer AI, the board, teammates (with the
           roster as their proof), then the builder and trust stories. Matches
           the hero's hub links. */}
