@@ -77,6 +77,8 @@ div.head {
 }
 
 .tabTitle {
+  /* Room for the Learn more button beside it. */
+  padding-right: 112px;
   color: var(--bs-off);
   font: 600 clamp(1.3rem, 1.9vw, 1.7rem) / 1.2 var(--font-body-stack);
   letter-spacing: -0.01em;
@@ -223,4 +225,45 @@ div.head {
   .mediaStill {
     animation: none;
   }
+}
+
+/* Per-feature "Learn more" button, beside each tab's title. */
+.tabItem {
+  position: relative;
+}
+
+.tabItem a.learnMore {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  padding: 5px 12px;
+  border: 1px solid rgba(63, 217, 196, 0.3);
+  border-radius: 999px;
+  color: var(--bs-teal);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    border-color 0.15s,
+    background-color 0.15s;
+}
+
+.tabItem a.learnMore:hover {
+  border-color: var(--bs-teal);
+  background: rgba(63, 217, 196, 0.1);
+}
+
+.tabItem a.learnMore:focus-visible {
+  outline: 2px solid var(--bs-teal);
+  outline-offset: 2px;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
 }

@@ -7,13 +7,6 @@
   transition: filter 0.6s ease;
 }
 
-/* Trapped: behind the problem section (its sections sit at z-index 1), so
- * the cards' frosted glass is in front, and in the problem register. */
-.layer[data-behind] {
-  z-index: 0;
-  filter: saturate(0.6) sepia(0.4) brightness(1.15);
-}
-
 .cursor {
   position: absolute;
   top: 0;

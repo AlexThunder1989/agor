@@ -1505,9 +1505,6 @@
 .problemCard {
   border-color: rgba(232, 196, 104, 0.14);
   background: linear-gradient(180deg, rgba(33, 29, 18, 0.55), rgba(17, 15, 10, 0.4));
-  /* Frosted glass: anything behind a card (the home page's cursor troupe,
-   * trapped in the silos) reads as being behind it. */
-  backdrop-filter: blur(1.5px);
 }
 
 .problemCard:hover {
@@ -3196,17 +3193,20 @@ a.radarBlip .blipName {
   text-wrap: pretty;
 }
 
-.homeHero a.homeRowItem:hover {
+.homeHero a.homeRowItem:hover,
+.homeHero a.homeRowItem[data-troupe-hover] {
   border-top-color: #45c4bb;
   transform: translateY(-3px);
 }
 
-.homeHero a.homeRowItem:hover::before {
+.homeHero a.homeRowItem:hover::before,
+.homeHero a.homeRowItem[data-troupe-hover]::before {
   opacity: 1;
   transform: none;
 }
 
-.homeHero a.homeRowItem:hover .homeRowLabel {
+.homeHero a.homeRowItem:hover .homeRowLabel,
+.homeHero a.homeRowItem[data-troupe-hover] .homeRowLabel {
   color: #8ee3db;
 }
 

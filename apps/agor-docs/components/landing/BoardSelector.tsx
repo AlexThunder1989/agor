@@ -7,7 +7,7 @@ import landing from '../LandingPage.module.css';
 import styles from './BoardSelector.module.css';
 import { boardDetails } from './details/board';
 import type { DetailMedia } from './details/types';
-import { LearnMore } from './LandingLink';
+import { LandingLink } from './LandingLink';
 
 /**
  * Home-page board section (design handoff "feature demo selector", 1c): four
@@ -236,7 +236,7 @@ export function BoardSelector() {
             {FEATURES.map((feature, index) => {
               const isActive = index === state.active;
               return (
-                <div key={feature.anchor}>
+                <div key={feature.anchor} className={styles.tabItem}>
                   <button
                     type="button"
                     role="tab"
@@ -253,18 +253,23 @@ export function BoardSelector() {
                       />
                     </span>
                   </button>
+                  {/* Beside the title, outside the tab button (no nested
+                      interactive elements). */}
+                  <LandingLink
+                    page="board"
+                    anchor={feature.anchor}
+                    placement="home-section"
+                    className={styles.learnMore}
+                  >
+                    Learn more
+                    <span className={styles.srOnly}> about {feature.label.toLowerCase()}</span>
+                  </LandingLink>
                   {/* One panel only: under the active tab when stacked. */}
                   {stacked && isActive && panel(styles.panelInline)}
                 </div>
               );
             })}
           </div>
-          <LearnMore
-            page="board"
-            placement="home-section"
-            anchor={active.anchor}
-            label={`More on ${active.label.toLowerCase()}`}
-          />
         </div>
         {!stacked && panel('')}
       </div>
