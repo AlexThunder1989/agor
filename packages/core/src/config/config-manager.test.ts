@@ -1074,6 +1074,39 @@ describe('loadConfig', () => {
     await expect(loadConfig()).rejects.toThrow(/claude_subscription_oauth must be a boolean/);
   });
 
+  it('accepts only checkpointed or disabled for hosted OpenCode', async () => {
+    const configPath = path.join(tempDir, '.agor', 'config.yaml');
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    await fs.writeFile(
+      configPath,
+      yaml.dump({ agentic_tools: { opencode_hosted_native_state: 'checkpointed' } }),
+      'utf-8'
+    );
+    await expect(loadConfig()).resolves.toMatchObject({
+      agentic_tools: { opencode_hosted_native_state: 'checkpointed' },
+    });
+
+    __resetConfigCacheForTests();
+    await fs.writeFile(
+      configPath,
+      yaml.dump({ agentic_tools: { opencode_hosted_native_state: 'disabled' } }),
+      'utf-8'
+    );
+    await expect(loadConfig()).resolves.toMatchObject({
+      agentic_tools: { opencode_hosted_native_state: 'disabled' },
+    });
+
+    __resetConfigCacheForTests();
+    await fs.writeFile(
+      configPath,
+      yaml.dump({ agentic_tools: { opencode_hosted_native_state: 'live' } }),
+      'utf-8'
+    );
+    await expect(loadConfig()).rejects.toThrow(
+      /opencode_hosted_native_state must be 'checkpointed' or 'disabled'/
+    );
+  });
+
   it('rejects unsupported or duplicate configured agentic tools', async () => {
     const agorDir = path.join(tempDir, '.agor');
     const configPath = path.join(agorDir, 'config.yaml');

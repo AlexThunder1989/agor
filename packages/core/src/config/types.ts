@@ -19,6 +19,9 @@ export interface AgorAgenticToolsSettings {
    * Default: enabled; false is an explicit opt-out. Provider approval remains a release prerequisite.
    */
   claude_subscription_oauth?: boolean;
+
+  /** Hosted OpenCode with checkpointed native state. Default: enabled when every hosted prerequisite holds; 'disabled' opts out. */
+  opencode_hosted_native_state?: 'checkpointed' | 'disabled';
 }
 
 /**
