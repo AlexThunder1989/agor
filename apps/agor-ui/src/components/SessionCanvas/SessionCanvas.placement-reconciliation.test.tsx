@@ -30,6 +30,7 @@ interface FlowNode {
 
 interface CapturedFlowProps {
   nodes: FlowNode[];
+  onNodesChange?: (changes: unknown[]) => void;
   onNodeDragStart?: (event: unknown, node: FlowNode) => void;
   onNodeDrag?: (event: unknown, node: FlowNode) => void;
   onNodeDragStop?: (event: unknown, node: FlowNode) => void;
@@ -224,6 +225,73 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
     });
     expect(patch).not.toHaveBeenCalled();
     expect(screen.getByTestId('board-syncing-pill')).toHaveTextContent('read-only');
+  });
+
+  it('sends no zone, annotation or unpin write while the board is not loaded (cached full record)', async () => {
+    vi.useFakeTimers();
+    // Reauth: every partition was reset, but the full record is still cached.
+    agorStore.setState({ boardPartitions: new Map() });
+    const patch = vi.fn(async () => ({}));
+    const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
+    render(
+      <App>
+        <ConnectionProvider value={connected}>
+          <SessionCanvas board={board} client={client} branches={[branch]} />
+        </ConnectionProvider>
+      </App>
+    );
+    await act(async () => {});
+    const zone = currentNode(IMPLEMENTING_ZONE_ID) as FlowNode & {
+      data: { onUpdate: (id: string, data: unknown) => Promise<unknown>; canEdit: boolean };
+    };
+    expect(zone.data.canEdit).toBe(false);
+    await act(async () => {
+      await zone.data.onUpdate(IMPLEMENTING_ZONE_ID, {
+        ...board.objects?.[IMPLEMENTING_ZONE_ID],
+        label: 'Edited',
+      });
+    });
+    // A queued zone resize.
+    act(() => {
+      flowProps?.onNodesChange?.([
+        { type: 'dimensions', id: IMPLEMENTING_ZONE_ID, dimensions: { width: 2000, height: 900 } },
+      ]);
+    });
+    // Unpinning the pinned branch.
+    const branchNode = currentNode(BRANCH_ID) as FlowNode & {
+      data: { onUnpin?: (id: string) => Promise<void> };
+    };
+    await act(async () => {
+      await branchNode.data.onUnpin?.(BRANCH_ID);
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+    });
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it('drops a queued zone resize when the board unloads before it is saved', async () => {
+    vi.useFakeTimers();
+    const patch = vi.fn(async () => ({}));
+    const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
+    render(
+      <App>
+        <ConnectionProvider value={connected}>
+          <SessionCanvas board={board} client={client} branches={[branch]} />
+        </ConnectionProvider>
+      </App>
+    );
+    await act(async () => {});
+    act(() => {
+      flowProps?.onNodesChange?.([
+        { type: 'dimensions', id: IMPLEMENTING_ZONE_ID, dimensions: { width: 2000, height: 900 } },
+      ]);
+    });
+    act(() => agorStore.getState().resetBoardPartitions());
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+    });
+    expect(patch).not.toHaveBeenCalled();
   });
 
   it('drops a pending move when the board unloads before it is saved', async () => {

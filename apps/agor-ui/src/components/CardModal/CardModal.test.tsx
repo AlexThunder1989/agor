@@ -81,4 +81,24 @@ describe('CardModal permission gating', () => {
       )
     );
   });
+
+  it('is read-only while its board is still loading, even with board.edit', async () => {
+    const { client, effectiveAccessFind } = makeClient(['board.view', 'board.edit']);
+    renderWithApp(
+      <CardModal
+        open
+        card={card}
+        board={board}
+        client={client}
+        onClose={vi.fn()}
+        readOnlyReason="This board is still loading."
+      />
+    );
+    await waitFor(() => expect(effectiveAccessFind).toHaveBeenCalled());
+    for (const button of screen.getAllByText('Edit').map((el) => el.closest('button'))) {
+      expect(button).toBeDisabled();
+    }
+    expect(screen.getByText('Archive').closest('button')).toBeDisabled();
+    expect(screen.getByText('Delete').closest('button')).toBeDisabled();
+  });
 });

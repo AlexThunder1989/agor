@@ -499,6 +499,10 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
     const boardReadyRef = useRef(boardReady);
     boardReadyRef.current = boardReady;
     const canMutateBoard = canEditBoard && mutationGate.canMutate && boardReady;
+    // Read by queued/debounced writes and stable callbacks at the moment they
+    // fire: an unloaded board (or a lost connection) drops them.
+    const canMutateBoardRef = useRef(canMutateBoard);
+    canMutateBoardRef.current = canMutateBoard;
     // Board Viewers may collaborate through comments even though structural
     // canvas mutations require board.edit. The daemon applies the same global
     // member floor plus board-view authorization on comment creation.
@@ -821,7 +825,9 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
       eraserMode: activeTool === 'eraser',
       activeUrlTargetArtifactId,
       onEditMarkdown: handleEditMarkdownNote,
-      canEdit: canEditBoard,
+      // Every board-object/zone/text/markdown write goes through these
+      // callbacks: they need the board loaded, not just board.edit.
+      canEdit: canMutateBoard,
     });
 
     // Extract zone labels - memoized to only change when labels actually change
@@ -861,7 +867,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
     // reads `board` and the placement map, which change on every board patch)
     // would defeat BranchNode's areEqual for all branches at once.
     const handleUnpinBranch = useStableCallback(async (branchId: string) => {
-      if (!board || !client) return;
+      if (!board || !client || !canMutateBoardRef.current) return;
 
       // Find the board_object for this branch
       const boardObject = boardObjectByBranch.get(branchId);
@@ -1048,7 +1054,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
     // Handler to unpin a card from its zone. Identity-stabilized for the same
     // reason as handleUnpinBranch.
     const handleUnpinCard = useStableCallback(async (cardId: string) => {
-      if (!board || !client) return;
+      if (!board || !client || !canMutateBoardRef.current) return;
       const boardObject = boardObjectByCard.get(cardId);
       if (!boardObject?.zone_id) return;
 
@@ -1863,6 +1869,8 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
                 return;
               }
 
+              // An unloaded board's zone geometry may be stale: no write.
+              if (!canMutateBoardRef.current) return;
               // Accumulate resize updates
               pendingResizeUpdatesRef.current[change.id] = {
                 width: newWidth,
@@ -1880,6 +1888,13 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
                 pendingResizeUpdatesRef.current = {};
 
                 if (!board || !client) return;
+                // The board unloaded (a reconnect) or became read-only during
+                // the debounce: its full-object upsert could restore a zone
+                // deleted meanwhile, so the resize is dropped.
+                if (!canMutateBoardRef.current) {
+                  showWarning('This board is reloading; your last resize was not saved.');
+                  return;
+                }
 
                 // Persist all resize changes
                 for (const [nodeId, dimensions] of Object.entries(updates)) {
@@ -1910,7 +1925,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
         // Call the original handler
         onNodesChangeInternal(changes);
       },
-      [board, client, onNodesChangeInternal, setNodes]
+      [board, client, onNodesChangeInternal, setNodes, showWarning]
     );
 
     // Handle node drag start
@@ -2459,9 +2474,9 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
                 height,
                 borderColor: defaultBorderColor,
                 backgroundColor: defaultBackgroundColor,
-                canEdit: canEditBoard,
+                canEdit: canMutateBoard,
                 onUpdate: (id: string, data: BoardObject) => {
-                  if (board && client) {
+                  if (board && client && canMutateBoardRef.current) {
                     client
                       .service('boards')
                       .patch(board.board_id, {
@@ -2504,7 +2519,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
         setDrawingZone(null);
         setActiveTool('select');
       }
-    }, [activeTool, drawingZone, board, client, setNodes, canMutateBoard, canEditBoard]);
+    }, [activeTool, drawingZone, board, client, setNodes, canMutateBoard]);
 
     const openMarkdownPlacementModal = useCallback(
       (event: Pick<React.MouseEvent, 'clientX' | 'clientY'>): boolean => {
@@ -2656,9 +2671,9 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
               objectId,
               content: markdownContent,
               width: markdownWidth,
-              canEdit: canEditBoard,
+              canEdit: canMutateBoard,
               onUpdate: (id: string, data: BoardObject) => {
-                if (board && client) {
+                if (board && client && canMutateBoardRef.current) {
                   client
                     .service('boards')
                     .patch(board.board_id, {
@@ -2712,7 +2727,6 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
       handleEditMarkdownNote,
       deleteObject,
       canMutateBoard,
-      canEditBoard,
     ]);
 
     // Node click handler for eraser mode and comment placement
@@ -3248,6 +3262,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
             open={cardModalOpen}
             card={selectedCard}
             board={board}
+            readOnlyReason={boardReady ? undefined : 'This board is still loading.'}
             zoneName={
               selectedCard
                 ? (() => {

@@ -46,6 +46,11 @@ interface CardModalProps {
   afterClose?: () => void;
   onCardUpdated?: (card: CardWithType) => void;
   onCardDeleted?: (cardId: string) => void;
+  /**
+   * Edits are blocked for this reason (e.g. the card's board is still
+   * loading, so the card shown may be stale).
+   */
+  readOnlyReason?: string;
 }
 
 const CardModalComponent = ({
@@ -59,6 +64,7 @@ const CardModalComponent = ({
   afterClose,
   onCardUpdated,
   onCardDeleted,
+  readOnlyReason,
 }: CardModalProps) => {
   const { token } = theme.useToken();
   const { showSuccess, showError } = useThemedMessage();
@@ -108,10 +114,10 @@ const CardModalComponent = ({
     };
   }, [open, client, boardId]);
 
-  const canEdit = Boolean(boardAccess?.capabilities.includes('board.edit'));
+  const canEdit = !readOnlyReason && Boolean(boardAccess?.capabilities.includes('board.edit'));
   const editBlockedReason = canEdit
     ? undefined
-    : "You don't have Board Editor or Manager access to change this card.";
+    : (readOnlyReason ?? "You don't have Board Editor or Manager access to change this card.");
 
   const hasChanges = noteValue !== (card?.note || '') || descValue !== (card?.description || '');
 
