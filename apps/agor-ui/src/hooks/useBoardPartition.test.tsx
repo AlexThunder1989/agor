@@ -101,4 +101,20 @@ describe('useBoardPartition', () => {
     await act(async () => releaseAll());
     await waitFor(() => expect(result.current.boardReady).toBe(true));
   });
+
+  it('re-requests a board whose in-flight load a reset orphaned (navigation during a resync)', async () => {
+    // B's partition read is in flight when a resync of another board resets
+    // every partition entry.
+    const { client, sessionReads, releaseAll } = makeClient();
+    const { result } = renderHook(() =>
+      useBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true })
+    );
+    await waitFor(() => expect(sessionReads()).toBe(1));
+    act(() => agorStore.getState().resetBoardPartitions());
+
+    // The orphaned load can't settle the board; the hook must read again.
+    await waitFor(() => expect(sessionReads()).toBe(2));
+    await act(async () => releaseAll());
+    await waitFor(() => expect(result.current.boardReady).toBe(true));
+  });
 });

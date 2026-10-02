@@ -247,7 +247,10 @@ export function loadBoardPartition(
   const lifetime = captureLoadLifetime();
   if (!lifetime) return Promise.resolve();
   const { authorityScope, loadEpoch } = lifetime;
-  const key = `${authorityScope}\u0000${loadEpoch}\u0000${boardId}`;
+  // Per partition epoch too: a load orphaned by a reset (its entry is gone,
+  // so it can never settle the board) must not absorb the board's next request.
+  const partitionEpoch = agorStore.getState().partitionEpoch;
+  const key = `${authorityScope}\u0000${loadEpoch}\u0000${partitionEpoch}\u0000${boardId}`;
   const existing = inflight.get(key);
   if (existing) return existing;
 

@@ -2223,3 +2223,61 @@ describe('useAgorData — reauthentication reads the displayed board once', () =
     expect(boardReads() - before).toBe(1);
   });
 });
+
+describe('useAgorData — navigating while a reconnect resync runs', () => {
+  it('the destination board still loads after the resync resets every partition', async () => {
+    window.history.pushState({}, '', '/b/board-a/');
+    onTestFinished(() => window.history.pushState({}, '', '/'));
+    const boardA = { board_id: 'board-a', slug: 'board-a', name: 'A' };
+    const boardB = { board_id: 'board-b', slug: 'board-b', name: 'B' };
+    const { client, emitIo, onFetch, fetchArguments } = makeMockClient({
+      boards: [boardA, boardB],
+      'boards:get': boardA as never,
+    });
+    const { result, rerender } = renderHook(
+      ({ boardId }) => {
+        const data = useAgorData(client);
+        useBoardPartition(client, boardId, { canUseMemberWorkspaceServices: true });
+        return data;
+      },
+      { initialProps: { boardId: 'board-a' } }
+    );
+    await waitForInitialLoad(result);
+    await flush();
+
+    // Hold the resync in its board-scoped batch (A is already resolved).
+    const resync = deferred();
+    onFetch('board-comments', 'findAll', (call) => (call === 2 ? resync.promise : undefined));
+    // Hold B's first partition read.
+    const firstB = deferred();
+    let bReads = 0;
+    onFetch('cards', 'findAll', () => {
+      const args = fetchArguments('cards', 'findAll').at(-1) as { query?: { board_id?: string } };
+      if (args.query?.board_id !== 'board-b') return undefined;
+      bReads += 1;
+      return bReads === 1 ? firstB.promise : undefined;
+    });
+    act(() => emitIo('connect'));
+    await flush();
+
+    // Navigate to B: its partition read starts while the resync is held.
+    window.history.pushState({}, '', '/b/board-b/');
+    rerender({ boardId: 'board-b' });
+    await waitFor(() => expect(bReads).toBe(1));
+
+    // The resync finishes (resetting every entry), then B's first read lands.
+    await act(async () => {
+      resync.resolve();
+      await resync.promise;
+    });
+    await flush();
+    await act(async () => {
+      firstB.resolve();
+      await firstB.promise;
+    });
+    await waitFor(() =>
+      expect(agorStore.getState().boardPartitions.get('board-b')?.status).toBe('loaded')
+    );
+    expect(bReads).toBe(2);
+  });
+});

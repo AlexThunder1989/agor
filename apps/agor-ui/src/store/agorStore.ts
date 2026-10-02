@@ -120,6 +120,12 @@ interface AgorMeta {
   agenticToolSettingsHydrated: boolean;
   /** Per-board partition loading state (see `boardPartitions.ts`). */
   boardPartitions: Map<string, BoardPartitionState>;
+  /**
+   * Bumped (monotonically) by every reset of `boardPartitions`. A partition
+   * load in flight across a reset is orphaned: it can no longer settle its
+   * board, so loads dedupe per epoch and the board is requested again.
+   */
+  partitionEpoch: number;
   /** Collections whose global snapshot has applied at least once. */
   globallyHydrated: Set<GloballyHydratedCollection>;
   /**
@@ -274,6 +280,7 @@ const INITIAL_META: AgorMetaWithUserScope = {
   agenticToolSettingsByName: new Map(),
   agenticToolSettingsHydrated: false,
   boardPartitions: new Map(),
+  partitionEpoch: 0,
   globallyHydrated: new Set(),
   sessionMcpLoaded: new Set(),
   sessionMcpEpoch: 0,
@@ -290,6 +297,7 @@ export const agorStore = createStore<AgorState>()(
         ...EMPTY_MAPS,
         ...INITIAL_META,
         boardPartitions: new Map(),
+        partitionEpoch: get().partitionEpoch + 1,
         globallyHydrated: new Set(),
         absentBranchIds: new Set(),
         sessionMcpLoaded: new Set(),
@@ -307,6 +315,7 @@ export const agorStore = createStore<AgorState>()(
         agenticToolSettingsHydrated: false,
         // Readiness describes the maps being cleared, so it resets with them.
         boardPartitions: new Map(),
+        partitionEpoch: get().partitionEpoch + 1,
         globallyHydrated: new Set(),
         sessionMcpLoaded: new Set(),
         ...INITIAL_USER_SCOPE,
@@ -365,9 +374,8 @@ export const agorStore = createStore<AgorState>()(
       );
       if (changed) set(partial as Partial<AgorState>);
     },
-    resetBoardPartitions: () => {
-      if (get().boardPartitions.size > 0) set({ boardPartitions: new Map() });
-    },
+    resetBoardPartitions: () =>
+      set({ boardPartitions: new Map(), partitionEpoch: get().partitionEpoch + 1 }),
     markGloballyHydrated: (collections) => {
       const current = get().globallyHydrated;
       const additions = collections.filter(
