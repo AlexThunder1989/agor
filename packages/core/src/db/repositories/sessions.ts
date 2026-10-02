@@ -30,6 +30,7 @@ import {
   sql,
 } from 'drizzle-orm';
 import { getBaseUrl } from '../../config/config-manager';
+import { PAGINATION } from '../../config/constants';
 import { generateId, shortId } from '../../lib/ids';
 import { getSessionUrl } from '../../utils/url';
 import { lockBranchForAdmission } from '../branch-admission';
@@ -63,7 +64,7 @@ import {
   RepositoryError,
   resolveByShortIdPrefix,
 } from './base';
-import { inVisibleBranchSet } from './branch-access';
+import { inVisibleBranchSet, visibleBranchReferenceAccessExists } from './branch-access';
 import { deepMerge } from './merge-utils';
 import {
   extractMessageText,
@@ -622,8 +623,23 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
       if (opts.createdBy !== undefined) conditions.push(eq(sessions.created_by, opts.createdBy));
       if (opts.archived !== undefined) conditions.push(eq(sessions.archived, opts.archived));
       if (opts.visibleToUserId) {
+        // Same branch.view policy either way; only the evaluation shape differs.
+        // The branch-set form has a fixed cost (the caller's whole visible set)
+        // even for a few rows; the per-row probe costs per candidate examined.
+        // Use the probe only where that count is bounded: an exact id list, or
+        // an uncounted page of the caller's own sessions (which sit on branches
+        // they could open sessions on, so the scan stops after about `limit`).
+        // Outer board/branch filters already pin the branch, so the probe
+        // needs no scope. Parity: sessions.visibility-parity-test-helpers.ts.
+        const boundedCandidates =
+          (opts.sessionIds !== undefined && opts.sessionIds.length <= PAGINATION.MAX_ID_LIST) ||
+          (opts.createdBy === opts.visibleToUserId &&
+            opts.includeTotal === false &&
+            opts.limit! <= PAGINATION.MAX_ID_LIST);
         conditions.push(
-          inVisibleBranchSet(this.db, opts.visibleToUserId, sessions.branch_id, opts)
+          boundedCandidates
+            ? visibleBranchReferenceAccessExists(this.db, opts.visibleToUserId, sessions.branch_id)
+            : inVisibleBranchSet(this.db, opts.visibleToUserId, sessions.branch_id, opts)
         );
       }
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
