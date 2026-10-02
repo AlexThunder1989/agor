@@ -173,6 +173,7 @@ import {
   trackExecutorProcess,
 } from './executor-tracking.js';
 import { assertHaTaskPermissionSupported, isConstrainedHa } from './ha-support.js';
+import { createDeploymentToolUnsupportedGate } from './integrations/opencode/deployment-capabilities.js';
 import { registerOpenCodeServices } from './integrations/opencode/index.js';
 import {
   inOpenCodeNativeStateMutationSlot,
@@ -550,8 +551,11 @@ export async function registerServices(ctx: RegisterServicesContext): Promise<Re
   // Core services: sessions, tasks, messages
   // ============================================================================
 
-  const sessionsService = createSessionsService(db, app, (tool) =>
-    isDeploymentAgenticToolAvailable(tool, deploymentAgenticToolPolicy)
+  const sessionsService = createSessionsService(
+    db,
+    app,
+    (tool) => isDeploymentAgenticToolAvailable(tool, deploymentAgenticToolPolicy),
+    createDeploymentToolUnsupportedGate(config)
   ) as unknown as SessionsServiceImpl;
   const tasksService = createTasksService(db, app, sessionTokenService);
   app.use('/sessions', sessionsService, {
@@ -1742,7 +1746,9 @@ function createExecuteHandler(
       return contribution.getExecutorLaunch({
         tenantId,
         session,
+        taskId: data.taskId,
         homeDir: executorHomeDir,
+        config,
       });
     })();
 
@@ -1980,7 +1986,7 @@ function createExecuteHandler(
       },
     });
 
-    if (executorLaunch) {
+    if (executorLaunch?.requiresLocalContainment) {
       const ready = createDeferredSignal();
       const finished = createDeferredSignal();
       let spawned = false;
