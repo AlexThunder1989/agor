@@ -38,10 +38,10 @@ const UNKNOWN_STATUS_CTA: CloudCta = {
 
 /** Short labels for tight spots such as the navbar island. */
 export const COMPACT_CTA_LABELS: Record<CloudCtaVariant, string> = {
-  console: 'Try Cloud',
+  console: 'Try Agor Cloud',
   waitlist: 'Join waitlist',
   capacity: 'Sign up',
-  hubspot_modal: 'Try Cloud',
+  hubspot_modal: 'Try Agor Cloud',
 };
 
 /**

@@ -3349,3 +3349,36 @@ a.radarBlip .blipName {
   opacity: 1;
   transform: translateY(2px);
 }
+
+/* ^word^ in hero copy: letters that can do a wave when the home page's
+ * cursor troupe cues it (html[data-troupe-wave]). */
+.waveWord,
+.waveWord > span {
+  display: inline-block;
+}
+
+:global(html[data-troupe-wave]) .waveWord > span {
+  animation: letterWave 0.7s ease-in-out calc(var(--i) * 90ms) 2;
+}
+
+@keyframes letterWave {
+  0%,
+  100% {
+    transform: none;
+  }
+
+  40% {
+    transform: translateY(-0.32em);
+  }
+}
+
+/* The troupe does the radar's introductions, so its hint isn't needed. */
+:global(html[data-troupe-on]) .rosterStatusLine {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :global(html[data-troupe-wave]) .waveWord > span {
+    animation: none;
+  }
+}

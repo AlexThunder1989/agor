@@ -6,19 +6,21 @@ import styles from './CursorTroupe.module.css';
 /**
  * PROTOTYPE (behind a flag): three cursors (Maya, Ari, and Sam in the code;
  * unnamed on screen) follow the reader down the home page and act out each
- * section's point. A director picks the section on stage (sections mark
- * themselves with data-troupe-section) and plays its beat once.
+ * section's point, with three guest cursors who join for the hero and the
+ * final CTA. A director picks the section on stage (sections mark themselves
+ * with data-troupe-section) and plays its beat once.
  *
  * Positions live in page coordinates and every target is re-read from the
- * page each frame (an element, or a text range such as one word or one
- * glyph's counter), so cursors stay locked to what they're touching while the
- * page scrolls. They idle at two-thirds size and grow to full size to do
- * things; gestures are motion only. Beats can also nudge the page itself:
- * light a hover state, or drive an element (the board panel they haul on
- * screen). Scrolling back up finds them parked where each beat ended; once
- * they've left at the final CTA they stay gone. Clicking the hero's
- * "Multiplayer AI" pill starts the whole show again. Shown in dev, or after
- * visiting with `?cursors` once; never under reduced motion or on touch.
+ * page each frame (an element, a text range, or one glyph's counter), so
+ * cursors stay locked to what they're touching while the page scrolls. They
+ * idle at two-thirds size and grow to full size to do things; gestures are
+ * motion only. Beats can also nudge the page: light a hover state, cue the
+ * hero's "team" letter wave, or drive an element (the board panel they haul
+ * in, the "confidence" they stretch). Scrolling back up finds them parked
+ * where each beat ended; once they've left at the final CTA they stay gone.
+ * Clicking the hero's "Multiplayer AI" pill starts the show again. Shown in
+ * dev, or after visiting with `?cursors` once; never under reduced motion or
+ * on touch.
  */
 
 const ENABLED_KEY = 'agor-cursor-troupe';
@@ -27,7 +29,7 @@ const CAST = [
   { name: 'Maya', color: '#f5a3c7', hz: 2.1, extra: false },
   { name: 'Ari', color: '#6fdcf0', hz: 1.8, extra: false },
   { name: 'Sam', color: '#f2d27a', hz: 1.55, extra: false },
-  // Guests who only join the governance ring.
+  // Guests: they join the hero's huddle and the final CTA's ring.
   { name: 'Lee', color: '#b9f18c', hz: 1.9, extra: true },
   { name: 'Kit', color: '#c3a6ff', hz: 1.7, extra: true },
   { name: 'Rho', color: '#ff9f7a', hz: 2.0, extra: true },
@@ -50,7 +52,7 @@ interface RectLike {
   getBoundingClientRect(): DOMRect;
 }
 type Anchor = (root: HTMLElement) => Element | RectLike | null | undefined;
-type Gesture = 'wave' | 'shrug' | 'look' | 'jump' | 'heave' | 'click';
+type Gesture = 'wave' | 'look' | 'jump' | 'heave' | 'tug' | 'click';
 
 interface Mark {
   at: number;
@@ -62,10 +64,14 @@ interface Mark {
   dy?: number;
   /** Follow stiffly (it's holding or riding the thing). */
   lock?: boolean;
+  /** Follow loosely at first, then lock after this many seconds. */
+  lockAfter?: number;
   /** Turn to point at this anchor's center. */
   point?: Anchor;
   /** Circle the target point; squash < 1 flattens it into an ellipse. */
   orbit?: { r: number; speed: number; phase: number; squash?: number };
+  /** Bounce around inside the anchor's box, screensaver style (px/s). */
+  roam?: { speed: number; angle: number };
   /** Size while at this mark (overrides idle/busy sizing). */
   size?: number;
   /** A small nervous jitter. */
@@ -85,6 +91,8 @@ interface Part {
   busy?: Array<[number, number]>;
   /** Read a press from the anchor's data-pressed (the demo's own clicks). */
   pressFromAnchor?: boolean;
+  /** Full size while the anchor is visible (opacity > 0.5), idle otherwise. */
+  sizeFromAnchor?: boolean;
 }
 
 interface Beat {
@@ -93,10 +101,10 @@ interface Beat {
   active: (rect: DOMRect, vh: number, root: HTMLElement) => boolean;
   /** Hide the cursors behind this rect (a hole in the layer) until `until`. */
   mask?: { anchor: Anchor; until: number };
-  /** Show the cursors only inside this ellipse, from `from` on. */
-  clip?: { anchor: Anchor; from: number };
-  /** One part per cast member who's in this beat. */
-  parts: Part[];
+  /** Show the cursors only inside these ellipses, from `from` on. */
+  clip?: { anchors: Anchor[]; from: number };
+  /** One part per cast member in this beat (by index; missing = not in it). */
+  parts: Array<Part | undefined>;
   /** One-shot side effects on the page, e.g. lighting a hover state. */
   events?: Array<{ at: number; run: (root: HTMLElement) => void }>;
   /** Drive an element: 'before' (not reached yet), 'play' (with t), 'done'. */
@@ -116,6 +124,27 @@ const nth =
 const at = (x: number, y: number): RectLike => ({
   getBoundingClientRect: () => new DOMRect(x, y, 0, 0),
 });
+/** A point on an ellipse around an anchor's center (angle in degrees, 0 = right). */
+const around =
+  (anchor: Anchor, rx: number, ry: number, deg: number): Anchor =>
+  (root) => {
+    const r = anchor(root)?.getBoundingClientRect();
+    if (!r) return null;
+    const a = (deg * Math.PI) / 180;
+    return at(r.left + r.width / 2 + Math.cos(a) * rx, r.top + r.height / 2 + Math.sin(a) * ry);
+  };
+/** Just off the viewport's left, bottom, or right edge, level with an anchor. */
+const offstage =
+  (anchor: Anchor, side: 0 | 1 | 2): Anchor =>
+  (root) => {
+    const r = anchor(root)?.getBoundingClientRect();
+    if (!r) return null;
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    if (side === 0) return at(-60, cy);
+    if (side === 1) return at(cx, window.innerHeight + 60);
+    return at(window.innerWidth + 60, cy);
+  };
 
 /** A Range around `text` inside `el` (or one character of it). */
 function textRange(el: Element | null | undefined, text: string, char?: number): Range | null {
@@ -151,9 +180,11 @@ function counterRect(range: Range | null): DOMRect | null {
   const inkBottom = baseline + m.actualBoundingBoxDescent;
   const inkLeft = box.left - m.actualBoundingBoxLeft;
   const inkRight = box.left + m.actualBoundingBoxRight;
-  // The stroke of a semibold "o" eats roughly a fifth of it on each side.
-  const sw = (inkRight - inkLeft) * 0.22;
-  const sh = (inkBottom - inkTop) * 0.2;
+  // The stroke eats more of the glyph the heavier the weight.
+  const weight = Number.parseInt(cs.fontWeight, 10) || 400;
+  const stroke = 0.05 + (0.17 * Math.min(600, Math.max(100, weight)) - 17) / 500;
+  const sw = (inkRight - inkLeft) * stroke;
+  const sh = (inkBottom - inkTop) * stroke * 0.9;
   return new DOMRect(
     inkLeft + sw,
     inkTop + sh,
@@ -161,43 +192,67 @@ function counterRect(range: Range | null): DOMRect | null {
     inkBottom - inkTop - 2 * sh
   );
 }
+const counterOf =
+  (find: (root: HTMLElement) => Range | null): Anchor =>
+  (root) => {
+    const rect = counterRect(find(root));
+    return rect ? { getBoundingClientRect: () => rect } : null;
+  };
 
 const centerBand = (r: DOMRect, vh: number) => r.top < vh * 0.6 && r.bottom > vh * 0.4;
 
+// Hero
 const pill = q('[class*="homeBadge"]');
 const ROW_ITEM = 'a[class*="homeRowItem"]';
 const rowItem = (i: number) => nth(ROW_ITEM, i);
-const team: Anchor = (root) => textRange(root.querySelector('[class*="homeSub"]'), 'team');
-const siloO: Anchor = (root) => {
-  const silo = [...root.querySelectorAll('h2 span')].find((s) => s.textContent?.trim() === 'silo');
-  const rect = counterRect(textRange(silo, 'silo', 3));
-  return rect ? { getBoundingClientRect: () => rect } : null;
-};
+const team = q('[data-wave-word]');
+const heroButton = (i: number): Anchor =>
+  i === 2
+    ? () => document.querySelector('header [class*="ctaSlot"] a')
+    : nth('[class*="homeCtaRow"] > *', i);
+// Problem: "Don’t let AI silo your team" has three o's.
+const problemHeading = (root: HTMLElement) => root.querySelector('h2');
+const O_COUNTERS = [
+  counterOf((root) => textRange(problemHeading(root), 'Don', 1)),
+  counterOf((root) => textRange(problemHeading(root), 'silo', 3)),
+  counterOf((root) => textRange(problemHeading(root), 'your', 1)),
+];
+// Work together
 const demoCursor = (i: number) => q(`[data-troupe-cursor="${i}"]`);
+// Board
 const boardPanel = q('[data-troupe="board-panel"]');
+// Teammates
 const RING_NODE = 'a[class*="ringNode"]';
 const ringNode = (i: number) => nth(RING_NODE, i);
 const ringHub = q('[class*="ringHub"]');
+// Command center
+const ccHeading = q('h2');
+// Roster
 const LINKED_BLIP = 'a[class*="radarBlip"]';
 const blip = (i: number) => nth(LINKED_BLIP, i);
-const rosterLink = q('a[href="/agent-roster"]');
-const ccHeading = q('h2');
-const confidence: Anchor = (root) => textRange(root.querySelector('h2'), 'confidence');
-/** Where the governance ring spins: just past the end of "confidence". */
-const spinCenter: Anchor = (root) => {
-  const r = confidence(root)?.getBoundingClientRect();
-  return r ? at(r.right + 54, r.top + r.height * 0.55) : null;
-};
-/** Where the governance guests enter from: left, bottom, right of the view. */
-const offstage =
-  (side: number): Anchor =>
+const radarScope = q('[class*="radarScope"]');
+/** Just outside the radar, `lag` degrees behind its sweep. */
+const chaseSweep =
+  (lag: number): Anchor =>
   (root) => {
-    const r = spinCenter(root)?.getBoundingClientRect();
-    if (!r) return null;
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    return side === 0 ? at(-60, r.top) : side === 1 ? at(r.left, h + 60) : at(w + 60, r.top);
+    const scope = radarScope(root)?.getBoundingClientRect();
+    const sweep = root.querySelector('[class*="radarSweep"]');
+    if (!scope || !sweep) return null;
+    const m = new DOMMatrixReadOnly(getComputedStyle(sweep).transform);
+    // The sweep's 0° is straight up, turning clockwise.
+    const sweepDeg = (Math.atan2(m.b, m.a) * 180) / Math.PI;
+    const a = ((sweepDeg - lag - 90) * Math.PI) / 180;
+    const r = scope.width / 2 + 24;
+    return at(
+      scope.left + scope.width / 2 + Math.cos(a) * r,
+      scope.top + scope.height / 2 + Math.sin(a) * r
+    );
   };
+// Governance
+const confidenceWord = q('h2 [class*="compoundWord"]');
+const BUS_DOT = '[class*="busNodeDot"]';
+const busDot = (i: number) => nth(BUS_DOT, i);
+// Final
 const together = q('[data-troupe="together"]');
 const ctaButton = (i: number) => nth('[class*="heroActions"] > *', i);
 
@@ -213,6 +268,18 @@ const lightRow = (root: HTMLElement, index: number | null) => {
     item.toggleAttribute('data-troupe-hover', i === index);
   });
 };
+const setHtmlFlag = (name: string, on: boolean) =>
+  document.documentElement.toggleAttribute(name, on);
+
+/** Progress (0..1) through a series of pulls: [start, end, from, to]. */
+function pulled(pulls: Array<[number, number, number, number]>, t: number): number {
+  let p = 0;
+  for (const [a, b, from, to] of pulls) {
+    if (t >= b) p = to;
+    else if (t > a) p = from + (to - from) * (1 - (1 - (t - a) / (b - a)) ** 3);
+  }
+  return p;
+}
 
 // Board: the panel is hauled in from the right in three heaves.
 const BOARD_PULLS: Array<[number, number, number, number]> = [
@@ -220,14 +287,6 @@ const BOARD_PULLS: Array<[number, number, number, number]> = [
   [2.55, 3.15, 0.3, 0.62],
   [3.55, 4.5, 0.62, 1],
 ];
-function boardProgress(t: number): number {
-  let p = 0;
-  for (const [a, b, from, to] of BOARD_PULLS) {
-    if (t >= b) p = to;
-    else if (t > a) p = from + (to - from) * (1 - (1 - (t - a) / (b - a)) ** 3);
-  }
-  return p;
-}
 const boardOffsets = new WeakMap<Element, number>();
 function driveBoard(root: HTMLElement, phase: 'before' | 'play' | 'done', t: number) {
   const panel = boardPanel(root) as HTMLElement | null;
@@ -243,83 +302,125 @@ function driveBoard(root: HTMLElement, phase: 'before' | 'play' | 'done', t: num
   const baseLeft = panel.getBoundingClientRect().left - applied;
   // Peek ~70px of the panel's left edge in from the viewport's right edge.
   const start = Math.max(0, window.innerWidth - 70 - baseLeft);
-  const offset = start * (1 - (phase === 'play' ? boardProgress(t) : 0));
+  const offset = start * (1 - (phase === 'play' ? pulled(BOARD_PULLS, t) : 0));
   boardOffsets.set(panel, offset);
   panel.style.transform = offset ? `translateX(${offset.toFixed(1)}px)` : '';
 }
 
+// Governance: "confidence" starts at heading size and is stretched to full.
+const STRETCH_PULLS: Array<[number, number, number, number]> = [
+  [1.5, 2.1, 0, 0.35],
+  [2.5, 3.1, 0.35, 0.7],
+  [3.5, 4.3, 0.7, 1],
+];
+const fullSizes = new WeakMap<Element, number>();
+function driveConfidence(root: HTMLElement, phase: 'before' | 'play' | 'done', t: number) {
+  const word = confidenceWord(root) as HTMLElement | null;
+  const heading = word?.parentElement;
+  if (!word || !heading) return;
+  if (phase === 'done') {
+    if (fullSizes.has(word)) {
+      word.style.fontSize = '';
+      fullSizes.delete(word);
+    }
+    return;
+  }
+  if (!fullSizes.has(word)) {
+    word.style.fontSize = '';
+    fullSizes.set(word, Number.parseFloat(getComputedStyle(word).fontSize));
+  }
+  const full = fullSizes.get(word) ?? 0;
+  const base = Number.parseFloat(getComputedStyle(heading).fontSize);
+  const p = phase === 'play' ? pulled(STRETCH_PULLS, t) : 0;
+  word.style.fontSize = `${(base + (full - base) * p).toFixed(1)}px`;
+}
+
 const ROW_SWEEP = [0, 1, 2, 3, 4].map((k) => 1.4 + k * 0.38);
 const HERO_GATHER = ROW_SWEEP[4] + 0.6;
+const HERO_FRIENDS = HERO_GATHER + 2.4;
+// Around "team": the three mains, then the three guests in between.
+const TEAM_SPOTS = [200, 340, 90, 140, 40, 270];
 
 const BEATS: Record<SectionId, Beat> = {
   // Out from behind the Multiplayer AI pill. Ari sweeps the landing-page row
-  // along the bottom, lighting each link; then all three gather under "team"
-  // ("your whole team can see") and do the wave.
+  // along the bottom, lighting each link; all three gather around "team"
+  // pointing in, and its letters do a wave. Then three friends pop out of
+  // Sign up, Book a demo, and Try Agor Cloud to join the huddle.
   hero: {
     delay: 0.4,
     active: (r, vh) => r.bottom > vh * 0.45,
     mask: { anchor: pill, until: 1.4 },
-    parts: [0, 1, 2].map((i) => ({
-      appear: i * 0.25,
-      marks: [
-        { at: 0, anchor: pill },
-        { at: 0.15 + i * 0.25, anchor: pill, fx: (i - 1) * 0.5, dx: (i - 1) * 36, dy: 34 },
-        ...(i === 1
-          ? ROW_SWEEP.map((when, k) => ({ at: when, anchor: rowItem(k), fx: -0.3, fy: -0.2 }))
-          : []),
-        {
-          at: i === 1 ? HERO_GATHER : 1.6 + i * 0.2,
-          anchor: team,
-          fy: 0.5,
-          dx: (i - 1) * 26,
-          dy: 10,
-        },
-      ],
-      cues: [
-        { at: 0.9 + i * 0.25, gesture: 'look' as const },
-        { at: HERO_GATHER + 1.0 + i * 0.15, gesture: 'jump' as const },
-        { at: HERO_GATHER + 1.8 + i * 0.15, gesture: 'jump' as const },
-      ],
-      busy: i === 1 ? [[1.2, HERO_GATHER + 1]] : [],
-    })),
+    parts: [0, 1, 2, 3, 4, 5].map((i): Part => {
+      const spot = around(team, 74, 36, TEAM_SPOTS[i]);
+      if (i >= 3) {
+        const appear = HERO_FRIENDS + (i - 3) * 0.3;
+        return {
+          appear,
+          marks: [
+            { at: 0, anchor: heroButton(i - 3) },
+            { at: appear + 0.15, anchor: spot, point: team },
+          ],
+          busy: [[appear, appear + 1.4]],
+        };
+      }
+      return {
+        appear: i * 0.25,
+        marks: [
+          { at: 0, anchor: pill },
+          { at: 0.15 + i * 0.25, anchor: pill, fx: (i - 1) * 0.5, dx: (i - 1) * 36, dy: 34 },
+          ...(i === 1
+            ? ROW_SWEEP.map((when, k) => ({ at: when, anchor: rowItem(k), fx: -0.3, fy: -0.2 }))
+            : []),
+          { at: i === 1 ? HERO_GATHER : 1.6 + i * 0.2, anchor: spot, point: team },
+        ],
+        cues: [{ at: 0.9 + i * 0.25, gesture: 'look' as const }],
+        busy: [i === 1 ? [1.2, HERO_GATHER + 1] : [HERO_GATHER, HERO_GATHER + 1.6]] as Array<
+          [number, number]
+        >,
+      };
+    }),
     events: [
       ...ROW_SWEEP.map((when, k) => ({
         at: when + 0.15,
         run: (root: HTMLElement) => lightRow(root, k),
       })),
       { at: HERO_GATHER + 0.2, run: (root: HTMLElement) => lightRow(root, null) },
+      { at: HERO_GATHER + 0.9, run: () => setHtmlFlag('data-troupe-wave', true) },
+      { at: HERO_GATHER + 2.6, run: () => setHtmlFlag('data-troupe-wave', false) },
     ],
   },
-  // Siloed: they squeeze into the counter of the "o" in "silo" and tremble
-  // there, shown only inside it.
+  // Siloed: one trapped in each "o" of "Don’t let AI silo your", bouncing
+  // around in it screensaver style and trembling, shown only inside it.
   problem: {
     delay: 0.2,
     active: (r, vh) => r.top < vh * 0.55 && r.bottom > vh * 0.5,
-    clip: { anchor: siloO, from: 1.0 },
-    parts: [
-      // Tip positions; each arrow hangs down and right of its tip.
-      [-0.38, -0.36],
-      [-0.06, -0.3],
-      [-0.3, -0.04],
-    ].map(([fx, fy]) => ({
+    clip: { anchors: O_COUNTERS, from: 0.9 },
+    parts: O_COUNTERS.map((counter, i) => ({
       marks: [
-        { at: 0, anchor: siloO, dy: -60 },
-        { at: 0.2, anchor: siloO, fx, fy, size: 0.42 },
-        { at: 1.0, anchor: siloO, fx, fy, size: 0.42, lock: true, tremble: true },
+        { at: 0, anchor: counter, dy: -70 },
+        { at: 0.2 + i * 0.15, anchor: counter, size: 0.55 },
+        {
+          at: 0.9,
+          anchor: counter,
+          size: 0.55,
+          roam: { speed: 16 + i * 5, angle: 0.8 + i * 2.2 },
+          tremble: true,
+        },
       ],
     })),
   },
   // The demo's Maya, Ari, and Sam are these three: follow their markers
   // (the demo hides its own while we're here) and press when they press.
+  // They ease over first rather than snapping to the demo's off-board starts.
   'work-together': {
     delay: 0,
     active: (r, vh) => r.top < vh * 0.7 && r.bottom > vh * 0.3,
     htmlFlag: 'data-troupe-wt',
     parts: [0, 1, 2].map((i) => ({
-      marks: [{ at: 0, anchor: demoCursor(i), fx: -0.5, fy: -0.5, dx: 2, dy: 1, lock: true }],
+      marks: [{ at: 0, anchor: demoCursor(i), fx: -0.5, fy: -0.5, dx: 2, dy: 1, lockAfter: 1.4 }],
       hold: true,
       pressFromAnchor: true,
-      busy: [[0, 30]],
+      sizeFromAnchor: true,
     })),
   },
   // Three heaves to haul the media panel on screen from the right.
@@ -385,81 +486,125 @@ const BEATS: Record<SectionId, Beat> = {
       cues: [{ at: 1.2 + i * 0.5, gesture: 'look' as const }],
     })),
   },
-  // Scan the radar, popping a few teammates' cards, then line up under the
-  // roster link and do the wave, twice.
+  // Maya introduces a few teammates one by one (the radar shows one card at
+  // a time); Ari and Sam circle just outside the scope, chasing its sweep and
+  // pointing in at it.
   roster: {
     delay: 0.3,
     active: centerBand,
-    parts: [0, 1, 2].map((i) => ({
-      marks: [
-        { at: 0.3 + i * 0.6, anchor: blip(i), fx: 0.18, fy: -0.05 },
-        ...(i < 2 ? [{ at: 2.3 + i * 0.6, anchor: blip(i + 3), fx: 0.18, fy: -0.05 }] : []),
-        { at: 4.0, anchor: rosterLink, fx: -0.25 + i * 0.25, fy: 0.5, dy: 22 },
-      ],
-      cues: [
-        { at: 5.0 + i * 0.16, gesture: 'jump' as const },
-        { at: 5.9 + i * 0.16, gesture: 'jump' as const },
-      ],
-      busy: [[0, 6.8]],
-    })),
-    events: [0, 1, 2, 3, 4].map((k) => ({
-      at: 0.7 + k * 0.6 + (k > 2 ? 0.2 : 0),
-      run: (root: HTMLElement) => {
-        if (k > 0) unhover(blip(k - 1)(root));
-        hover(blip(k)(root));
+    parts: [
+      {
+        marks: [0, 1, 2, 3, 4].map((k) => ({
+          at: 0.2 + k * 1.1,
+          anchor: blip(k),
+          fx: 0.18,
+          fy: -0.05,
+        })),
+        busy: [[0, 6]],
       },
-    })),
+      ...[18, 44].map((lag) => ({
+        marks: [
+          { at: 0, anchor: chaseSweep(lag), point: radarScope },
+          { at: 0.9, anchor: chaseSweep(lag), point: radarScope, lock: true },
+        ],
+      })),
+    ],
+    events: [
+      ...[0, 1, 2, 3, 4].map((k) => ({
+        at: 0.55 + k * 1.1,
+        run: (root: HTMLElement) => {
+          if (k > 0) unhover(blip(k - 1)(root));
+          hover(blip(k)(root));
+        },
+      })),
+      { at: 6.2, run: (root: HTMLElement) => unhover(blip(4)(root)) },
+    ],
   },
-  // Confidence: three guests arrive from off screen, all six form a ring
-  // pointing inward beside "confidence", and turn slowly like a spinner. The
-  // guests leave when the reader moves on.
+  // Confidence: "confidence" starts at heading size; Maya and Ari grab it and
+  // stretch it out in three tugs while Sam watches. Then each clicks onto one
+  // of the trust list's pulses and stays there.
   governance: {
     delay: 0.2,
     active: centerBand,
-    parts: [0, 1, 2, 3, 4, 5].map((k) => {
-      const guest = k >= 3;
-      return {
+    drive: driveConfidence,
+    parts: [
+      ...[
+        { fx: 0.5, fy: 0, dx: -4 },
+        { fx: 0.5, fy: -0.5, dx: -6, dy: 8 },
+      ].map(
+        (grip, i): Part => ({
+          marks: [
+            { at: 0, anchor: confidenceWord, ...grip },
+            { at: 1.1, anchor: confidenceWord, ...grip, lock: true },
+            { at: 4.8 + i * 0.4, anchor: busDot(1 + i * 2) },
+          ],
+          cues: [
+            ...STRETCH_PULLS.map(([a]) => ({ at: a - 0.3, gesture: 'tug' as const })),
+            { at: 5.6 + i * 0.4, gesture: 'click' as const },
+          ],
+          busy: [[1.0, 6.4 + i * 0.4] as [number, number]],
+        })
+      ),
+      {
         marks: [
-          guest
-            ? { at: 0, anchor: offstage(k - 3) }
-            : { at: 0, anchor: spinCenter, dx: (k - 1) * 30, dy: -60 },
-          {
-            at: guest ? 0.4 + (k - 3) * 0.2 : 0.6,
-            anchor: spinCenter,
-            orbit: { r: 38, speed: 0.55, phase: (k * Math.PI) / 3, squash: 1 },
-            point: spinCenter,
-          },
+          { at: 0, anchor: confidenceWord, fx: 0.5, dx: 70, dy: 50, point: confidenceWord },
+          { at: 5.6, anchor: busDot(5) },
         ],
-        busy: [[0, 60]],
-      };
-    }),
+        cues: [
+          { at: 2.0, gesture: 'look' },
+          { at: 6.4, gesture: 'click' },
+        ],
+        busy: [[5.5, 7.2]],
+      },
+    ],
   },
-  // Ease in to "together", a little orbit dance around it, then each clicks a
-  // CTA and they're off (for good, until the pill brings them back).
+  // Circle the wagons: all six ring "together", pointing in, turning slowly.
+  // The guests head off; the three regulars each click a CTA and they're
+  // gone (for good, until the pill brings them back).
   final: {
     delay: 0.2,
     active: (r, vh) => r.top < vh * 0.55 && r.bottom > vh * 0.3,
-    parts: [0, 1, 2].map((i) => ({
-      marks: [
-        { at: 0, anchor: together, dx: (i - 1) * 60, dy: 70 },
-        { at: 0.9, anchor: together, orbit: { r: 74, speed: 2.6, phase: (i * 2 * Math.PI) / 3 } },
-        { at: 3.7 + i * 0.2, anchor: ctaButton(i), fx: 0.12, fy: 0.15 },
-      ],
-      cues: [{ at: 4.7 + i * 0.18, gesture: 'click' as const }],
-      busy: [[0.6, 5.6]],
-      vanish: 5.8 + i * 0.1,
-    })),
+    parts: [0, 1, 2, 3, 4, 5].map((k): Part => {
+      const ring = {
+        r: 170,
+        speed: 0.7,
+        phase: (k * Math.PI) / 3 + Math.PI / 6,
+        squash: 0.42,
+      };
+      if (k >= 3) {
+        const side = (k - 3) as 0 | 1 | 2;
+        return {
+          marks: [
+            { at: 0, anchor: offstage(together, side) },
+            { at: 0.3 + side * 0.2, anchor: together, orbit: ring, point: together },
+            { at: 3.6 + side * 0.15, anchor: offstage(together, side) },
+          ],
+          busy: [[0, 4.4]],
+          vanish: 4.6 + side * 0.15,
+        };
+      }
+      return {
+        marks: [
+          { at: 0, anchor: together, dx: (k - 1) * 60, dy: 70 },
+          { at: 0.5, anchor: together, orbit: ring, point: together },
+          { at: 3.9 + k * 0.2, anchor: ctaButton(k), fx: 0.12, fy: 0.15 },
+        ],
+        cues: [{ at: 4.8 + k * 0.18, gesture: 'click' as const }],
+        busy: [[0.4, 5.6]],
+        vanish: 5.9 + k * 0.1,
+      };
+    }),
   },
 };
 /** Once the final beat gets this far, the show is over. */
-const FINAL_EXIT = 6.2;
+const FINAL_EXIT = 6.3;
 
 const GESTURE_SECONDS: Record<Gesture, number> = {
   wave: 0.9,
-  shrug: 0.7,
   look: 1.0,
   jump: 0.5,
   heave: 0.9,
+  tug: 0.9,
   click: 0.8,
 };
 
@@ -476,8 +621,6 @@ function gestureAt(
         oy: 0,
         rot: Math.sin(u * Math.PI * 6) * 12 * fade,
       };
-    case 'shrug':
-      return { ox: 0, oy: -Math.abs(Math.sin(u * Math.PI * 2)) * 7, rot: 0 };
     case 'look':
       return { ox: 0, oy: 0, rot: -Math.sin(u * Math.PI) * 18 };
     case 'jump':
@@ -486,6 +629,11 @@ function gestureAt(
       // Lean back (right), then yank left with the pull, then recover.
       const ox = u < 0.3 ? 9 * (u / 0.3) : u < 0.55 ? 9 - 23 * ((u - 0.3) / 0.25) : -14 * fade;
       return { ox, oy: Math.sin(u * Math.PI) * 3, rot: u < 0.3 ? 8 * (u / 0.3) : 0 };
+    }
+    case 'tug': {
+      // Lean in (left), then yank out to the right and up, then recover.
+      const ox = u < 0.3 ? -8 * (u / 0.3) : u < 0.55 ? -8 + 22 * ((u - 0.3) / 0.25) : 14 * fade;
+      return { ox, oy: -Math.sin(u * Math.PI) * 6, rot: u < 0.3 ? -8 * (u / 0.3) : 0 };
     }
     case 'click':
       return { ox: 0, oy: 0, rot: 0, press: u < 0.25 };
@@ -497,6 +645,8 @@ const ARROW_ANGLE = -125;
 
 const IDLE_SCALE = 0.66;
 const MOVE_SECONDS = 1.1;
+/** No cursor moves faster than this (px/s), so section changes don't whip. */
+const MAX_SPEED = 2200;
 
 function isBusy(part: Part, t: number): boolean {
   const pad = 0.25;
@@ -516,6 +666,8 @@ interface CursorState {
   rot: number;
   opacity: number;
   size: number;
+  /** Screensaver bounce, relative to the roam box's top-left. */
+  roam: { x: number; y: number; vx: number; vy: number; key: string };
 }
 
 export function CursorTroupe() {
@@ -543,6 +695,7 @@ export function CursorTroupe() {
 
   useEffect(() => {
     if (!enabled) return;
+    setHtmlFlag('data-troupe-on', true);
     const states: CursorState[] = CAST.map(() => ({
       x: 0,
       y: 0,
@@ -551,6 +704,7 @@ export function CursorTroupe() {
       rot: 0,
       opacity: 0,
       size: IDLE_SCALE,
+      roam: { x: 0, y: 0, vx: 0, vy: 0, key: '' },
     }));
     const played = new Set<SectionId>();
     const fired = new Set<string>();
@@ -625,9 +779,7 @@ export function CursorTroupe() {
         if (b.drive && r) {
           b.drive(r, id === active && !replaying ? 'play' : played.has(id) ? 'done' : 'before', t);
         }
-        if (b.htmlFlag) {
-          document.documentElement.toggleAttribute(b.htmlFlag, id === active && !finished);
-        }
+        if (b.htmlFlag) setHtmlFlag(b.htmlFlag, id === active && !finished);
       }
       if (beat?.events && root && !replaying && !finished) {
         beat.events.forEach((event, index) => {
@@ -639,7 +791,7 @@ export function CursorTroupe() {
         });
       }
 
-      // Masks: a hole the cursors hide behind, or the only window they show in.
+      // Masks: a hole the cursors hide behind, or the only windows they show in.
       const layer = layerRef.current;
       let maskImage = '';
       if (layer && beat && root && !finished) {
@@ -654,11 +806,18 @@ export function CursorTroupe() {
             layer.style.setProperty('-webkit-mask-composite', 'xor');
           }
         } else if (beat.clip && t >= beat.clip.from) {
-          const win = beat.clip.anchor(root)?.getBoundingClientRect();
-          if (win) {
-            maskImage = `radial-gradient(ellipse ${win.width / 2}px ${win.height / 2}px at ${
-              win.left + win.width / 2
-            }px ${win.top + win.height / 2}px, #000 96%, transparent 100%)`;
+          const windows = beat.clip.anchors
+            .map((anchor) => anchor(root)?.getBoundingClientRect())
+            .filter((r): r is DOMRect => Boolean(r));
+          if (windows.length) {
+            maskImage = windows
+              .map(
+                (w) =>
+                  `radial-gradient(ellipse ${w.width / 2}px ${w.height / 2}px at ${
+                    w.left + w.width / 2
+                  }px ${w.top + w.height / 2}px, #000 96%, transparent 100%)`
+              )
+              .join(', ');
             layer.style.maskSize = '100% 100%';
             layer.style.maskPosition = '0 0';
             layer.style.maskComposite = 'add';
@@ -677,6 +836,7 @@ export function CursorTroupe() {
         const part = finished ? undefined : beat?.parts[i];
         let target: { x: number; y: number } | null = null;
         let mark: Mark | null = null;
+        let locked = false;
         let show = false;
         let ox = 0;
         let oy = 0;
@@ -684,9 +844,13 @@ export function CursorTroupe() {
         let press = false;
         let pointRot: number | null = null;
         let pulse = -1;
+        let anchorVisible = false;
         if (part && root) {
           const current = [...part.marks].reverse().find((m) => m.at <= t) ?? part.marks[0];
           mark = current;
+          locked =
+            Boolean(current.lock) ||
+            (current.lockAfter !== undefined && t >= current.at + current.lockAfter);
           const anchorEl = current.anchor(root);
           if (anchorEl) {
             const r = anchorEl.getBoundingClientRect();
@@ -696,6 +860,34 @@ export function CursorTroupe() {
               const angle = current.orbit.phase + current.orbit.speed * (t - current.at);
               x += Math.cos(angle) * current.orbit.r;
               y += Math.sin(angle) * current.orbit.r * (current.orbit.squash ?? 0.5);
+            }
+            if (current.roam) {
+              // Keep the whole arrow inside: it hangs down and right of its tip.
+              const px = 20 * (current.size ?? 1);
+              const w = Math.max(0, r.width - px * 0.75);
+              const h = Math.max(0, r.height - px * 0.95);
+              const ro = state.roam;
+              const key = `${active}:${i}:${current.at}`;
+              if (ro.key !== key) {
+                ro.key = key;
+                ro.x = w / 2;
+                ro.y = h / 2;
+                ro.vx = Math.cos(current.roam.angle) * current.roam.speed;
+                ro.vy = Math.sin(current.roam.angle) * current.roam.speed;
+              }
+              ro.x += ro.vx * dt;
+              ro.y += ro.vy * dt;
+              if (ro.x < 0 || ro.x > w) {
+                ro.vx = -ro.vx;
+                ro.x = Math.min(w, Math.max(0, ro.x));
+              }
+              if (ro.y < 0 || ro.y > h) {
+                ro.vy = -ro.vy;
+                ro.y = Math.min(h, Math.max(0, ro.y));
+              }
+              x = r.left + sx + ro.x;
+              y = r.top + sy + ro.y;
+              locked = true;
             }
             target = { x, y };
             if (current.point) {
@@ -711,12 +903,9 @@ export function CursorTroupe() {
                 pointRot = ((deg - ARROW_ANGLE + 540) % 360) - 180;
               }
             }
-            if (
-              part.pressFromAnchor &&
-              anchorEl instanceof Element &&
-              anchorEl.hasAttribute('data-pressed')
-            ) {
-              press = true;
+            if (anchorEl instanceof HTMLElement) {
+              anchorVisible = Number(anchorEl.style.opacity || '1') > 0.5;
+              if (part.pressFromAnchor && anchorEl.hasAttribute('data-pressed')) press = true;
             }
           }
           show =
@@ -735,17 +924,20 @@ export function CursorTroupe() {
             }
           }
           if (current.tremble) {
-            ox += Math.sin(now / 37 + i * 1.7) * 1.2;
-            oy += Math.cos(now / 29 + i * 2.3) * 0.9;
+            ox += Math.sin(now / 37 + i * 1.7) * 1.1;
+            oy += Math.cos(now / 29 + i * 2.3) * 0.8;
           }
         } else if (member.extra && state.opacity > 0.05 && !finished) {
           // A guest whose scene is over heads off the side it's nearest.
           const leftward = state.x - sx < vw / 2;
           target = { x: state.x + (leftward ? -1 : 1) * 900, y: state.y };
-          const onScreen = state.x > sx - 40 && state.x < sx + vw + 40;
-          show = onScreen;
+          show = state.x > sx - 40 && state.x < sx + vw + 40;
         }
-        const busy = part ? isBusy(part, t) : false;
+        const busy = part
+          ? part.sizeFromAnchor
+            ? anchorVisible || press
+            : isBusy(part, t)
+          : false;
         const wantSize = mark?.size ?? (busy ? 1 : IDLE_SCALE);
 
         if (target) {
@@ -754,14 +946,14 @@ export function CursorTroupe() {
             state.y = target.y;
             state.vx = 0;
             state.vy = 0;
+            if (part.appear !== undefined && member.extra) state.size = 0.2;
           } else {
             // Damped spring, each member a little lazier than the last, plus
             // a sideways pull that bows free moves up and left (a right
             // hand's arc). Locked parts follow stiffly and straight. Small
             // semi-implicit steps: the stiff (9 Hz) follow is unstable at one
-            // step per frame.
-            const stiff = Boolean(mark?.lock);
-            const hz = stiff ? 9 : mark?.orbit ? 5 : member.hz;
+            // step per frame. Speed is capped so section changes don't whip.
+            const hz = locked ? 9 : mark?.orbit ? 5 : member.hz;
             const k = (2 * Math.PI * hz) ** 2;
             const c = 2 * Math.sqrt(k);
             const steps = Math.ceil(dt / (1 / 240));
@@ -772,7 +964,7 @@ export function CursorTroupe() {
               const dist = Math.hypot(dx, dy);
               let ax = k * dx - c * state.vx;
               let ay = k * dy - c * state.vy;
-              if (!stiff && !mark?.orbit && dist > 2) {
+              if (!locked && !mark?.orbit && dist > 2) {
                 let nx = -dy / dist;
                 let ny = dx / dist;
                 if (nx + ny > 0) {
@@ -784,6 +976,11 @@ export function CursorTroupe() {
               }
               state.vx += ax * h;
               state.vy += ay * h;
+              const speed = Math.hypot(state.vx, state.vy);
+              if (!locked && speed > MAX_SPEED) {
+                state.vx *= MAX_SPEED / speed;
+                state.vy *= MAX_SPEED / speed;
+              }
               state.x += state.vx * h;
               state.y += state.vy * h;
             }
@@ -798,7 +995,8 @@ export function CursorTroupe() {
         state.opacity += ((show ? 1 : 0) - state.opacity) * Math.min(1, dt * 8);
         state.size += (wantSize - state.size) * Math.min(1, dt * 6);
         state.rot += ((pointRot ?? 0) - state.rot) * Math.min(1, dt * 7);
-        const fidget = mark?.lock || mark?.orbit ? 0 : Math.sin(now / 760 + i * 2.1) * 2;
+        const still = locked || mark?.orbit;
+        const fidget = still ? 0 : Math.sin(now / 760 + i * 2.1) * 2;
         const px = state.x - sx + ox + fidget;
         const py = state.y - sy + oy + fidget * 0.6;
         el.style.opacity = state.opacity.toFixed(3);
@@ -824,8 +1022,10 @@ export function CursorTroupe() {
         const b = BEATS[id];
         const r = sectionRoot(id);
         if (b.drive && r) b.drive(r, 'done', 0);
-        if (b.htmlFlag) document.documentElement.removeAttribute(b.htmlFlag);
+        if (b.htmlFlag) setHtmlFlag(b.htmlFlag, false);
       }
+      setHtmlFlag('data-troupe-on', false);
+      setHtmlFlag('data-troupe-wave', false);
       if (heroRoot) lightRow(heroRoot, null);
     };
   }, [enabled]);

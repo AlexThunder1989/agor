@@ -2,7 +2,6 @@
 
 import { Pause, Play } from 'lucide-react';
 import { useEffect, useReducer, useRef, useState } from 'react';
-import Aurora from '../Aurora/Aurora';
 import landing from '../LandingPage.module.css';
 import styles from './BoardSelector.module.css';
 import { boardDetails } from './details/board';
@@ -211,14 +210,8 @@ export function BoardSelector() {
       data-reveal
       data-troupe-section="board"
     >
-      <div className={landing.showcaseDivider} aria-hidden="true">
-        <Aurora
-          colorStops={['#2e9a92', '#34e6c4', '#7ad9ff']}
-          amplitude={0.9}
-          blend={1}
-          speed={0.6}
-        />
-      </div>
+      {/* No aurora divider here: the multiplayer band above already
+          carries one, and a second poked a bright strip into it. */}
       <div className={`${landing.sectionHeader} ${styles.head}`}>
         <h2>
           See the work and <span className={landing.headingStrong}>shape</span> it{' '}

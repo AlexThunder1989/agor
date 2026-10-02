@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react';
+import { type CSSProperties, Fragment, type ReactNode } from 'react';
 import styles from './LandingPage.module.css';
 
 export interface HeroCopy {
@@ -17,16 +17,18 @@ export interface HeroCopy {
 // the /not-alone-problem variant); see git history for the retired arms.
 export const HOME_HERO: HeroCopy = {
   headline: 'Your AI coding agents\nare working [alone]',
-  subheadline: 'Bring every session onto one [board] your whole team can see.',
+  subheadline: 'Bring every session onto one [board] your whole ^team^ can see.',
 };
 
 // {word} → bold ink highlight (.headingStrong), [word] → teal/sky gradient
 // highlight (.headingAccent), ~~word~~ → struck-through/dimmed (.headingStrike,
 // for "crossing out" a word being replaced), *word* → italic (.headingItalic,
-// a quieter emphasis than the two highlight colors) — parsed generically
+// a quieter emphasis than the two highlight colors), ^word^ → plain text
+// whose letters can do a wave (.waveWord; the home page's cursor troupe
+// cues it) — parsed generically
 // here since these lines carry more than the usual one-accent-phrase-per-
 // heading convention. \n → author-chosen <br/>.
-const HIGHLIGHT_PATTERN = /\{([^}]+)\}|\[([^\]]+)\]|~~([^~]+)~~|\*([^*]+)\*/g;
+const HIGHLIGHT_PATTERN = /\{([^}]+)\}|\[([^\]]+)\]|~~([^~]+)~~|\*([^*]+)\*|\^([^^]+)\^/g;
 
 function parseHighlights(text: string, keyPrefix: string): ReactNode[] {
   const nodes: ReactNode[] = [];
@@ -38,7 +40,7 @@ function parseHighlights(text: string, keyPrefix: string): ReactNode[] {
     if (index > lastIndex) {
       nodes.push(text.slice(lastIndex, index));
     }
-    const [, strong, accent, strike, italic] = match;
+    const [, strong, accent, strike, italic, wave] = match;
     if (strong !== undefined) {
       nodes.push(
         <span key={`${keyPrefix}-${key++}`} className={styles.headingStrong}>
@@ -61,6 +63,17 @@ function parseHighlights(text: string, keyPrefix: string): ReactNode[] {
       nodes.push(
         <span key={`${keyPrefix}-${key++}`} className={styles.headingItalic}>
           {italic}
+        </span>
+      );
+    } else if (wave !== undefined) {
+      nodes.push(
+        <span key={`${keyPrefix}-${key++}`} className={styles.waveWord} data-wave-word="">
+          {[...wave].map((letter, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: letters of a fixed word
+            <span key={i} style={{ '--i': i } as CSSProperties}>
+              {letter}
+            </span>
+          ))}
         </span>
       );
     }
