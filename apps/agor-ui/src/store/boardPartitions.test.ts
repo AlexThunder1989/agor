@@ -17,14 +17,15 @@ import {
   runHydration,
   touchedSince,
 } from './agorHydration';
-import { applyBoardPartition, type BoardPartitionSnapshot, EMPTY_MAPS } from './agorMaps';
-import { branchRemoved, cardRemoved, sessionPatched } from './agorRealtimeActions';
+import { EMPTY_MAPS } from './agorMaps';
+import { branchRemoved, cardCreated, cardRemoved, sessionPatched } from './agorRealtimeActions';
 import { agorStore } from './agorStore';
 import {
   isPartitionStateCurrent,
   loadBoardPartition,
   makeBoardReadySelector,
   markBoardPartitionLoaded,
+  otherLoadedScopes,
   retryBoardPartition,
 } from './boardPartitions';
 import { captureLoadLifetime } from './loadLifetime';
@@ -34,6 +35,7 @@ import {
   flushRealtimeNow,
   setRealtimeAuthorityScope,
 } from './realtimeBatch';
+import { applyPartitionSnapshot, type BoardPartitionSnapshot } from './scopeMerge';
 
 const AUTHORITY = 'user-a:member:1';
 const BOARD = 'board-1';
@@ -76,7 +78,14 @@ const snapshotOf = (overrides: Partial<BoardPartitionSnapshot> = {}): BoardParti
 
 const never = () => false;
 
-describe('applyBoardPartition (fill-only merge)', () => {
+// Partitions are applied with no other loaded scope unless a test says so.
+const applyBoardPartition = (
+  prev: Parameters<typeof applyPartitionSnapshot>[0],
+  snapshot: BoardPartitionSnapshot,
+  touched: Parameters<typeof applyPartitionSnapshot>[2]
+) => applyPartitionSnapshot(prev, snapshot, touched, []);
+
+describe('applyPartitionSnapshot', () => {
   it('inserts absent rows into every map and the session buckets', () => {
     const next = applyBoardPartition(
       EMPTY_MAPS,
@@ -97,7 +106,7 @@ describe('applyBoardPartition (fill-only merge)', () => {
     expect(next.boardById.get(BOARD)?.objects).toBeDefined();
   });
 
-  it('never overwrites a present row', () => {
+  it('never overwrites a present branch or session (the global sets own them)', () => {
     const live = session('s-1', 'br-1', { title: 'live' });
     const liveBranch = branch('br-1', { name: 'live' });
     const prev = applyBoardPartition(
@@ -496,6 +505,50 @@ describe('loadBoardPartition', () => {
     expect(agorStore.getState().boardPartitions.get(BOARD)?.status).toBe('error');
     retryBoardPartition(BOARD);
     expect(agorStore.getState().boardPartitions.has(BOARD)).toBe(false);
+  });
+
+  it('reloading a board reconciles its annotations: deleted, moved and hidden rows leave', async () => {
+    // Rows left from before a reconnect unloaded the board.
+    agorStore.getState().applyMaps((prev) =>
+      applyBoardPartition(
+        prev,
+        snapshotOf({
+          boardObjects: [boardObject('o-kept', 'br-1'), boardObject('o-hidden', 'br-private')],
+          cards: [card('k-deleted'), card('k-moved'), card('k-kept')],
+        }),
+        never
+      )
+    );
+    const { client, release } = makePartitionClient({
+      boardObjects: [boardObject('o-kept', 'br-1')],
+      cards: [card('k-kept')],
+    });
+    const load = loadBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true });
+    // A card created live during the load stays although the snapshot lacks it.
+    cardCreated(card('k-live'));
+    release();
+    await load;
+    const state = agorStore.getState();
+    expect([...state.boardObjectById.keys()]).toEqual(['o-kept']);
+    expect([...state.cardById.keys()].sort()).toEqual(['k-kept', 'k-live']);
+    expect(ready()).toBe(true);
+  });
+
+  it('claims of other loaded scopes: partitions (not errored, not this one) and the global sets', () => {
+    const lifetime = captureLoadLifetime()!;
+    markBoardPartitionLoaded('board-2', lifetime);
+    markBoardPartitionLoaded(BOARD, lifetime);
+    agorStore.getState().setBoardPartition('board-3', {
+      status: 'error',
+      authorityScope: lifetime.authorityScope,
+      loadEpoch: lifetime.loadEpoch,
+    });
+    agorStore.getState().markGloballyHydrated(['sessions']);
+    const keys = otherLoadedScopes(agorStore.getState(), BOARD).map((scope) => scope.key);
+    expect(keys).toEqual(['board:board-2', 'global']);
+    const global = otherLoadedScopes(agorStore.getState()).at(-1)!;
+    expect(global.claims.sessions).toBeDefined();
+    expect(global.claims.branches).toBeUndefined();
   });
 });
 

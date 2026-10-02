@@ -195,6 +195,8 @@ interface AgorActions {
   resetBoardPartitions: () => void;
   /** Record that a global snapshot of these collections has applied. */
   markGloballyHydrated: (collections: readonly string[]) => void;
+  /** Record that these collections are no longer globally complete (a scoped reconnect). */
+  unmarkGloballyHydrated: (collections: readonly GloballyHydratedCollection[]) => void;
   /** Record that one session's MCP links are loaded. */
   markSessionMcpLoaded: (sessionId: string) => void;
   /** Forget which sessions' MCP links are loaded (reconnect, authority change). */
@@ -368,6 +370,13 @@ export const agorStore = createStore<AgorState>()(
       );
       if (additions.length === 0) return;
       set({ globallyHydrated: new Set([...current, ...additions]) });
+    },
+    unmarkGloballyHydrated: (collections) => {
+      const current = get().globallyHydrated;
+      if (!collections.some((c) => current.has(c))) return;
+      const next = new Set(current);
+      for (const c of collections) next.delete(c);
+      set({ globallyHydrated: next });
     },
     markSessionMcpLoaded: (sessionId) => {
       const current = get().sessionMcpLoaded;

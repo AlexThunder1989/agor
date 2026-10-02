@@ -332,7 +332,10 @@ describe('workspace authority generation ordering', () => {
     rerender({ role: 'member', ready: true, generation: 2 });
     await waitFor(() => expect(seam.usersFindAll).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(agorStore.getState().userById.get('same-user')).toBeDefined());
-    expect(agorStore.getState().boardObjectById.has('member-object')).toBe(true);
+    // On Home the resync reads no board objects: they load with a board's
+    // partition, which the promotion unloaded (and which may read them now).
+    expect(seam.boardObjectsFindAll).not.toHaveBeenCalled();
+    expect(agorStore.getState().boardPartitions.size).toBe(0);
     expect(result.current.error).toBeNull();
   });
 

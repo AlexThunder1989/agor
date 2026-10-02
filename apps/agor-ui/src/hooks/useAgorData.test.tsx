@@ -17,9 +17,11 @@
  * `agorStore.getState().<map>` while load-state reads stay on `result.current`.
  */
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { getRevision } from '../store/agorHydration';
 import { agorStore } from '../store/agorStore';
+import { markBoardPartitionLoaded } from '../store/boardPartitions';
+import { captureLoadLifetime } from '../store/loadLifetime';
 // Session `patched`/`updated` writes are coalesced to one flush per frame (see
 // realtimeBatch); flush synchronously in tests that assert the post-patch store.
 import { flushRealtimeNow } from '../store/realtimeBatch';
@@ -688,10 +690,15 @@ describe('useAgorData — socket-event bailouts', () => {
   });
 
   it('keeps a missed hard delete removed after reconnect refetch', async () => {
+    // On the board, which the resync reconciles (other boards are unloaded).
+    window.history.pushState({}, '', '/b/displayed/');
+    const board = { board_id: 'board-1', slug: 'displayed', name: 'Displayed' };
     const session = makeSession({ session_id: 's-1', branch_id: 'b-1' });
     const branch = makeBranch({ branch_id: 'b-1' });
     const boardObject = makeBoardObject({ object_id: 'bo-1', branch_id: 'b-1' });
     const seed: Record<string, unknown[]> = {
+      boards: [board],
+      'boards:get': board as never,
       'sessions:find': [session],
       'sessions:findAll': [session],
       'branches:findAll': [branch],
@@ -699,6 +706,7 @@ describe('useAgorData — socket-event bailouts', () => {
     };
     const { client, emitIo } = makeMockClient(seed);
     const { result } = renderHook(() => useAgorData(client));
+    onTestFinished(() => window.history.pushState({}, '', '/'));
     await waitForInitialLoad(result);
 
     expect(agorStore.getState().branchById.has('b-1')).toBe(true);
@@ -1290,7 +1298,7 @@ describe('useAgorData — lean boards list + objects hydration', () => {
     expect(fetchCount('branches', 'get')).toBe(0);
   });
 
-  it('does not repeat the displayed-board point read during reconnect resync', async () => {
+  it('reconnect resync reads the displayed board once and every board list lean', async () => {
     window.history.pushState({}, '', '/b/displayed/');
     const board = {
       board_id: 'board-D',
@@ -1302,7 +1310,7 @@ describe('useAgorData — lean boards list + objects hydration', () => {
       boards: [board],
       'boards:get': board as never,
     };
-    const { client, emitIo, fetchCount } = makeMockClient(seed);
+    const { client, emitIo, fetchCount, fetchArguments } = makeMockClient(seed);
     const { result } = renderHook(() => useAgorData(client));
     try {
       await waitForInitialLoad(result);
@@ -1313,10 +1321,14 @@ describe('useAgorData — lean boards list + objects hydration', () => {
       await waitFor(() => expect(fetchCount('boards', 'findAll')).toBeGreaterThanOrEqual(3));
       await flush();
 
-      // Silent reconnect uses the full boards.findAll snapshot. It deliberately
-      // skips the cold-load targeted get, so resync and idle do not poll boards.
-      expect(fetchCount('boards', 'get')).toBe(1);
+      // The resync reads the lean list plus ONE point read of the displayed
+      // board (never every board's full record), so its zones never flash off.
+      // Other boards' records load with their partitions.
+      expect(fetchCount('boards', 'get')).toBe(2);
       expect(fetchCount('branches', 'get')).toBe(0);
+      const resyncList = fetchArguments('boards', 'findAll').at(-1) as { query?: unknown };
+      expect(resyncList.query).toMatchObject({ lean: true });
+      expect(agorStore.getState().boardById.get('board-D')?.objects).toBeDefined();
     } finally {
       window.history.pushState({}, '', '/');
     }
@@ -2020,5 +2032,126 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
       gate.resolve();
       window.history.pushState({}, '', '/');
     }
+  });
+});
+
+describe('useAgorData — reconnect reconciles the displayed partition', () => {
+  const boardA = { board_id: 'board-A', slug: 'displayed', name: 'Displayed' };
+  const fullA = { ...boardA, objects: { 'zone-1': { type: 'zone', x: 0, y: 0 } } };
+  const card = (id: string, title = id) => ({ card_id: id, board_id: 'board-A', title });
+
+  function boardRoute() {
+    window.history.pushState({}, '', '/b/displayed/');
+    onTestFinished(() => window.history.pushState({}, '', '/'));
+  }
+
+  it('drops deletions, applies moves and archives missed while disconnected, and unloads other boards', async () => {
+    boardRoute();
+    const seed: Record<string, unknown[]> = {
+      boards: [boardA],
+      'boards:get': fullA as never,
+      'branches:findAll': [
+        makeBranch({ branch_id: 'b-1', board_id: 'board-A' }),
+        makeBranch({ branch_id: 'b-arch', board_id: 'board-A' }),
+      ],
+      'board-objects:findAll': [
+        makeBoardObject({ object_id: 'bo-1', board_id: 'board-A', branch_id: 'b-1' }),
+        makeBoardObject({ object_id: 'bo-arch', board_id: 'board-A', branch_id: 'b-arch' }),
+        makeBoardObject({ object_id: 'bo-card', board_id: 'board-A', branch_id: undefined }),
+        makeBoardObject({ object_id: 'bo-deleted', board_id: 'board-A', branch_id: undefined }),
+      ],
+      cards: [card('k-1'), card('k-deleted')],
+    };
+    const { client, emitIo, fetchArguments } = makeMockClient(seed);
+    const { result } = renderHook(() => useAgorData(client));
+    await waitForInitialLoad(result);
+    await flush();
+    // Another board was loaded before the disconnect.
+    markBoardPartitionLoaded('board-B', captureLoadLifetime()!);
+    expect(agorStore.getState().cardById.has('k-deleted')).toBe(true);
+
+    // While disconnected: a card and a board object deleted, a placement
+    // moved, a card edited, a branch archived (its placement stays, as on the
+    // server).
+    seed['branches:findAll'] = [makeBranch({ branch_id: 'b-1', board_id: 'board-A' })];
+    seed['board-objects:findAll'] = [
+      makeBoardObject({ object_id: 'bo-1', board_id: 'board-A', branch_id: 'b-1' }),
+      makeBoardObject({ object_id: 'bo-arch', board_id: 'board-A', branch_id: 'b-arch' }),
+      makeBoardObject({
+        object_id: 'bo-card',
+        board_id: 'board-A',
+        branch_id: undefined,
+        position: { x: 300, y: 400 },
+      }),
+    ];
+    seed.cards = [card('k-1', 'edited')];
+    act(() => emitIo('connect'));
+
+    await waitFor(() => expect(agorStore.getState().cardById.has('k-deleted')).toBe(false));
+    const state = agorStore.getState();
+    expect([...state.cardById.keys()]).toEqual(['k-1']);
+    expect(state.cardById.get('k-1')?.title).toBe('edited');
+    expect([...state.boardObjectById.keys()].sort()).toEqual(['bo-1', 'bo-arch', 'bo-card']);
+    expect(state.boardObjectById.get('bo-card')?.position).toEqual({ x: 300, y: 400 });
+    expect(state.branchById.has('b-arch')).toBe(false);
+    expect(state.boardById.get('board-A')?.objects).toBeDefined();
+    // The displayed board is complete again; every other board is unloaded.
+    expect(state.boardPartitions.get('board-A')?.status).toBe('loaded');
+    expect(state.boardPartitions.has('board-B')).toBe(false);
+    expect([...state.globallyHydrated].sort()).toEqual(['branches', 'sessions']);
+    // Annotations were read for the displayed board only.
+    const resyncReads = [
+      fetchArguments('board-objects', 'findAll').at(-1),
+      fetchArguments('cards', 'findAll').at(-1),
+    ] as Array<{ query?: unknown }>;
+    for (const read of resyncReads) expect(read.query).toMatchObject({ board_id: 'board-A' });
+  });
+
+  it('keeps rows written live while the resync was in flight', async () => {
+    boardRoute();
+    const seed: Record<string, unknown[]> = {
+      boards: [boardA],
+      'boards:get': fullA as never,
+      cards: [card('k-1', 'server')],
+    };
+    const { client, emit, emitIo, onFetch } = makeMockClient(seed);
+    const { result } = renderHook(() => useAgorData(client));
+    await waitForInitialLoad(result);
+    await flush();
+
+    let reconnecting = false;
+    onFetch('cards', 'findAll', () => {
+      if (!reconnecting) return undefined;
+      // Realtime during the resync's read: a card created and one patched.
+      emit('cards', 'created', card('k-live'));
+      emit('cards', 'patched', card('k-1', 'live'));
+      return undefined;
+    });
+    reconnecting = true;
+    act(() => emitIo('connect'));
+    await waitFor(() => expect(agorStore.getState().cardById.has('k-live')).toBe(true));
+    await flush();
+    expect(agorStore.getState().cardById.get('k-1')?.title).toBe('live');
+    expect(agorStore.getState().cardById.has('k-live')).toBe(true);
+  });
+
+  it('on Home reads no board objects or cards and unloads every board', async () => {
+    const { client, emitIo, fetchCount } = makeMockClient({});
+    const { result } = renderHook(() => useAgorData(client));
+    await waitForInitialLoad(result);
+    await flush();
+    markBoardPartitionLoaded('board-B', captureLoadLifetime()!);
+    const before = {
+      objects: fetchCount('board-objects', 'findAll'),
+      cards: fetchCount('cards', 'findAll'),
+      sessions: fetchCount('sessions', 'findAll'),
+    };
+
+    act(() => emitIo('connect'));
+    await waitFor(() => expect(fetchCount('sessions', 'findAll')).toBeGreaterThan(before.sessions));
+    await flush();
+    expect(fetchCount('board-objects', 'findAll')).toBe(before.objects);
+    expect(fetchCount('cards', 'findAll')).toBe(before.cards);
+    expect(agorStore.getState().boardPartitions.size).toBe(0);
   });
 });

@@ -660,18 +660,6 @@ export function findSessionInBranchBuckets(
   return undefined;
 }
 
-/** One board's partition as fetched by `loadBoardPartition`. */
-export interface BoardPartitionSnapshot {
-  boardId: string;
-  branches: readonly Branch[];
-  sessions: readonly Session[];
-  /** `null` when the caller may not read board objects (global viewers). */
-  boardObjects: readonly BoardEntityObject[] | null;
-  cards: readonly CardWithType[];
-  /** Full board record (objects / custom_css); `null` keeps the lean row. */
-  board: Board | null;
-}
-
 /** Collections the fill fence consults. */
 export type PartitionCollection = 'sessions' | 'branches' | 'boards' | 'boardObjects' | 'cards';
 
@@ -700,7 +688,8 @@ export function keepLiveWrites<T>(
 
 /**
  * Fill-only merge of branch and session rows (invariant I2: a load never
- * overwrites a live row). Shared by board partitions and the user-scope reads.
+ * overwrites a live row). The branch and session half of `fillScope`
+ * (`scopeMerge.ts`); the user-scope reads use it directly.
  *
  * - A row is inserted only when its id is ABSENT from the store and no live
  *   event touched it since the load started. Present rows are kept current by
@@ -765,50 +754,11 @@ export function applyEntityFill(
 /** Above this many new sessions, a fill rebuilds the session maps once. */
 const INCREMENTAL_SESSION_FILL_LIMIT = 64;
 
-function isOnRemovedBranch(
+/** Whether `branchId` was touched during the load and is now absent (archived or removed). */
+export function isOnRemovedBranch(
   maps: DataMaps,
   branchId: string | null | undefined,
   touched: PartitionTouched
 ): boolean {
   return !!branchId && !maps.branchById.has(branchId) && touched('branches', branchId);
-}
-
-/**
- * Fill-only merge of a board partition snapshot: branches and sessions through
- * `applyEntityFill`, then board objects and cards under the same rules (rows on
- * a touched-and-absent branch are skipped). The full board record replaces the
- * lean one unless `boards:<id>` was touched. Comments are global and loaded
- * before first paint, so they are not part of a partition.
- */
-export function applyBoardPartition(
-  prev: DataMaps,
-  snapshot: BoardPartitionSnapshot,
-  touched: PartitionTouched
-): DataMaps {
-  let maps = applyEntityFill(prev, snapshot, touched);
-
-  for (const boardObject of snapshot.boardObjects ?? []) {
-    if (maps.boardObjectById.has(boardObject.object_id)) continue;
-    if (
-      touched('boardObjects', boardObject.object_id) ||
-      isOnRemovedBranch(maps, boardObject.branch_id, touched)
-    )
-      continue;
-    maps = upsertBoardObjectInMaps(maps, boardObject, 'create');
-  }
-
-  let cardById = maps.cardById;
-  for (const card of snapshot.cards) {
-    if (cardById.has(card.card_id) || touched('cards', card.card_id)) continue;
-    if (cardById === maps.cardById) cardById = new Map(cardById);
-    cardById.set(card.card_id, card);
-  }
-  if (cardById !== maps.cardById) maps = { ...maps, cardById };
-
-  if (snapshot.board && !touched('boards', snapshot.board.board_id)) {
-    const boardById = replaceIfChanged(maps.boardById, snapshot.board.board_id, snapshot.board);
-    if (boardById !== maps.boardById) maps = { ...maps, boardById };
-  }
-
-  return maps;
 }

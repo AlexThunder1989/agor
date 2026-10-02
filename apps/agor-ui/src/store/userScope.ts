@@ -44,7 +44,7 @@ import {
   WholesaleReplacementError,
   wholesaleReplacedSince,
 } from './agorHydration';
-import { applyEntityFill } from './agorMaps';
+import { applyEntityFill, type DataMaps } from './agorMaps';
 import { type AgorState, agorStore } from './agorStore';
 import { isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
 import { sessionListQuery } from './sessionListQuery';
@@ -104,7 +104,10 @@ const rowsOf = <T>(result: unknown): T[] =>
  * isn't archived, where someone else spoke and the caller did not speak last.
  * A superset of the threads `makeCommentsForYouSelector` can show.
  */
-export function referencedBranchIds(s: AgorState, userId: string): Set<string> {
+export function referencedBranchIds(
+  s: Pick<DataMaps, 'sessionById' | 'commentById' | 'boardById'>,
+  userId: string
+): Set<string> {
   const ids = new Set<string>();
   for (const session of s.sessionById.values()) {
     if (!session.archived && session.created_by === userId && session.branch_id) {
@@ -166,6 +169,14 @@ interface ScopeRun {
 let currentRun: ScopeRun | null = null;
 
 const isCurrent = (run: ScopeRun) => currentRun === run && isLoadLifetimeCurrent(run.lifetime);
+
+/**
+ * The user whose scope is loading or loaded under the current lifetime, or
+ * null. Its rows are claimed against other scopes' replaces (`scopeMerge`).
+ */
+export function getUserScopeUserId(): string | null {
+  return currentRun && isCurrent(currentRun) ? currentRun.userId : null;
+}
 
 /**
  * Read rows and fill-merge them; null when the run went stale. Read errors

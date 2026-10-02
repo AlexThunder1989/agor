@@ -10,9 +10,14 @@
  * `makeBoardReadySelector(boardId)` instead.
  *
  * Invariant I2 — a load never overwrites a live row. The snapshot is merged with
- * `applyBoardPartition`: fill-only, fenced per id by the touched stamps that
- * every realtime write records (`agorHydration.touchedSince`). The snapshot is
- * never discarded because of churn, so a partition load cannot starve the way a
+ * `applyPartitionSnapshot`, fenced per id by the touched stamps that every
+ * realtime write records (`agorHydration.touchedSince`): a row written live
+ * during the load keeps its live value. Branches and sessions are filled
+ * (the global sets own them until Step 3); board objects, cards and the full
+ * board record are reconciled (`replaceScope`), so loading a board again
+ * after it was unloaded (a reconnect unloads every board but the displayed
+ * one) drops rows deleted, moved or hidden meanwhile. The snapshot is never
+ * discarded because of churn, so a partition load cannot starve the way a
  * skip-apply-on-race hydration can.
  *
  * Loads are deduplicated per (authority, board), and a load whose authority
@@ -30,7 +35,6 @@ import {
   WholesaleReplacementError,
   wholesaleReplacedSince,
 } from './agorHydration';
-import { applyBoardPartition, type BoardPartitionSnapshot } from './agorMaps';
 import {
   type AgorState,
   agorStore,
@@ -39,7 +43,16 @@ import {
 } from './agorStore';
 import { captureLoadLifetime, isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
 import { getRealtimeAuthorityScope } from './realtimeBatch';
+import {
+  applyPartitionSnapshot,
+  type BoardPartitionSnapshot,
+  boardPartitionScope,
+  globalSetsClaims,
+  type LoadScope,
+  userScopeClaims,
+} from './scopeMerge';
 import { sessionListQuery } from './sessionListQuery';
+import { getUserScopeUserId, referencedBranchIds } from './userScope';
 
 /**
  * Whether `boardId` is complete: its partition loaded, or (Steps 1–2) every
@@ -66,6 +79,32 @@ export function isPartitionStateCurrent(state: BoardPartitionState | undefined):
     state.authorityScope === getRealtimeAuthorityScope() &&
     state.loadEpoch === getHydrationCancellationEpoch()
   );
+}
+
+/**
+ * Every scope that is loading or loaded under the current lifetime, except
+ * `exceptBoardId`'s partition: the claims a replace must respect (a row one of
+ * them still claims is never removed). Overlapping scopes are normal: my
+ * session on a loaded board belongs to the user scope and to that partition.
+ */
+export function otherLoadedScopes(state: AgorState, exceptBoardId?: string): LoadScope[] {
+  const scopes: LoadScope[] = [];
+  for (const [boardId, partition] of state.boardPartitions) {
+    if (boardId === exceptBoardId || partition.status === 'error') continue;
+    if (isPartitionStateCurrent(partition)) scopes.push(boardPartitionScope(boardId));
+  }
+  const userId = getUserScopeUserId();
+  if (userId) {
+    let referenced: Set<string> | null = null;
+    scopes.push(
+      userScopeClaims(userId, () => {
+        referenced ??= referencedBranchIds(state, userId);
+        return referenced;
+      })
+    );
+  }
+  scopes.push(globalSetsClaims(state.globallyHydrated));
+  return scopes;
 }
 
 export function makeBoardPartitionSelector(
@@ -143,7 +182,8 @@ async function fetchBoardPartition(
 }
 
 /**
- * Load one board's partition and fill-merge it into the store. Deduplicated per
+ * Load one board's partition and merge it into the store
+ * (`applyPartitionSnapshot`). Deduplicated per
  * (authority, lifetime, board); resolves once applied, dropped, or failed.
  *
  * The `loading` entry is owned by this load (`loadId`). A load that is
@@ -187,7 +227,8 @@ export function loadBoardPartition(
         }
         const touched = (collection: HydratedCollection, id: string) =>
           touchedSince(collection, id, fence.startRevisions[collection]);
-        store().applyMaps((prev) => applyBoardPartition(prev, snapshot, touched));
+        const others = otherLoadedScopes(store(), boardId);
+        store().applyMaps((prev) => applyPartitionSnapshot(prev, snapshot, touched, others));
         // `applyMaps` notifies subscribers synchronously; one may have ended
         // this lifetime (logout, remount) or started a load that owns the entry.
         if (!isCurrent()) return;
