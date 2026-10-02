@@ -48,6 +48,20 @@ const FEATURES: Feature[] = [
   },
 ];
 
+/** Whether the home page's cursor troupe is running (html[data-troupe-on]). */
+function useTroupeOn(): boolean {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    const root = document.documentElement;
+    const sync = () => setOn(root.hasAttribute('data-troupe-on'));
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(root, { attributes: true, attributeFilter: ['data-troupe-on'] });
+    return () => observer.disconnect();
+  }, []);
+  return on;
+}
+
 function mediaFor(anchor: string): DetailMedia | undefined {
   return boardDetails.find((detail) => detail.id === anchor)?.media;
 }
@@ -76,6 +90,7 @@ export function BoardSelector() {
   const [progress, setProgress] = useState(0);
   const sectionRef = useRef<HTMLElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const troupeOn = useTroupeOn();
 
   useEffect(() => {
     const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -160,7 +175,7 @@ export function BoardSelector() {
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
-  }, [running, state.active, state.held, stacked]);
+  }, [running, state.active, state.held, stacked, troupeOn]);
 
   const barFor = (index: number) => {
     if (index !== state.active) return 0;
@@ -168,12 +183,19 @@ export function BoardSelector() {
     return progress;
   };
 
+  // While the troupe is on, play the cursor-free cuts (it supplies the cursors).
+  const cut = (src: string) => (troupeOn ? src.replace(/(-540)?\.mp4$/, '-clean$1.mp4') : src);
+
   const panel = (className: string) => (
     <div className={`${styles.panel} ${className}`} data-troupe="board-panel">
       {media?.type === 'video' ? (
         <video
-          key={media.src}
+          // Remount when switching to the cursor-free cut, so it reloads.
+          key={`${media.src}${troupeOn ? ':clean' : ''}`}
           ref={videoRef}
+          // The home page's cursor troupe performs this video's cursors from
+          // its recorded track (demo-videos/capture.mjs --clean).
+          data-troupe-video={troupeOn ? media.src.replace(/\.mp4$/, '-cursors.json') : undefined}
           className={styles.media}
           muted
           playsInline
@@ -182,9 +204,9 @@ export function BoardSelector() {
           aria-label={media.alt}
         >
           {media.srcSmall && (
-            <source src={media.srcSmall} type="video/mp4" media="(max-width: 720px)" />
+            <source src={cut(media.srcSmall)} type="video/mp4" media="(max-width: 720px)" />
           )}
-          <source src={media.src} type="video/mp4" />
+          <source src={cut(media.src)} type="video/mp4" />
         </video>
       ) : media?.type === 'image' ? (
         // biome-ignore lint/performance/noImgElement: Static product screenshot (static export, unoptimized images)

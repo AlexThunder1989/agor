@@ -76,6 +76,8 @@ interface Mark {
   size?: number;
   /** A small nervous jitter. */
   tremble?: boolean;
+  /** Play role k of the cursors recorded in the panel video's track. */
+  perform?: number;
 }
 
 interface Part {
@@ -241,6 +243,48 @@ const O_COUNTERS = [
 const demoCursor = (i: number) => q(`[data-troupe-cursor="${i}"]`);
 // Board
 const boardPanel = q('[data-troupe="board-panel"]');
+
+interface CursorTrack {
+  fps: number;
+  frameCount: number;
+  /** Per cursor id: one [x, y, ripple] (0..1 of the video frame) or null per frame. */
+  cursors: Record<string, { color: string; frames: Array<[number, number, number] | null> }>;
+  /** Roles: cursor ids in order of first appearance. */
+  roles?: string[];
+}
+const tracks = new Map<string, CursorTrack | 'loading' | 'missing'>();
+function loadTrack(url: string): CursorTrack | null {
+  const cached = tracks.get(url);
+  if (cached === undefined) {
+    tracks.set(url, 'loading');
+    fetch(url)
+      .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
+      .then((track: CursorTrack) => {
+        const first = (id: string) => track.cursors[id].frames.findIndex(Boolean);
+        track.roles = Object.keys(track.cursors).sort(
+          (a, b) => first(a) - first(b) || (a < b ? -1 : 1)
+        );
+        tracks.set(url, track);
+      })
+      .catch(() => tracks.set(url, 'missing'));
+    return null;
+  }
+  return typeof cached === 'string' ? null : cached;
+}
+/** Where role k's cursor is right now in the panel's video (viewport px). */
+function performAt(root: HTMLElement, k: number): { x: number; y: number; ripple: number } | null {
+  const video = root.querySelector<HTMLVideoElement>('video[data-troupe-video]');
+  const url = video?.dataset.troupeVideo;
+  if (!video || !url) return null;
+  const track = loadTrack(url);
+  const id = track?.roles?.[k];
+  if (!track || !id) return null;
+  const index = Math.min(track.frameCount - 1, Math.floor(video.currentTime * track.fps));
+  const frame = track.cursors[id].frames[index];
+  if (!frame) return null;
+  const r = video.getBoundingClientRect();
+  return { x: r.left + frame[0] * r.width, y: r.top + frame[1] * r.height, ripple: frame[2] };
+}
 // Teammates
 const RING_NODE = 'a[class*="ringNode"]';
 const ringNode = (i: number) => nth(RING_NODE, i);
@@ -455,15 +499,28 @@ const BEATS: Record<SectionId, Beat> = {
     delay: 0.2,
     active: (r, vh) => r.top < vh * 0.65 && r.bottom > vh * 0.35,
     drive: driveBoard,
-    parts: [-0.28, 0, 0.28].map((fy, i) => ({
-      marks: [
-        { at: 0, anchor: boardPanel, fx: -0.5, fy, dx: 16 },
-        { at: 1.1, anchor: boardPanel, fx: -0.5, fy, dx: 16, lock: true },
-        { at: 4.8, anchor: boardPanel, fx: -0.42 + i * 0.06, fy: 0.5, dy: 26 },
-      ],
-      cues: BOARD_PULLS.map(([a]) => ({ at: a - 0.3, gesture: 'heave' as const })),
-      busy: [[1.0, 4.7]],
-    })),
+    // Then they *are* the video's cursors: the clean cut plays and each takes
+    // a role from its recorded track (a fourth friend joins for the boards
+    // clip). Roles the current clip doesn't have watch from under the panel.
+    parts: [
+      ...[-0.28, 0, 0.28].map(
+        (fy, i): Part => ({
+          marks: [
+            { at: 0, anchor: boardPanel, fx: -0.5, fy, dx: 16 },
+            { at: 1.1, anchor: boardPanel, fx: -0.5, fy, dx: 16, lock: true },
+            { at: 4.7, anchor: boardPanel, perform: i },
+          ],
+          cues: BOARD_PULLS.map(([a]) => ({ at: a - 0.3, gesture: 'heave' as const })),
+          busy: [[1.0, 4.7]],
+        })
+      ),
+      {
+        marks: [
+          { at: 0, anchor: offstage(boardPanel, 2) },
+          { at: 4.3, anchor: boardPanel, perform: 3 },
+        ],
+      },
+    ],
   },
   // Ari laps the ring, lighting each node; then all three point at Shared
   // ownership: the team owns it.
@@ -892,6 +949,7 @@ export function CursorTroupe() {
         let pointRot: number | null = null;
         let pulse = -1;
         let anchorVisible = false;
+        let performing = false;
         if (part && root) {
           const current = [...part.marks].reverse().find((m) => m.at <= t) ?? part.marks[0];
           mark = current;
@@ -937,6 +995,32 @@ export function CursorTroupe() {
               locked = true;
             }
             target = { x, y };
+            if (current.perform !== undefined) {
+              const role = performAt(root, current.perform);
+              if (role) {
+                target = { x: role.x + sx, y: role.y + sy };
+                locked = true;
+                performing = true;
+                if (role.ripple > 0 && role.ripple <= 1) {
+                  pulse = role.ripple;
+                  press = role.ripple < 0.25;
+                }
+              } else {
+                // Not in this clip: watch from under the panel, pointing in.
+                target = {
+                  x: r.left + sx + r.width * (0.3 + 0.13 * current.perform),
+                  y: r.bottom + sy + 28,
+                };
+                const deg =
+                  (Math.atan2(
+                    r.top + r.height / 2 + sy - state.y,
+                    r.left + r.width / 2 + sx - state.x
+                  ) *
+                    180) /
+                  Math.PI;
+                pointRot = ((deg - ARROW_ANGLE + 540) % 360) - 180;
+              }
+            }
             if (current.point) {
               const p = current.point(root)?.getBoundingClientRect();
               if (p) {
@@ -980,11 +1064,13 @@ export function CursorTroupe() {
           target = { x: state.x + (leftward ? -1 : 1) * 900, y: state.y };
           show = state.x > sx - 40 && state.x < sx + vw + 40;
         }
-        const busy = part
-          ? part.sizeFromAnchor
-            ? anchorVisible || press
-            : isBusy(part, t)
-          : false;
+        const busy = performing
+          ? true
+          : part
+            ? part.sizeFromAnchor
+              ? anchorVisible || press
+              : isBusy(part, t)
+            : false;
         const wantSize = mark?.size ?? (busy ? 1 : IDLE_SCALE);
 
         if (target) {
