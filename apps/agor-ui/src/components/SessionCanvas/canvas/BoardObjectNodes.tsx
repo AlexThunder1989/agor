@@ -135,6 +135,9 @@ const ZoneNodeComponent = ({ data, selected }: { data: ZoneNodeData; selected?: 
   // never a fresh capture when the delayed write is finally confirmed.
   const [editTicket, setEditTicket] = useState<BoardWriteTicket | null>(null);
   const captureTicket = () => data.beginBoardWrite?.() ?? null;
+  // An open dialog keeps its ticket: opening either dialog again while one
+  // is open is ignored (as an open label editor ignores re-open clicks).
+  const zoneDialogOpen = configModalOpen || deleteModalOpen;
   const beginEdit = () => {
     const ticket = captureTicket();
     setEditTicket(ticket);
@@ -547,6 +550,7 @@ const ZoneNodeComponent = ({ data, selected }: { data: ZoneNodeData; selected?: 
               icon={<SettingOutlined />}
               disabled={mutationDisabled}
               onClick={() => {
+                if (zoneDialogOpen) return;
                 beginEdit();
                 setConfigModalOpen(true);
               }}
@@ -599,6 +603,7 @@ const ZoneNodeComponent = ({ data, selected }: { data: ZoneNodeData; selected?: 
                   domEvent.stopPropagation();
                   if (mutationDisabled) return;
                   if (key === 'delete') {
+                    if (zoneDialogOpen) return;
                     beginEdit();
                     setDeleteModalOpen(true);
                     return;

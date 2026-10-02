@@ -216,6 +216,27 @@ describe('ZoneNode settings modal', () => {
     );
   });
 
+  it('an open zone dialog ignores a second open click and keeps its open-time ticket', async () => {
+    const opened = { boardId: 'board-1', partition: null, authGeneration: 1 };
+    const later = { boardId: 'board-1', partition: null, authGeneration: 2 };
+    const beginBoardWrite = vi.fn().mockReturnValueOnce(opened).mockReturnValue(later);
+    const onUpdate = vi.fn();
+    renderZone(vi.fn(), CONNECTED, { onUpdate, beginBoardWrite });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Zone settings' }));
+    // A second click (double click) and the delete dialog's opener, while the
+    // settings dialog is open.
+    fireEvent.click(screen.getByRole('button', { name: 'Zone settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'More zone actions' }));
+    fireEvent.click(await screen.findByText('Delete zone'));
+    expect(beginBoardWrite).toHaveBeenCalledTimes(1);
+    const modalProps = zoneConfigModalRenderSpy.mock.calls.at(-1)?.[0] as {
+      onUpdate: (objectId: string, objectData: unknown) => unknown;
+    };
+    modalProps.onUpdate('zone-1', { type: 'zone', label: 'Renamed' });
+    expect(onUpdate).toHaveBeenLastCalledWith('zone-1', { type: 'zone', label: 'Renamed' }, opened);
+  });
+
   it('mounts the settings modal only when the user opens it', () => {
     renderZone(vi.fn(), CONNECTED);
 

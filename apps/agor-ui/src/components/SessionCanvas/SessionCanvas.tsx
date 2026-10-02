@@ -631,6 +631,9 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
       ticket: BoardWriteTicket;
     } | null>(null);
     const handleCancelBranchTrigger = useCallback(() => setBranchTriggerModal(null), []);
+    // The picker action being run: a second Execute (a double click) before
+    // the first finishes runs nothing. Set synchronously, before any await.
+    const runningBranchTriggerRef = useRef<typeof branchTriggerModal>(null);
     const handleExecuteBranchTrigger = useStableCallback(
       async ({
         sessionId,
@@ -648,6 +651,8 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
           setBranchTriggerModal(null);
           return;
         }
+        if (runningBranchTriggerRef.current === triggerModal) return;
+        runningBranchTriggerRef.current = triggerModal;
 
         // Rechecked before every dispatch, including after each await.
         const stale = () => {
@@ -722,6 +727,9 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
             `Failed to ${action} session: ${error instanceof Error ? error.message : String(error)}`
           );
         } finally {
+          if (runningBranchTriggerRef.current === triggerModal) {
+            runningBranchTriggerRef.current = null;
+          }
           setBranchTriggerModal(null);
         }
       }

@@ -52,9 +52,11 @@ beforeEach(() => {
   showWarning.mockClear();
 });
 
-afterEach(() => {
-  // Confirmations are static dialogs outside the render container.
+afterEach(async () => {
+  // Confirmations are static dialogs outside the render container; wait out
+  // their close so none is counted by the next test.
   Modal.destroyAll();
+  await waitFor(() => expect(document.querySelectorAll('.ant-modal-confirm')).toHaveLength(0));
 });
 
 const board: Board = { board_id: 'board-1', name: 'Team Board' } as Board;
@@ -291,5 +293,82 @@ describe('CardModal permission gating', () => {
     });
     expect(screen.getByText('Archive').closest('button')).toBeDisabled();
     expect(screen.getByText('Save').closest('button')).toBeDisabled();
+  });
+
+  const openConfirmations = () => document.querySelectorAll('.ant-modal-confirm').length;
+
+  it.each([
+    ['Archive', 'Archive', false],
+    ['Delete', 'Delete', false],
+    ['Archive', 'Delete', false],
+    ['Archive', 'Archive', true],
+    ['Delete', 'Archive', true],
+  ])(
+    'a second click (%s, then %s; canvas: %s) opens no second confirmation, and closing ends it',
+    async (first, second, requireLoadedBoard) => {
+      if (requireLoadedBoard) loadBoard();
+      const { client, patch, remove, effectiveAccessFind } = makeClient([
+        'board.view',
+        'board.edit',
+      ]);
+      const ui = (open: boolean) =>
+        withApp(
+          <CardModal
+            open={open}
+            card={card}
+            board={board}
+            client={client}
+            onClose={vi.fn()}
+            requireLoadedBoard={requireLoadedBoard}
+          />
+        );
+      const view = render(ui(true));
+      await waitFor(() => expect(effectiveAccessFind).toHaveBeenCalled());
+      await waitFor(() => expect(screen.getByText(first).closest('button')).not.toBeDisabled());
+      fireEvent.click(screen.getByText(first).closest('button') as HTMLButtonElement);
+      fireEvent.click(screen.getByText(second).closest('button') as HTMLButtonElement);
+      await waitFor(() => expect(openConfirmations()).toBeGreaterThan(0));
+      expect(openConfirmations()).toBe(1);
+      const okButtons = Array.from(
+        document.querySelectorAll<HTMLButtonElement>(
+          '.ant-modal-confirm-btns .ant-btn-primary, .ant-modal-confirm-btns .ant-btn-dangerous'
+        )
+      );
+      // CardModal stays mounted when closed (Settings → Cards, the canvas).
+      view.rerender(ui(false));
+      await waitFor(() => expect(openConfirmations()).toBe(0));
+      for (const ok of okButtons) {
+        await act(async () => {
+          fireEvent.click(ok);
+        });
+      }
+      expect(patch).not.toHaveBeenCalled();
+      expect(remove).not.toHaveBeenCalled();
+    }
+  );
+
+  it('a confirmation closed without confirming lets the next click open one', async () => {
+    const { client, patch, effectiveAccessFind } = makeClient(['board.view', 'board.edit']);
+    renderWithApp(<CardModal open card={card} board={board} client={client} onClose={vi.fn()} />);
+    await waitFor(() => expect(effectiveAccessFind).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByText('Archive').closest('button')).not.toBeDisabled());
+    fireEvent.click(screen.getByText('Archive').closest('button') as HTMLButtonElement);
+    await waitFor(() => expect(openConfirmations()).toBe(1));
+    const cancel = document.querySelector<HTMLButtonElement>(
+      '.ant-modal-confirm-btns button:not(.ant-btn-primary)'
+    );
+    await act(async () => {
+      fireEvent.click(cancel as HTMLButtonElement);
+    });
+    await waitFor(() => expect(openConfirmations()).toBe(0));
+    fireEvent.click(screen.getByText('Archive').closest('button') as HTMLButtonElement);
+    await waitFor(() => expect(openConfirmations()).toBe(1));
+    const ok = document.querySelector<HTMLButtonElement>(
+      '.ant-modal-confirm-btns .ant-btn-primary'
+    );
+    await act(async () => {
+      fireEvent.click(ok as HTMLButtonElement);
+    });
+    expect(patch).toHaveBeenCalledTimes(1);
   });
 });

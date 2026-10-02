@@ -556,6 +556,78 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
     }
   );
 
+  it('a double-clicked zone-trigger picker runs its trigger once', async () => {
+    vi.useFakeTimers();
+    triggerPickerExecute = null;
+    agorStore.setState({
+      boardObjectsByBoardId: new Map([[BOARD_ID, [{ ...implementingPlacement, zone_id: null }]]]),
+    });
+    const triggerBoard = {
+      ...board,
+      objects: {
+        ...board.objects,
+        [IMPLEMENTING_ZONE_ID]: {
+          ...board.objects?.[IMPLEMENTING_ZONE_ID],
+          trigger: { behavior: 'show_picker', prompt_template: 'Review this fixture.' },
+        },
+      },
+    } as Board;
+    const patch = vi.fn(async () => ({}));
+    const create = vi.fn(async () => ({ session_id: 'session-new' }));
+    const prompt = vi.fn(async () => ({}));
+    const client = {
+      service: vi.fn(() => ({ patch, create })),
+      sessions: { prompt },
+    } as unknown as AgorClient;
+    render(
+      <App>
+        <ConnectionProvider value={connected}>
+          <SessionCanvas
+            currentUserId={adminUser.user_id}
+            board={triggerBoard}
+            client={client}
+            branches={[branch]}
+          />
+        </ConnectionProvider>
+      </App>
+    );
+    await act(async () => {});
+    act(() => {
+      const node = { ...currentNode(BRANCH_ID), positionAbsolute: { x: 1800, y: 200 } };
+      flowProps?.onNodeDragStart?.({}, node);
+      flowProps?.onNodeDrag?.({}, node);
+      flowProps?.onNodeDragStop?.({}, node);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(501);
+    });
+    expect(screen.getByTestId('zone-trigger-picker')).toBeTruthy();
+    create.mockClear();
+    // The session create is in flight when the second click arrives.
+    let releaseCreate: () => void = () => {};
+    create.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseCreate = () => resolve({ session_id: 'session-new' });
+        })
+    );
+    const params = {
+      sessionId: 'new',
+      action: 'prompt',
+      renderedTemplate: 'Review this fixture.',
+      agent: 'claude-code',
+    };
+    await act(async () => {
+      const first = triggerPickerExecute?.(params);
+      const second = triggerPickerExecute?.(params);
+      await Promise.resolve();
+      releaseCreate();
+      await Promise.all([first, second]);
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(prompt).toHaveBeenCalledTimes(1);
+  });
+
   // A reconnect resync resets every partition and marks the displayed board
   // loaded in one synchronous step: no render ever sees the board unloaded.
   const resyncReload = () =>
