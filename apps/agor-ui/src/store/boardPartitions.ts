@@ -35,12 +35,7 @@ import {
   WholesaleReplacementError,
   wholesaleReplacedSince,
 } from './agorHydration';
-import {
-  type AgorState,
-  agorStore,
-  type BoardPartitionState,
-  GLOBALLY_HYDRATED_COLLECTIONS,
-} from './agorStore';
+import { type AgorState, agorStore, type BoardPartitionState } from './agorStore';
 import { captureLoadLifetime, isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
 import { getRealtimeAuthorityScope } from './realtimeBatch';
 import {
@@ -55,16 +50,15 @@ import { sessionListQuery } from './sessionListQuery';
 import { getUserScopeUserId, referencedBranchIds } from './userScope';
 
 /**
- * Whether `boardId` is complete: its partition loaded, or (Steps 1–2) every
- * collection's global snapshot has applied. Curried for per-board memoization.
+ * Whether `boardId` is complete: its partition is loaded. Nothing else makes a
+ * board complete; board objects, cards and full board records load only with
+ * it. Curried for per-board memoization.
  */
 export function makeBoardReadySelector(
   boardId: string | null | undefined
 ): (s: AgorState) => boolean {
   return (s) => {
-    if (!boardId) return false;
-    if (s.boardPartitions.get(boardId)?.status === 'loaded') return true;
-    return GLOBALLY_HYDRATED_COLLECTIONS.every((c) => s.globallyHydrated.has(c));
+    return !!boardId && s.boardPartitions.get(boardId)?.status === 'loaded';
   };
 }
 

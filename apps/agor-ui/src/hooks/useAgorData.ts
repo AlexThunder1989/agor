@@ -49,7 +49,6 @@ import {
   touchedSince,
 } from '../store/agorHydration';
 import {
-  buildBoardObjectMaps,
   buildById,
   buildSessionMaps,
   keepLiveWrites,
@@ -140,8 +139,8 @@ const RECENT_SESSIONS_LIMIT = 50;
 const GLOBAL_SETS_SCOPE_HOLD_MS = 10_000;
 
 // Items the Home first paint gates on. Board objects and cards are only needed
-// to paint a canvas, so on Home they leave the gate and hydrate globally in the
-// background instead. Comments stay gated on every route: Home's "comments for
+// to paint a canvas, so Home does not read them at all; a board loads its own
+// with its partition. Comments stay gated on every route: Home's "comments for
 // you" rule scans them all.
 const HOME_DEFERRED_ITEMS: ReadonlySet<InitialLoadItemKey> = new Set(['board-objects', 'cards']);
 const ALL_INITIAL_LOAD_KEYS: readonly InitialLoadItemKey[] = INITIAL_LOAD_ITEMS.map(
@@ -884,7 +883,6 @@ export function useAgorData(
             interimSessionById
           ) ?? undefined;
         // No displayed board (Home): board objects and cards are not read.
-        // On first paint they hydrate globally in the background instead.
         const deferAnnotations = !boardScope;
         if (deferAnnotations && !silent) setInitialLoadPlan(HOME_INITIAL_LOAD_KEYS);
 
@@ -1127,12 +1125,9 @@ export function useAgorData(
         bumpFirstPaintMergeRevisions();
         // A silent resync reads the session and branch sets in full: a
         // complete global snapshot, exactly like the background hydrations'
-        // applies. Board objects, cards and full board records are now
-        // complete only for the displayed board (its partition).
-        if (silent) {
-          agorStore.getState().markGloballyHydrated(['sessions', 'branches']);
-          agorStore.getState().unmarkGloballyHydrated(['boardObjects', 'cards', 'boards']);
-        }
+        // applies. Board objects, cards and full board records are complete
+        // only per board (its partition).
+        if (silent) agorStore.getState().markGloballyHydrated(['sessions', 'branches']);
         if (displayedBoardFull) markBoardPartitionLoaded(boardScope, loadLifetime);
         // User scope (design r3 §3): the rest of my sessions, my branches, every
         // teammate I can view, and the branches my sessions and comment
@@ -1165,10 +1160,12 @@ export function useAgorData(
 
         // ── Background full hydration (skip-apply-on-race) ──────────────
         // First paint is now open with ONLY the recent sessions + the displayed
-        // board's branches/sessions/objects/cards/comments. Pull the FULL sets so
-        // per-board counts, the board switcher, GlobalSearch, the branch-list
-        // drawer, facepiles and session genealogy (which can span boards) see
-        // everything a beat later.
+        // board's branches/sessions/objects/cards. Pull the FULL session and
+        // branch sets so per-board counts, the board switcher, GlobalSearch,
+        // the branch-list drawer, facepiles and session genealogy (which can
+        // span boards) see everything a beat later. Board objects, cards and
+        // full board records are never read globally: each board's load with
+        // its partition (`useBoardPartition`).
         //
         // Correctness: this runs WHILE the app is interactive, so a realtime
         // create/patch/remove can land during a global fetch. `runHydration`
@@ -1182,9 +1179,9 @@ export function useAgorData(
         const hydrateGlobalSets = () => {
           // Sessions + branches: now ALWAYS bounded at first paint (my newest
           // N / board-scoped), so hydrate them on every non-silent load (silent
-          // reconnect already fetched them full above). repos / users / boards /
-          // card-types / comments stay global at first paint, so they need no
-          // top-up.
+          // reconnect already fetched them full above). repos / users / lean
+          // boards / card-types / comments stay global at first paint, so they
+          // need no top-up.
           //
           // Sessions and branches hydrate on INDEPENDENT loops (separate fetches,
           // separate revision guards, separate generation tokens). Coupling them
@@ -1253,71 +1250,6 @@ export function useAgorData(
                   branchById: buildById(allBranches, 'branch_id', prev.branchById),
                 }));
               }
-            );
-          }
-
-          // Board objects / cards: board-scoped at first paint when a board was
-          // resolved, and not fetched at all on Home (deferred out of the gate).
-          // Either way, hydrate the global set in the background (non-silent only —
-          // a reconnect reconciles the displayed board and unloads the others).
-          // Comments need no top-up: the gate always loads the global set.
-          //
-          // Board objects and cards hydrate on INDEPENDENT loops so churn in one
-          // (e.g. rapid card moves) can't starve the other's apply. Each global
-          // snapshot is a superset of its board-scoped first-paint slice, so no
-          // overlay is needed; the quiet-window guard prevents clobber/resurrect.
-          if (!silent) {
-            if (canUseMemberWorkspaceServices) {
-              void runAuthorityHydration(
-                'board-objects',
-                ['boardObjects'],
-                () =>
-                  client
-                    .service('board-objects')
-                    .findAll({ query: { $limit: PAGINATION.DEFAULT_LIMIT } }),
-                (allBoardObjects) =>
-                  agorStore.getState().applyMaps((prev) => {
-                    const base = buildBoardObjectMaps(allBoardObjects);
-                    return {
-                      ...prev,
-                      boardObjectById: base.boardObjectById,
-                      boardObjectsByBoardId: base.boardObjectsByBoardId,
-                      boardObjectByBranchId: base.boardObjectByBranchId,
-                      boardObjectByCardId: base.boardObjectByCardId,
-                    };
-                  })
-              );
-            }
-            void runAuthorityHydration(
-              'cards',
-              ['cards'],
-              () =>
-                client.service('cards').findAll({ query: { $limit: PAGINATION.DEFAULT_LIMIT } }),
-              (allCards) =>
-                agorStore.getState().applyMaps((prev) => ({
-                  ...prev,
-                  cardById: buildById(allCards, 'card_id', prev.cardById),
-                }))
-            );
-          }
-
-          // Boards: the gated first-paint list is LEAN (no objects/custom_css) and
-          // board switching never refetches — so every OTHER board's annotations
-          // must be backfilled here, exactly like sessions/branches. Only on the
-          // non-silent first load: a reconnect reads the displayed board's full
-          // record and unloads the others. The displayed board already carries
-          // its objects from the targeted get; the full set is a superset of it.
-          if (!silent) {
-            void runAuthorityHydration(
-              'boards',
-              ['boards'],
-              () =>
-                client.service('boards').findAll({ query: { $limit: PAGINATION.DEFAULT_LIMIT } }),
-              (allBoards) =>
-                agorStore.getState().applyMaps((prev) => ({
-                  ...prev,
-                  boardById: buildById(allBoards, 'board_id', prev.boardById),
-                }))
             );
           }
         };
@@ -1443,8 +1375,6 @@ export function useAgorData(
         userById: new Map(),
         boardObjectById: new Map(),
         boardObjectsByBoardId: new Map(),
-        boardObjectByBranchId: new Map(),
-        boardObjectByCardId: new Map(),
       }));
     }
 

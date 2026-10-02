@@ -165,6 +165,19 @@ function makeMockClient(seed: Record<string, unknown[]> = {}) {
   };
 }
 
+/**
+ * Put the hook on board `board-1`'s route: board objects and cards load only
+ * with a board's partition (never on Home), here at first paint.
+ */
+function onBoardRoute(seed: Record<string, unknown[]>) {
+  const board = { board_id: 'board-1', slug: 'board-one', name: 'Board one' };
+  seed.boards ??= [board];
+  seed['boards:get'] ??= board as never;
+  window.history.pushState({}, '', '/b/board-one/');
+  onTestFinished(() => window.history.pushState({}, '', '/'));
+  return seed;
+}
+
 const makeBranch = (overrides: Record<string, unknown> = {}) => ({
   branch_id: 'b-1',
   repo_id: 'r-1',
@@ -506,11 +519,13 @@ describe('useAgorData — socket-event bailouts', () => {
     const branch = makeBranch();
     const session = makeSession();
     const boardObject = makeBoardObject({ object_id: 'bo-1', branch_id: branch.branch_id });
-    const { client, emit } = makeMockClient({
-      branches: [branch],
-      sessions: [session],
-      'board-objects': [boardObject],
-    });
+    const { client, emit } = makeMockClient(
+      onBoardRoute({
+        branches: [branch],
+        sessions: [session],
+        'board-objects': [boardObject],
+      })
+    );
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
 
@@ -525,7 +540,6 @@ describe('useAgorData — socket-event bailouts', () => {
     // Archive preserves placement in the database for unarchive, so unlike a
     // hard delete it must stay in the client indexes too.
     expect(agorStore.getState().boardObjectById.get('bo-1')).toEqual(boardObject);
-    expect(agorStore.getState().boardObjectByBranchId.get('b-1')).toEqual(boardObject);
   });
 
   it('drops a duplicate `sessions.created` for an existing id', async () => {
@@ -602,11 +616,13 @@ describe('useAgorData — socket-event bailouts', () => {
       board_id: 'board-2',
       branch_id: 'b-1',
     });
-    const { client, emit } = makeMockClient({
-      sessions: [session],
-      branches: [branch],
-      'board-objects': [boardObject, duplicateBoardObject],
-    });
+    const { client, emit } = makeMockClient(
+      onBoardRoute({
+        sessions: [session],
+        branches: [branch],
+        'board-objects': [boardObject, duplicateBoardObject],
+      })
+    );
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
 
@@ -614,7 +630,6 @@ describe('useAgorData — socket-event bailouts', () => {
     expect(agorStore.getState().sessionById.has('s-1')).toBe(true);
     expect(agorStore.getState().sessionsByBranch.has('b-1')).toBe(true);
     expect(agorStore.getState().boardObjectById.has('bo-1')).toBe(true);
-    expect(agorStore.getState().boardObjectByBranchId.has('b-1')).toBe(true);
     expect(
       agorStore
         .getState()
@@ -637,7 +652,6 @@ describe('useAgorData — socket-event bailouts', () => {
     expect(agorStore.getState().sessionsByBranch.has('b-1')).toBe(false);
     expect(agorStore.getState().boardObjectById.has('bo-1')).toBe(false);
     expect(agorStore.getState().boardObjectById.has('bo-duplicate')).toBe(false);
-    expect(agorStore.getState().boardObjectByBranchId.has('b-1')).toBe(false);
     expect(
       agorStore
         .getState()
@@ -722,7 +736,6 @@ describe('useAgorData — socket-event bailouts', () => {
       expect(agorStore.getState().branchById.has('b-1')).toBe(false);
       expect(agorStore.getState().sessionById.has('s-1')).toBe(false);
       expect(agorStore.getState().boardObjectById.has('bo-1')).toBe(false);
-      expect(agorStore.getState().boardObjectByBranchId.has('b-1')).toBe(false);
     });
   });
 
@@ -775,7 +788,7 @@ describe('useAgorData — socket-event bailouts', () => {
     expect(agorStore.getState().artifactById).toBe(before);
   });
 
-  it('builds derived board-object indexes during initial load', async () => {
+  it("buckets the displayed board's board objects at first paint", async () => {
     const branchObject = makeBoardObject({ object_id: 'bo-branch', branch_id: 'b-1' });
     const cardObject = makeBoardObject({
       object_id: 'bo-card',
@@ -788,9 +801,9 @@ describe('useAgorData — socket-event bailouts', () => {
       board_id: 'board-2',
       branch_id: 'b-2',
     });
-    const { client } = makeMockClient({
-      'board-objects': [branchObject, cardObject, otherBoardObject],
-    });
+    const { client } = makeMockClient(
+      onBoardRoute({ 'board-objects': [branchObject, cardObject, otherBoardObject] })
+    );
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
 
@@ -809,11 +822,9 @@ describe('useAgorData — socket-event bailouts', () => {
         .boardObjectsByBoardId.get('board-2')
         ?.map((bo) => bo.object_id)
     ).toEqual(['bo-other']);
-    expect(agorStore.getState().boardObjectByBranchId.get('b-1')?.object_id).toBe('bo-branch');
-    expect(agorStore.getState().boardObjectByCardId.get('c-1')?.object_id).toBe('bo-card');
   });
 
-  it('keeps board-object derived indexes in sync across patch and remove events', async () => {
+  it('keeps board-object buckets in sync across patch and remove events', async () => {
     const boardObject = makeBoardObject({
       object_id: 'bo-1',
       board_id: 'board-1',
@@ -840,14 +851,12 @@ describe('useAgorData — socket-event bailouts', () => {
         .boardObjectsByBoardId.get('board-2')
         ?.map((bo) => bo.object_id)
     ).toEqual(['bo-1']);
-    expect(agorStore.getState().boardObjectByBranchId.has('b-1')).toBe(false);
-    expect(agorStore.getState().boardObjectByBranchId.get('b-2')?.zone_id).toBe('zone-b');
+    expect(agorStore.getState().boardObjectById.get('bo-1')?.zone_id).toBe('zone-b');
 
     act(() => emit('board-objects', 'removed', { ...boardObject, board_id: 'board-2' }));
 
     expect(agorStore.getState().boardObjectById.has('bo-1')).toBe(false);
     expect(agorStore.getState().boardObjectsByBoardId.has('board-2')).toBe(false);
-    expect(agorStore.getState().boardObjectByBranchId.has('b-2')).toBe(false);
   });
 
   it('keeps unrelated board-object buckets reference-stable on other-board patches', async () => {
@@ -1271,31 +1280,17 @@ describe('useAgorData — lean boards list + objects hydration', () => {
     }
   });
 
-  it('backfills every board objects via the boards background hydration', async () => {
+  it("never reads every board's full record: Home has only the lean list", async () => {
     const leanA = { board_id: 'board-A', slug: 'a', name: 'A' };
-    const leanB = { board_id: 'board-B', slug: 'b', name: 'B' };
-    const fullA = {
-      ...leanA,
-      objects: { 'z-a': { type: 'zone', x: 0, y: 0, width: 1, height: 1 } },
-    };
-    const fullB = {
-      ...leanB,
-      objects: { 'z-b': { type: 'zone', x: 0, y: 0, width: 1, height: 1 } },
-    };
-    const seed: Record<string, unknown[]> = {};
-    const { client, fetchCount, onFetch } = makeMockClient(seed);
-    // Home path (jsdom `/`): no board scope, no targeted get. The lean gated
-    // fetch (call 1) carries no objects; the hydration (call 2) carries them.
-    onFetch('boards', 'findAll', (call) => {
-      seed['boards:findAll'] = call === 1 ? [leanA, leanB] : [fullA, fullB];
-    });
+    const { client, fetchCount, fetchArguments } = makeMockClient({ boards: [leanA] });
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
     await flush();
-    expect(agorStore.getState().boardById.get('board-A')?.objects).toBeDefined();
-    expect(agorStore.getState().boardById.get('board-B')?.objects).toBeDefined();
+    expect(fetchCount('boards', 'findAll')).toBe(1);
+    expect(fetchArguments('boards', 'findAll')[0]).toMatchObject({ query: { lean: true } });
     expect(fetchCount('boards', 'get')).toBe(0);
-    expect(fetchCount('branches', 'get')).toBe(0);
+    expect(fetchCount('board-objects', 'findAll')).toBe(0);
+    expect(fetchCount('cards', 'findAll')).toBe(0);
   });
 
   it('reconnect resync reads the displayed board once and every board list lean', async () => {
@@ -1318,7 +1313,7 @@ describe('useAgorData — lean boards list + objects hydration', () => {
       expect(fetchCount('boards', 'get')).toBe(1);
 
       act(() => emitIo('connect'));
-      await waitFor(() => expect(fetchCount('boards', 'findAll')).toBeGreaterThanOrEqual(3));
+      await waitFor(() => expect(fetchCount('boards', 'findAll')).toBe(2));
       await flush();
 
       // The resync reads the lean list plus ONE point read of the displayed
@@ -1326,8 +1321,9 @@ describe('useAgorData — lean boards list + objects hydration', () => {
       // Other boards' records load with their partitions.
       expect(fetchCount('boards', 'get')).toBe(2);
       expect(fetchCount('branches', 'get')).toBe(0);
-      const resyncList = fetchArguments('boards', 'findAll').at(-1) as { query?: unknown };
-      expect(resyncList.query).toMatchObject({ lean: true });
+      for (const read of fetchArguments('boards', 'findAll') as Array<{ query?: unknown }>) {
+        expect(read.query).toMatchObject({ lean: true });
+      }
       expect(agorStore.getState().boardById.get('board-D')?.objects).toBeDefined();
     } finally {
       window.history.pushState({}, '', '/');
@@ -1516,7 +1512,7 @@ describe('useAgorData — opened session transcript priority', () => {
     await act(async () => prefetch.resolve());
     await waitFor(() => expect(fetchCount('sessions', 'findAll')).toBe(1));
     expect(fetchCount('branches', 'findAll')).toBe(1);
-    expect(fetchCount('boards', 'findAll')).toBe(2);
+    expect(fetchCount('boards', 'findAll')).toBe(1); // full board records load per board only
     await waitFor(() => expect(agorStore.getState().sessionById.has('s-global-only')).toBe(true));
   });
 
@@ -1674,7 +1670,7 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
   };
   const never = () => new Promise(() => {});
 
-  it('gates Home on my newest sessions and global comments, not on board objects or cards', async () => {
+  it('gates Home on my newest sessions and global comments, and reads no board objects or cards', async () => {
     window.history.pushState({}, '', '/');
     const mine = makeSession({ session_id: 's-mine', created_by: 'user-me' });
     const { client, fetchArguments, onFetch } = makeMockClient({ 'sessions:find': [mine] });
@@ -1705,8 +1701,10 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
     expect(gated).not.toContain('cards');
     expect(gated).not.toContain('board-objects');
     expect(fetchArguments('board-comments', 'findAll')).toEqual([{ query: { $limit: 10000 } }]);
-    // The deferred collections hydrate globally in the background.
-    expect(fetchArguments('board-objects', 'findAll')).toEqual([{ query: { $limit: 10000 } }]);
+    // Home never reads board objects or cards; a board loads its own.
+    await flush();
+    expect(fetchArguments('board-objects', 'findAll')).toEqual([]);
+    expect(fetchArguments('cards', 'findAll')).toEqual([]);
     // One gated row < 200: the gated page already holds all of my sessions.
     await waitFor(() => expect(agorStore.getState().mySessionsLoaded).toBe(true));
   });

@@ -270,9 +270,9 @@ function deferredList() {
 describe('workspace authority generation ordering', () => {
   it('discards delayed member responses after demotion', async () => {
     const seam = transitionClient();
-    const objects = deferredList();
-    seam.queueUsers(Promise.resolve([{ ...VIEWER, user_id: 'same-user', role: 'member' }]));
-    seam.queueBoardObjects(objects.promise);
+    // Users are member-only; their read is held across the demotion.
+    const users = deferredList();
+    seam.queueUsers(users.promise);
     const { result, rerender } = renderHook(
       ({ role, ready, generation }: { role: string; ready: boolean; generation: number }) =>
         useAgorData(seam.client, {
@@ -283,15 +283,15 @@ describe('workspace authority generation ordering', () => {
         }),
       { initialProps: { role: 'member', ready: true, generation: 1 } }
     );
-    await waitFor(() => expect(seam.boardObjectsFindAll).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(seam.usersFindAll).toHaveBeenCalledTimes(1));
 
     // The role can render before useAgorClient publishes its reauthenticated
     // generation. Even with a still-true connection bit, the old member fetch
     // is invalid and no viewer-era resync may start.
     rerender({ role: 'viewer', ready: true, generation: 1 });
     await act(async () => {
-      objects.resolve([{ object_id: 'old-object', board_id: 'board-1' }]);
-      await objects.promise;
+      users.resolve([{ ...VIEWER, user_id: 'same-user', role: 'member' }]);
+      await users.promise;
     });
     expect(agorStore.getState().userById.size).toBe(0);
     expect(agorStore.getState().boardObjectById.size).toBe(0);

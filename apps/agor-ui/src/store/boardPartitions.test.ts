@@ -566,20 +566,18 @@ describe('board readiness', () => {
     expect(makeBoardReadySelector('board-2')(agorStore.getState())).toBe(false);
   });
 
-  it('treats every board as ready once all five global snapshots have applied', async () => {
-    // Comments are excluded: they are global and gated at first paint.
-    const collections = ['sessions', 'branches', 'boardObjects', 'cards', 'boards'] as const;
-    for (const [i, c] of collections.entries()) {
-      expect(makeBoardReadySelector('board-2')(agorStore.getState())).toBe(false);
+  it('never treats a board as ready from global snapshots: only its partition', async () => {
+    for (const c of ['sessions', 'branches'] as const) {
       await runHydration(
         c,
         [c],
         async () => [],
         () => {}
       );
-      if (i < collections.length - 1)
-        expect(makeBoardReadySelector('board-2')(agorStore.getState())).toBe(false);
     }
+    expect(agorStore.getState().globallyHydrated.size).toBe(2);
+    expect(makeBoardReadySelector('board-2')(agorStore.getState())).toBe(false);
+    markBoardPartitionLoaded('board-2', captureLoadLifetime()!);
     expect(makeBoardReadySelector('board-2')(agorStore.getState())).toBe(true);
   });
 

@@ -44,13 +44,6 @@ export type DataMaps = {
   boardById: Map<string, Board>;
   boardObjectById: Map<string, BoardEntityObject>;
   boardObjectsByBoardId: Map<string, BoardEntityObject[]>;
-  // Global placement lookup. Branch placements are unique because a branch can
-  // only have one board-object row at a time.
-  boardObjectByBranchId: Map<string, BoardEntityObject>;
-  // Global placement lookup. Cards follow the same one-row-per-card service
-  // contract as branches; callers needing board-scoped iteration should use
-  // boardObjectsByBoardId instead.
-  boardObjectByCardId: Map<string, BoardEntityObject>;
   commentById: Map<string, BoardComment>;
   cardById: Map<string, CardWithType>;
   cardTypeById: Map<string, CardType>;
@@ -70,8 +63,6 @@ export const EMPTY_MAPS: DataMaps = {
   boardById: new Map(),
   boardObjectById: new Map(),
   boardObjectsByBoardId: new Map(),
-  boardObjectByBranchId: new Map(),
-  boardObjectByCardId: new Map(),
   commentById: new Map(),
   cardById: new Map(),
   cardTypeById: new Map(),
@@ -163,36 +154,6 @@ export function buildById<T extends object>(
     map.set(item[key] as unknown as string, item);
   }
   return reconcileByIdMap(prev, map);
-}
-
-// Derived board-object index set, built once from a fetched list. Shared by
-// the essential (board-scoped, first-paint) index build and the background
-// full-hydration pass — single source of truth so the two can't diverge.
-export function buildBoardObjectMaps(list: readonly BoardEntityObject[]): {
-  boardObjectById: Map<string, BoardEntityObject>;
-  boardObjectsByBoardId: Map<string, BoardEntityObject[]>;
-  boardObjectByBranchId: Map<string, BoardEntityObject>;
-  boardObjectByCardId: Map<string, BoardEntityObject>;
-} {
-  const boardObjectById = new Map<string, BoardEntityObject>();
-  const boardObjectsByBoardId = new Map<string, BoardEntityObject[]>();
-  const boardObjectByBranchId = new Map<string, BoardEntityObject>();
-  const boardObjectByCardId = new Map<string, BoardEntityObject>();
-  for (const boardObject of list) {
-    boardObjectById.set(boardObject.object_id, boardObject);
-
-    const bucket = boardObjectsByBoardId.get(boardObject.board_id);
-    if (bucket) bucket.push(boardObject);
-    else boardObjectsByBoardId.set(boardObject.board_id, [boardObject]);
-
-    if (boardObject.branch_id) {
-      boardObjectByBranchId.set(boardObject.branch_id, boardObject);
-    }
-    if (boardObject.card_id) {
-      boardObjectByCardId.set(boardObject.card_id, boardObject);
-    }
-  }
-  return { boardObjectById, boardObjectsByBoardId, boardObjectByBranchId, boardObjectByCardId };
 }
 
 // Build the session lookups (`sessionById` + branch-bucketed `sessionsByBranch`)
@@ -508,45 +469,7 @@ export function upsertBoardObjectInMaps(
     boardObjectsByBoardId = nextBuckets;
   }
 
-  let boardObjectByBranchId = prev.boardObjectByBranchId;
-  if (existing?.branch_id && existing.branch_id !== boardObject.branch_id) {
-    boardObjectByBranchId = new Map(boardObjectByBranchId);
-    boardObjectByBranchId.delete(existing.branch_id);
-  }
-  if (boardObject.branch_id) {
-    const existingByBranch = boardObjectByBranchId.get(boardObject.branch_id);
-    if (!existingByBranch || !shallowEqualEntity(existingByBranch, boardObject)) {
-      boardObjectByBranchId =
-        boardObjectByBranchId === prev.boardObjectByBranchId
-          ? new Map(boardObjectByBranchId)
-          : boardObjectByBranchId;
-      boardObjectByBranchId.set(boardObject.branch_id, boardObject);
-    }
-  }
-
-  let boardObjectByCardId = prev.boardObjectByCardId;
-  if (existing?.card_id && existing.card_id !== boardObject.card_id) {
-    boardObjectByCardId = new Map(boardObjectByCardId);
-    boardObjectByCardId.delete(existing.card_id);
-  }
-  if (boardObject.card_id) {
-    const existingByCard = boardObjectByCardId.get(boardObject.card_id);
-    if (!existingByCard || !shallowEqualEntity(existingByCard, boardObject)) {
-      boardObjectByCardId =
-        boardObjectByCardId === prev.boardObjectByCardId
-          ? new Map(boardObjectByCardId)
-          : boardObjectByCardId;
-      boardObjectByCardId.set(boardObject.card_id, boardObject);
-    }
-  }
-
-  return {
-    ...prev,
-    boardObjectById,
-    boardObjectsByBoardId,
-    boardObjectByBranchId,
-    boardObjectByCardId,
-  };
+  return { ...prev, boardObjectById, boardObjectsByBoardId };
 }
 
 export function removeBoardObjectFromMaps(
@@ -559,30 +482,10 @@ export function removeBoardObjectFromMaps(
   const boardObjectById = new Map(prev.boardObjectById);
   boardObjectById.delete(existing.object_id);
 
-  let boardObjectByBranchId = prev.boardObjectByBranchId;
-  if (
-    existing.branch_id &&
-    boardObjectByBranchId.get(existing.branch_id)?.object_id === existing.object_id
-  ) {
-    boardObjectByBranchId = new Map(boardObjectByBranchId);
-    boardObjectByBranchId.delete(existing.branch_id);
-  }
-
-  let boardObjectByCardId = prev.boardObjectByCardId;
-  if (
-    existing.card_id &&
-    boardObjectByCardId.get(existing.card_id)?.object_id === existing.object_id
-  ) {
-    boardObjectByCardId = new Map(boardObjectByCardId);
-    boardObjectByCardId.delete(existing.card_id);
-  }
-
   return {
     ...prev,
     boardObjectById,
     boardObjectsByBoardId: removeBoardObjectFromBoardBucket(prev.boardObjectsByBoardId, existing),
-    boardObjectByBranchId,
-    boardObjectByCardId,
   };
 }
 

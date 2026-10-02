@@ -58,20 +58,14 @@ export interface BoardPartitionState {
   error?: string;
 }
 
-/** Collections whose GLOBAL snapshot makes every board complete once applied. */
-export type GloballyHydratedCollection =
-  | 'sessions'
-  | 'branches'
-  | 'boardObjects'
-  | 'cards'
-  | 'boards';
-/** Comments are excluded: they are global and gated at first paint. */
+/**
+ * Collections loaded globally in the background (Steps 1–2; removed in 3.3).
+ * Board objects, cards and full board records load per board only.
+ */
+export type GloballyHydratedCollection = 'sessions' | 'branches';
 export const GLOBALLY_HYDRATED_COLLECTIONS: readonly GloballyHydratedCollection[] = [
   'sessions',
   'branches',
-  'boardObjects',
-  'cards',
-  'boards',
 ];
 
 /**
@@ -195,8 +189,6 @@ interface AgorActions {
   resetBoardPartitions: () => void;
   /** Record that a global snapshot of these collections has applied. */
   markGloballyHydrated: (collections: readonly string[]) => void;
-  /** Record that these collections are no longer globally complete (a scoped reconnect). */
-  unmarkGloballyHydrated: (collections: readonly GloballyHydratedCollection[]) => void;
   /** Record that one session's MCP links are loaded. */
   markSessionMcpLoaded: (sessionId: string) => void;
   /** Forget which sessions' MCP links are loaded (reconnect, authority change). */
@@ -371,13 +363,6 @@ export const agorStore = createStore<AgorState>()(
       if (additions.length === 0) return;
       set({ globallyHydrated: new Set([...current, ...additions]) });
     },
-    unmarkGloballyHydrated: (collections) => {
-      const current = get().globallyHydrated;
-      if (!collections.some((c) => current.has(c))) return;
-      const next = new Set(current);
-      for (const c of collections) next.delete(c);
-      set({ globallyHydrated: next });
-    },
     markSessionMcpLoaded: (sessionId) => {
       const current = get().sessionMcpLoaded;
       if (current.has(sessionId)) return;
@@ -449,11 +434,6 @@ export const agorStore = createStore<AgorState>()(
             removedObjectIds.add(objectId);
             draft.boardObjectById.delete(objectId);
           }
-        }
-        const indexedBoardObject = draft.boardObjectByBranchId.get(branchId);
-        if (indexedBoardObject) removedObjectIds.add(indexedBoardObject.object_id);
-        if (draft.boardObjectByBranchId.has(branchId)) {
-          draft.boardObjectByBranchId.delete(branchId);
         }
         for (const [boardId, boardObjects] of draft.boardObjectsByBoardId) {
           const remaining = boardObjects.filter(
