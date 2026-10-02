@@ -49,6 +49,7 @@ import {
   upsertBoardObjectInMaps,
 } from './agorMaps';
 import { type AgorState, agorStore } from './agorStore';
+import { pruneSessionMcpLinks } from './sessionMcpLinks';
 
 // Thin bindings to the store primitives. The vanilla store and its actions are
 // stable module singletons, so these resolve the live action each call. The
@@ -101,6 +102,8 @@ export function sessionPatched(session: Session) {
 
 export function sessionRemoved(session: Session) {
   bumpRevision('sessions', session.session_id);
+  bumpRevision('sessionMcp');
+  pruneSessionMcpLinks([session.session_id]);
   // Update sessionById — bail out when the id isn't tracked so the
   // wrapper short-circuit prevents the spurious `maps` update.
   setMap('sessionById', (prev) => {
@@ -241,7 +244,11 @@ export function branchRemoved(branch: Branch) {
   bumpRevision('sessionMcp');
   bumpRevision('gatewayChannels');
   bumpRevision('artifacts');
+  const removedSessionIds = [...agorStore.getState().sessionById.values()]
+    .filter((session) => session.branch_id === branch.branch_id)
+    .map((session) => session.session_id);
   applyBranchHardDeleteCascade(branch.branch_id);
+  pruneSessionMcpLinks(removedSessionIds);
   // Collapse exceptions survive archive/move but not a hard delete.
   removeCollapsedBranchNode(branch.branch_id);
 }

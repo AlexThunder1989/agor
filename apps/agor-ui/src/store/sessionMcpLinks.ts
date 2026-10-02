@@ -21,6 +21,7 @@ import {
   beginPartitionLoad,
   endPartitionLoad,
   type HydratedCollection,
+  markTouched,
   touchedSince,
 } from './agorHydration';
 import { agorStore } from './agorStore';
@@ -75,6 +76,21 @@ const epoch = () => agorStore.getState().sessionMcpEpoch;
  * an authority change may change which links are visible). Rows stay on
  * screen; mounted readers reload and their edit controls wait meanwhile.
  */
+/** Touched-fence id recording that a session was deleted. */
+const deletedKey = (sessionId: string) => `deleted\u0000${sessionId}`;
+
+/**
+ * Forget deleted sessions' links and loaded marks (realtime `removed`, or a
+ * hard-deleted branch's cascade). The deletion is stamped on the touched
+ * fence, so a read in flight for the session applies nothing. The caller
+ * has already bumped the `sessionMcp` revision for this removal.
+ */
+export function pruneSessionMcpLinks(sessionIds: readonly string[]): void {
+  if (sessionIds.length === 0) return;
+  for (const id of sessionIds) markTouched('sessionMcp', deletedKey(id));
+  agorStore.getState().forgetSessionMcp(sessionIds);
+}
+
 export function resetSessionMcpLinks(): void {
   agorStore.getState().resetSessionMcpLoaded();
 }
@@ -103,12 +119,13 @@ export function loadSessionMcpServerIds(client: AgorClient, sessionId: string): 
         | Array<{ session_id: string; mcp_server_id: string }>
         | { data: Array<{ session_id: string; mcp_server_id: string }> };
       if (!isCurrent()) return;
+      const collection: HydratedCollection = 'sessionMcp';
+      const start = fence.startRevisions[collection];
+      if (touchedSince(collection, deletedKey(sessionId), start)) return;
       const rows = Array.isArray(result) ? result : result.data;
       const snapshotIds = rows
         .filter((row) => row.session_id === sessionId)
         .map((row) => row.mcp_server_id);
-      const collection: HydratedCollection = 'sessionMcp';
-      const start = fence.startRevisions[collection];
       const store = agorStore.getState();
       store.applyMaps((prev) => {
         const sessionMcpServerIds = mergeSessionMcpSnapshot(

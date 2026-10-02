@@ -2,7 +2,7 @@ import type { AgorClient } from '@agor-live/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { updateSessionMcpServers } from '../utils/sessionMcpServers';
 import { cancelAllHydrations, resetHydrationRevisions } from './agorHydration';
-import { mcpServerRemoved } from './agorRealtimeActions';
+import { branchRemoved, mcpServerRemoved, sessionRemoved } from './agorRealtimeActions';
 import { agorStore } from './agorStore';
 import { setRealtimeAuthorityScope } from './realtimeBatch';
 import { sessionMcpCreated, sessionMcpPatched, sessionMcpRemoved } from './sessionMcpActions';
@@ -206,5 +206,53 @@ describe('updateSessionMcpServers before the links load', () => {
     expect(nested.remove).toHaveBeenCalledTimes(1);
     expect(nested.remove).toHaveBeenCalledWith('c');
     expect(nested.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('session MCP links of deleted sessions', () => {
+  beforeEach(() => {
+    agorStore.getState().reset();
+    resetHydrationRevisions();
+    setRealtimeAuthorityScope(AUTHORITY);
+  });
+  afterEach(() => {
+    setRealtimeAuthorityScope(null);
+  });
+
+  const session = (id: string, branchId = 'b-1') =>
+    ({ session_id: id, branch_id: branchId, archived: false }) as never;
+
+  it('forgets a removed session: its loaded mark and its link rows', async () => {
+    const { client, responses } = makeClient();
+    const load = loadSessionMcpServerIds(client, 's-1');
+    responses[0].resolve([{ session_id: 's-1', mcp_server_id: 'a' }]);
+    await load;
+    expect(agorStore.getState().sessionMcpLoaded.has('s-1')).toBe(true);
+
+    sessionRemoved(session('s-1'));
+    expect(agorStore.getState().sessionMcpLoaded.has('s-1')).toBe(false);
+    expect(agorStore.getState().sessionMcpServerIds.has('s-1')).toBe(false);
+  });
+
+  it('forgets the sessions of a hard-deleted branch', async () => {
+    agorStore.getState().setMap('sessionById', new Map([['s-2', session('s-2', 'b-9')]]));
+    const { client, responses } = makeClient();
+    const load = loadSessionMcpServerIds(client, 's-2');
+    responses[0].resolve([{ session_id: 's-2', mcp_server_id: 'a' }]);
+    await load;
+
+    branchRemoved({ branch_id: 'b-9' } as never);
+    expect(agorStore.getState().sessionMcpLoaded.has('s-2')).toBe(false);
+    expect(agorStore.getState().sessionMcpServerIds.has('s-2')).toBe(false);
+  });
+
+  it('applies nothing from a read that lands after its session was deleted', async () => {
+    const { client, responses } = makeClient();
+    const load = loadSessionMcpServerIds(client, 's-3');
+    sessionRemoved(session('s-3'));
+    responses[0].resolve([{ session_id: 's-3', mcp_server_id: 'a' }]);
+    await load;
+    expect(agorStore.getState().sessionMcpLoaded.has('s-3')).toBe(false);
+    expect(agorStore.getState().sessionMcpServerIds.has('s-3')).toBe(false);
   });
 });

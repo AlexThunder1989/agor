@@ -202,6 +202,8 @@ interface AgorActions {
   markSessionMcpLoaded: (sessionId: string) => void;
   /** Forget which sessions' MCP links are loaded and bump their epoch. */
   resetSessionMcpLoaded: () => void;
+  /** Drop deleted sessions' MCP links and loaded marks. */
+  forgetSessionMcp: (sessionIds: readonly string[]) => void;
   /** Mirror the realtime authority scope (see `dataAuthority`). */
   setDataAuthority: (authority: string | null) => void;
   /** Mirror archive visibility while retaining the persisted board placement. */
@@ -383,6 +385,17 @@ export const agorStore = createStore<AgorState>()(
     },
     resetSessionMcpLoaded: () =>
       set({ sessionMcpLoaded: new Set(), sessionMcpEpoch: get().sessionMcpEpoch + 1 }),
+    forgetSessionMcp: (sessionIds) => {
+      const { sessionMcpLoaded, sessionMcpServerIds } = get();
+      const loaded = sessionIds.filter((id) => sessionMcpLoaded.has(id));
+      const linked = sessionIds.filter((id) => sessionMcpServerIds.has(id));
+      if (loaded.length === 0 && linked.length === 0) return;
+      const nextLoaded = new Set(sessionMcpLoaded);
+      for (const id of loaded) nextLoaded.delete(id);
+      const nextLinks = new Map(sessionMcpServerIds);
+      for (const id of linked) nextLinks.delete(id);
+      set({ sessionMcpLoaded: nextLoaded, sessionMcpServerIds: nextLinks });
+    },
     setDataAuthority: (authority) => {
       if (authority !== get().dataAuthority) set({ dataAuthority: authority });
     },
