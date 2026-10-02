@@ -38,13 +38,12 @@ const USER_NAMES = [
   'viewerRole',
 ] as const;
 type UserName = (typeof USER_NAMES)[number];
-/** Principals outside the predicates' contract: compared for parity only. */
-const PARITY_ONLY_PRINCIPALS = new Set(['unknown-principal', 'foreign-owner']);
 
 export interface SessionVisibilityFixture {
   users: Record<UserName, UserID>;
   boardIds: BoardID[];
   branchIds: BranchID[];
+  branchByName: Record<string, BranchID>;
   /** Live sessions, plus sessions of a deleted branch (cascade-removed). */
   sessionIds: SessionID[];
   deletedSessionIds: SessionID[];
@@ -154,8 +153,15 @@ export async function seedSessionVisibilityFixture(
     name: `Archived-${generateId()}`,
     created_by: users.owner,
   });
+  // A second active group whose role differs from the first on the same package.
+  const second = await groupRepo.create({
+    name: `Second-${generateId()}`,
+    created_by: users.owner,
+  });
   for (const name of ['groupMember', 'viewerRole', 'noneDirect'] as const)
     await groupRepo.addMember(active.group_id, users[name], users.owner);
+  for (const name of ['groupMember', 'viewerDirect'] as const)
+    await groupRepo.addMember(second.group_id, users[name], users.owner);
   for (const name of ['groupMember', 'noneDirect'] as const)
     await groupRepo.addMember(archived.group_id, users[name], users.owner);
 
@@ -171,6 +177,7 @@ export async function seedSessionVisibilityFixture(
   const user = (name: UserName) => ({ principal_type: 'user' as const, user_id: users[name] });
   const activeGroup = { principal_type: 'group' as const, group_id: active.group_id };
   const archivedGroup = { principal_type: 'group' as const, group_id: archived.group_id };
+  const secondGroup = { principal_type: 'group' as const, group_id: second.group_id };
   const entry = (
     principal: CapabilityPolicyEntry['principal'],
     preset: CapabilityPolicyPresetId,
@@ -279,6 +286,24 @@ export async function seedSessionVisibilityFixture(
       override: config('shared', 'viewer', [entry(activeGroup, 'none')]),
     },
     {
+      // Members of both groups combine to Viewer; second-only members match
+      // `none`, which shadows Others.
+      name: 'two-groups-viewer-and-none',
+      board: sharedBoard,
+      override: config('shared', 'viewer', [
+        entry(activeGroup, 'viewer'),
+        entry(secondGroup, 'none'),
+      ]),
+    },
+    {
+      name: 'two-groups-none-and-collaborator',
+      board: groupBoard,
+      override: config('shared', 'none', [
+        entry(activeGroup, 'none'),
+        entry(secondGroup, 'collaborator', 'read'),
+      ]),
+    },
+    {
       name: 'archived-branch',
       board: sharedBoard,
       archived: true,
@@ -304,6 +329,7 @@ export async function seedSessionVisibilityFixture(
 
   const sessionRepo = new SessionRepository(db);
   const branchIds: BranchID[] = [];
+  const branchByName: Record<string, BranchID> = {};
   const sessionIds: SessionID[] = [];
   const deletedSessionIds: SessionID[] = [];
   const base = Date.UTC(2026, 0, 1);
@@ -357,6 +383,7 @@ export async function seedSessionVisibilityFixture(
       await deleteFrom(db, branches).where(eq(branches.branch_id, branchId)).run();
     } else {
       branchIds.push(branchId);
+      branchByName[spec.name] = branchId;
     }
   }
   // Archive only now: policy writes refuse inactive group principals.
@@ -365,6 +392,7 @@ export async function seedSessionVisibilityFixture(
     users,
     boardIds: [sharedBoard, privateBoard, groupBoard],
     branchIds,
+    branchByName,
     sessionIds,
     deletedSessionIds,
   };
@@ -404,12 +432,22 @@ export async function exerciseSessionVisibilityParity(
   // The tiers must actually differ, or the parity below proves little.
   const sizes = new Set([...visibleBranches.values()].map((set) => set.size));
   expect(sizes.size).toBeGreaterThanOrEqual(4);
+  // Two active groups on one package: grants combine, and a matching `none`
+  // group shadows Others (the resolver's contract the SQL must reproduce).
+  const sees = (name: UserName, branch: string) =>
+    visibleBranches.get(users[name])?.has(fixture.branchByName[branch]);
+  expect(sees('groupMember', 'two-groups-viewer-and-none')).toBe(true);
+  expect(sees('viewerDirect', 'two-groups-viewer-and-none')).toBe(false);
+  expect(sees('outsider', 'two-groups-viewer-and-none')).toBe(true);
+  expect(sees('groupMember', 'two-groups-none-and-collaborator')).toBe(true);
+  expect(sees('viewerDirect', 'two-groups-none-and-collaborator')).toBe(true);
+  expect(sees('viewerRole', 'two-groups-none-and-collaborator')).toBe(false);
 
   const principals: [string, UserID | undefined][] = [
     ...USER_NAMES.map((name) => [name, users[name]] as [string, UserID]),
     // Superadmins and service accounts bypass at the hook: no visibleToUserId.
     ['unscoped', undefined],
-    // Not authenticated same-tenant callers (see PARITY_ONLY_PRINCIPALS).
+    // Not authenticated same-tenant callers: parity only, no oracle.
     ['unknown-principal', generateId() as UserID],
     ...(foreign ? [['foreign-owner', foreign.users.owner] as [string, UserID]] : []),
   ];
@@ -471,7 +509,33 @@ export async function exerciseSessionVisibilityParity(
     const current = await currentFindPage(db, opts);
     expect(current, label).toEqual(legacy);
     comparisons++;
+    expectOracle(label, opts, current);
     return current;
+  }
+  // Both forms compose the same SQL helpers (precedence, group sets, effective
+  // config), so a regression there moves them together: every in-contract page
+  // is also checked against the TypeScript resolver. Order is SQL's (old and
+  // new agree on it above); the oracle fixes membership, totals and page sizes.
+  const inContract = new Set<UserID | undefined>([undefined, ...Object.values(users)]);
+  const boardOf = new Map(all.map((s) => [s.session_id, s.branch_board_id ?? null]));
+  function expectOracle(label: string, opts: SessionPageOptions, page: Page): void {
+    if (!inContract.has(opts.visibleToUserId)) return;
+    const expected = expectedIds(opts.visibleToUserId, opts);
+    const ids = page.rows.map(([id]) => id);
+    expect(
+      ids.filter((id) => !expected.has(id)),
+      `${label}: oracle leak`
+    ).toEqual([]);
+    expect(new Set(ids).size, `${label}: oracle duplicates`).toBe(ids.length);
+    expect(
+      page.rows.filter(([id, board]) => boardOf.get(id) !== board),
+      `${label}: oracle board`
+    ).toEqual([]);
+    if (page.total !== undefined) expect(page.total, `${label}: oracle total`).toBe(expected.size);
+    const remaining = Math.max(0, expected.size - Math.max(0, opts.skip ?? 0));
+    expect(ids.length, `${label}: oracle page size`).toBe(
+      Math.min(opts.limit ?? Number.POSITIVE_INFINITY, remaining)
+    );
   }
   function expectedIds(principal: UserID | undefined, opts: SessionPageOptions): Set<string> {
     const visible = principal ? visibleBranches.get(principal) : undefined;
@@ -510,11 +574,6 @@ export async function exerciseSessionVisibilityParity(
           sortUpdatedAt: -1,
         });
         expect(full.total).toBe(full.rows.length);
-        if (!PARITY_ONLY_PRINCIPALS.has(principalLabel)) {
-          expect(new Set(full.rows.map(([id]) => id)), `${label} oracle`).toEqual(
-            expectedIds(visibleToUserId, opts)
-          );
-        }
         // Uncounted updated_at pages up to MAX_ID_LIST with `archived` set take
         // the per-row probe for the caller's own sessions; other orders, larger
         // pages and an unset `archived` keep the branch-set form.
@@ -548,14 +607,23 @@ export async function exerciseSessionVisibilityParity(
       // Walk active pages past the end with both counted and no-count windows.
       const active = { ...filter, archived: false, visibleToUserId };
       const total = (await compare(`${label} total`, { ...active, limit: 0 })).total!;
+      const walked: SessionID[] = [];
       for (let skip = 0; skip <= total + 4; skip += 4) {
-        await compare(`${label} page skip=${skip}`, {
+        const page = await compare(`${label} page skip=${skip}`, {
           ...active,
           sortUpdatedAt: -1,
           limit: 4,
           skip,
           ...(skip % 8 === 4 ? { includeTotal: false } : {}),
         });
+        walked.push(...page.rows.map(([id]) => id));
+      }
+      // The pages tile the whole set: nothing skipped or repeated across them.
+      expect(walked.length, `${label} walk`).toBe(new Set(walked).size);
+      if (inContract.has(visibleToUserId)) {
+        expect(new Set(walked), `${label} walk oracle`).toEqual(
+          expectedIds(visibleToUserId, active)
+        );
       }
     }
   }

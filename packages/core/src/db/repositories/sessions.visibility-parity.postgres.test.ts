@@ -31,6 +31,6 @@ describe.skipIf(!url || process.env.AGOR_DB_DIALECT !== 'postgresql')(
         const local = await seedSessionVisibilityFixture(scoped);
         expect(await exerciseSessionVisibilityParity(scoped, local, foreign)).toBeGreaterThan(1000);
       });
-    }, 300_000);
+    }, 600_000);
   }
 );
