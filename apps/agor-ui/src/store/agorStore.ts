@@ -55,6 +55,8 @@ export interface BoardPartitionState {
   loadEpoch: number;
   /** The load that owns a `loading` entry; only its owner may settle or release it. */
   loadId?: number;
+  /** The load that settled a `loaded` entry (absent when first paint or a resync did). */
+  loadedBy?: number;
   error?: string;
 }
 
@@ -200,8 +202,12 @@ interface AgorActions {
   setBoardPartition: (boardId: string, state: BoardPartitionState | null) => void;
   /** Merge user-scope flags; a no-op when nothing changes. */
   setUserScope: (partial: Partial<UserScopeMeta>) => void;
-  /** Forget every board partition (authority transitions orphan their loads). */
-  resetBoardPartitions: () => void;
+  /**
+   * Forget every board partition (authority transitions orphan their loads)
+   * and bump `partitionEpoch`; `keepBoardId`'s entry survives when given (a
+   * reconnect resync keeps a board that loaded after it started).
+   */
+  resetBoardPartitions: (keepBoardId?: string) => void;
   /** Record that a global snapshot of these collections has applied. */
   markGloballyHydrated: (collections: readonly string[]) => void;
   /** Record that one session's MCP links are loaded. */
@@ -226,6 +232,7 @@ function shallowEqualPartition(a: BoardPartitionState, b: BoardPartitionState): 
     a.authorityScope === b.authorityScope &&
     a.loadEpoch === b.loadEpoch &&
     a.loadId === b.loadId &&
+    a.loadedBy === b.loadedBy &&
     a.error === b.error
   );
 }
@@ -374,8 +381,13 @@ export const agorStore = createStore<AgorState>()(
       );
       if (changed) set(partial as Partial<AgorState>);
     },
-    resetBoardPartitions: () =>
-      set({ boardPartitions: new Map(), partitionEpoch: get().partitionEpoch + 1 }),
+    resetBoardPartitions: (keepBoardId) => {
+      const kept = keepBoardId ? get().boardPartitions.get(keepBoardId) : undefined;
+      set({
+        boardPartitions: kept && keepBoardId ? new Map([[keepBoardId, kept]]) : new Map(),
+        partitionEpoch: get().partitionEpoch + 1,
+      });
+    },
     markGloballyHydrated: (collections) => {
       const current = get().globallyHydrated;
       const additions = collections.filter(

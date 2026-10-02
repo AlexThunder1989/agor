@@ -26,6 +26,8 @@ import {
   makeBoardReadySelector,
   markBoardPartitionLoaded,
   otherLoadedScopes,
+  partitionLoadMark,
+  partitionLoadSince,
   retryBoardPartition,
 } from './boardPartitions';
 import { captureLoadLifetime } from './loadLifetime';
@@ -270,6 +272,36 @@ describe('loadBoardPartition', () => {
     await load;
     expect(ready()).toBe(true);
     expect(agorStore.getState().sessionById.has('s-1')).toBe(true);
+  });
+
+  it('offers a resync only the loads that started after its mark, in flight or loaded', async () => {
+    const lifetime = captureLoadLifetime()!;
+    const { client, release } = makePartitionClient({});
+    // Started before the resync's mark: never reused.
+    const before = loadBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true });
+    const mark = partitionLoadMark();
+    expect(partitionLoadSince(BOARD, lifetime, mark)).toBe(undefined);
+    release();
+    await before;
+    expect(partitionLoadSince(BOARD, lifetime, mark)).toBe(undefined);
+
+    // Started after it: the in-flight promise, then reused once loaded.
+    agorStore.getState().resetBoardPartitions();
+    const second = makePartitionClient({});
+    const after = loadBoardPartition(second.client, BOARD, { canUseMemberWorkspaceServices: true });
+    expect(partitionLoadSince(BOARD, lifetime, mark)).toBe(after);
+    second.release();
+    await after;
+    await expect(partitionLoadSince(BOARD, lifetime, mark)).resolves.toBe(undefined);
+    // Another lifetime never matches.
+    expect(
+      partitionLoadSince(BOARD, { ...lifetime, loadEpoch: lifetime.loadEpoch + 1 }, mark)
+    ).toBe(undefined);
+    // A resync keeps that board loaded across its reset, and only that board.
+    markBoardPartitionLoaded('board-2', lifetime);
+    agorStore.getState().resetBoardPartitions(BOARD);
+    expect(agorStore.getState().boardPartitions.get(BOARD)?.status).toBe('loaded');
+    expect(agorStore.getState().boardPartitions.has('board-2')).toBe(false);
   });
 
   it('dedupes in-flight loads of the same board', async () => {

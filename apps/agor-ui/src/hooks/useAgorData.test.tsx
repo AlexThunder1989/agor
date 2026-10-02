@@ -2281,3 +2281,72 @@ describe('useAgorData — navigating while a reconnect resync runs', () => {
     expect(bReads).toBe(2);
   });
 });
+
+describe('useAgorData — navigating during the resync light batch', () => {
+  it.each(['loaded', 'in flight'])(
+    'reuses the destination board partition load (%s) instead of reading the board again',
+    async (state) => {
+      window.history.pushState({}, '', '/b/board-a/');
+      onTestFinished(() => window.history.pushState({}, '', '/'));
+      const boardA = { board_id: 'board-a', slug: 'board-a', name: 'A' };
+      const boardB = { board_id: 'board-b', slug: 'board-b', name: 'B' };
+      const { client, emitIo, onFetch, fetchArguments } = makeMockClient({
+        boards: [boardA, boardB],
+        'boards:get': boardA as never,
+      });
+      const { result, rerender } = renderHook(
+        ({ boardId }) => {
+          const data = useAgorData(client);
+          useBoardPartition(client, boardId, { canUseMemberWorkspaceServices: true });
+          return data;
+        },
+        { initialProps: { boardId: 'board-a' } }
+      );
+      await waitForInitialLoad(result);
+      await flush();
+
+      // Hold the resync in its light batch, before it resolves a board.
+      const light = deferred();
+      onFetch('card-types', 'findAll', (call) => (call === 2 ? light.promise : undefined));
+      const boardReads = (service: 'cards' | 'board-objects') =>
+        fetchArguments(service, 'findAll').filter(
+          (args) => (args as { query?: { board_id?: string } }).query?.board_id === 'board-b'
+        ).length;
+      // 'in flight': B's partition read is still pending when the resync
+      // resolves its board.
+      const heldB = deferred();
+      onFetch('cards', 'findAll', () => {
+        const args = fetchArguments('cards', 'findAll').at(-1) as { query?: { board_id?: string } };
+        return state === 'in flight' && args.query?.board_id === 'board-b'
+          ? heldB.promise
+          : undefined;
+      });
+      act(() => emitIo('connect'));
+      await flush();
+
+      // Navigate to B: its partition read starts while the resync is held.
+      window.history.pushState({}, '', '/b/board-b/');
+      rerender({ boardId: 'board-b' });
+      await waitFor(() => expect(boardReads('cards')).toBe(1));
+
+      await act(async () => {
+        light.resolve();
+        await light.promise;
+      });
+      await flush();
+      await act(async () => {
+        heldB.resolve();
+        await heldB.promise;
+      });
+      await flush();
+      await waitFor(() =>
+        expect(agorStore.getState().boardPartitions.get('board-b')?.status).toBe('loaded')
+      );
+      await flush();
+      // One read of B's annotations: the resync reused B's in-flight load.
+      expect(boardReads('cards')).toBe(1);
+      expect(boardReads('board-objects')).toBe(1);
+      expect(agorStore.getState().boardPartitions.get('board-b')?.status).toBe('loaded');
+    }
+  );
+});

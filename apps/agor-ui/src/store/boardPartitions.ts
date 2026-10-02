@@ -178,13 +178,54 @@ export function releaseResyncClaim(claim: { boardId: string; loadId: number } | 
   }
 }
 
+const inflight = new Map<string, Promise<void>>();
+
+// Loads dedupe per (authority, lifetime, partition epoch, board).
+function inflightKey(lifetime: LoadLifetime, partitionEpoch: number, boardId: string): string {
+  return `${lifetime.authorityScope}\u0000${lifetime.loadEpoch}\u0000${partitionEpoch}\u0000${boardId}`;
+}
+
+/** The sequence mark of partition loads started so far (see `partitionLoadSince`). */
+export function partitionLoadMark(): number {
+  return loadSequence;
+}
+
+/**
+ * A load of `boardId` that started after `sinceMark` under `lifetime`: its
+ * promise while in flight, a resolved one once it has loaded the board, else
+ * `undefined`. A reconnect resync reuses it instead of reading the board a
+ * second time: the load started after the resync did, so its snapshot
+ * already reflects everything the resync must reconcile.
+ */
+export function partitionLoadSince(
+  boardId: string,
+  lifetime: LoadLifetime,
+  sinceMark: number
+): Promise<void> | undefined {
+  const entry = agorStore.getState().boardPartitions.get(boardId);
+  if (
+    !entry ||
+    entry.authorityScope !== lifetime.authorityScope ||
+    entry.loadEpoch !== lifetime.loadEpoch
+  ) {
+    return undefined;
+  }
+  if (entry.status === 'loaded') {
+    return entry.loadedBy !== undefined && entry.loadedBy > sinceMark
+      ? Promise.resolve()
+      : undefined;
+  }
+  if (entry.status !== 'loading' || entry.loadId === undefined || entry.loadId <= sinceMark) {
+    return undefined;
+  }
+  return inflight.get(inflightKey(lifetime, agorStore.getState().partitionEpoch, boardId));
+}
+
 /** Forget a failed partition so `useBoardPartition` loads it again. */
 export function retryBoardPartition(boardId: string): void {
   const state = agorStore.getState().boardPartitions.get(boardId);
   if (state?.status === 'error') agorStore.getState().setBoardPartition(boardId, null);
 }
-
-const inflight = new Map<string, Promise<void>>();
 
 async function fetchBoardPartition(
   client: AgorClient,
@@ -250,7 +291,7 @@ export function loadBoardPartition(
   // Per partition epoch too: a load orphaned by a reset (its entry is gone,
   // so it can never settle the board) must not absorb the board's next request.
   const partitionEpoch = agorStore.getState().partitionEpoch;
-  const key = `${authorityScope}\u0000${loadEpoch}\u0000${partitionEpoch}\u0000${boardId}`;
+  const key = inflightKey(lifetime, partitionEpoch, boardId);
   const existing = inflight.get(key);
   if (existing) return existing;
 
@@ -282,7 +323,12 @@ export function loadBoardPartition(
         // `applyMaps` notifies subscribers synchronously; one may have ended
         // this lifetime (logout, remount) or started a load that owns the entry.
         if (!isCurrent()) return;
-        store().setBoardPartition(boardId, { status: 'loaded', authorityScope, loadEpoch });
+        store().setBoardPartition(boardId, {
+          status: 'loaded',
+          authorityScope,
+          loadEpoch,
+          loadedBy: loadId,
+        });
         return;
       } catch (err) {
         if (!isCurrent()) return;

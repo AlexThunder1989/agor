@@ -61,6 +61,8 @@ import {
   getDisplayedBoardId,
   markBoardPartitionLoaded,
   otherLoadedScopes,
+  partitionLoadMark,
+  partitionLoadSince,
   releaseResyncClaim,
 } from '../store/boardPartitions';
 import {
@@ -573,6 +575,9 @@ export function useAgorData(
       // A resync after an authority transition (every board unloaded) claims
       // the displayed board so its partition hook doesn't read it a second
       // time; the apply below settles it, `finally` releases it otherwise.
+      // Partition loads started after this mark postdate the resync, so it
+      // can reuse one for its board (see `inflightBoardPartitionLoad`).
+      const partitionMark = partitionLoadMark();
       const resyncClaim = silent ? claimDisplayedBoardForResync(loadLifetime) : null;
 
       try {
@@ -900,6 +905,15 @@ export function useAgorData(
         // No displayed board (Home): board objects and cards are not read.
         const deferAnnotations = !boardScope;
         if (deferAnnotations && !silent) setInitialLoadPlan(HOME_INITIAL_LOAD_KEYS);
+        // The UI navigated to this board while the resync ran (its light
+        // batch): the board's own partition load, started after the resync,
+        // reconciles it. Await (or reuse) that load rather than read the board
+        // twice.
+        const reusedPartitionLoad =
+          silent && boardScope
+            ? partitionLoadSince(boardScope, loadLifetime, partitionMark)
+            : undefined;
+        const readBoardAnnotations = !!boardScope && !reusedPartitionLoad;
 
         // ── Essential gated fetches — HEAVY + board-scoped batch ────────
         // Scoped to the displayed board when resolved (board_id pushes to SQL
@@ -947,7 +961,7 @@ export function useAgorData(
                 },
               })
             : Promise.resolve([] as Session[]),
-          deferAnnotations
+          !readBoardAnnotations
             ? Promise.resolve(null)
             : track(
                 'board-objects',
@@ -970,7 +984,7 @@ export function useAgorData(
               .service('board-comments')
               .findAll({ query: { $limit: PAGINATION.DEFAULT_LIMIT } })
           ),
-          deferAnnotations
+          !readBoardAnnotations
             ? Promise.resolve(null)
             : track(
                 'cards',
@@ -982,12 +996,14 @@ export function useAgorData(
           // zones/text/markdown paint at first load — the boards list above is
           // lean. Only when a board is actually displayed (also on a reconnect).
           // Not tracked — not a loading-checklist item.
-          boardScope
+          readBoardAnnotations && boardScope
             ? // A failed get degrades gracefully rather than blocking first paint:
               // the board is then not marked loaded, and its partition load
               // fetches the record again.
               (client.service('boards').get(boardScope) as Promise<Board>).catch(() => null)
             : Promise.resolve(null),
+          // Settles (applied, dropped or failed); never rejects.
+          reusedPartitionLoad,
         ]);
         if (!authorityIsCurrent()) return false;
         debugTimer?.endFetchPhase();
@@ -1096,7 +1112,14 @@ export function useAgorData(
         // A reconnect unloads every board: their rows may have missed
         // deletions while disconnected, and their next partition load
         // reconciles them. The displayed board is reconciled right here.
-        if (silent) agorStore.getState().resetBoardPartitions();
+        // A reused partition load already reconciled its board (it started
+        // after this resync): keep the board loaded rather than unload it.
+        if (silent) {
+          const reused =
+            reusedPartitionLoad &&
+            agorStore.getState().boardPartitions.get(boardScope ?? '')?.status === 'loaded';
+          agorStore.getState().resetBoardPartitions(reused ? boardScope : undefined);
+        }
         // The displayed board's board objects and cards reconcile
         // (`replaceScope`, fenced like everything above): rows written live
         // during this load keep their live value, and rows the board no
@@ -1117,7 +1140,7 @@ export function useAgorData(
             branchById: branchesMap,
             userById: usersMap,
           };
-          if (!boardScope) return maps;
+          if (!boardScope || reusedPartitionLoad) return maps;
           return replaceScope(
             maps,
             boardPartitionScope(boardScope),
