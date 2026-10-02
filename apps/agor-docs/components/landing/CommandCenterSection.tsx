@@ -108,12 +108,14 @@ export function CommandCenterSection({
     <section
       className={hero ? `${styles.productShowcase} ${styles.sectionHero}` : styles.productShowcase}
       data-reveal
+      data-troupe-section="command-center"
     >
       <div className={styles.sectionHeader}>
         <span className={styles.eyebrow}>Stay sane with a lot of agents</span>
         <Heading>
-          A <span className={styles.headingStrong}>command center</span> for{' '}
-          <span className={styles.headingAccent}>agent work</span>
+          A <span className={styles.headingStrong}>command center</span>
+          <br />
+          for <span className={styles.headingAccent}>agent work</span>
         </Heading>
         {hero && <SectionHeroActions page="command-center" align="start" />}
       </div>

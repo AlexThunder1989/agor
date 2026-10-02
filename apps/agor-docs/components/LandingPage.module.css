@@ -1505,6 +1505,9 @@
 .problemCard {
   border-color: rgba(232, 196, 104, 0.14);
   background: linear-gradient(180deg, rgba(33, 29, 18, 0.55), rgba(17, 15, 10, 0.4));
+  /* Frosted glass: anything behind a card (the home page's cursor troupe,
+   * trapped in the silos) reads as being behind it. */
+  backdrop-filter: blur(1.5px);
 }
 
 .problemCard:hover {

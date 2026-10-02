@@ -77,6 +77,7 @@ export function TeammatesSection({
         hero ? `${styles.workspaceSection} ${styles.sectionHero}` : styles.workspaceSection
       }
       data-reveal
+      data-troupe-section="teammates"
     >
       <div className={styles.workspaceCopy}>
         <span className={styles.eyebrow}>Build on what your team teaches them</span>

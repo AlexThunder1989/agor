@@ -498,3 +498,8 @@
     transition: none;
   }
 }
+
+/* The home page's cursor troupe plays these three while it's on stage here. */
+:global(html[data-troupe-wt]) .cursor {
+  visibility: hidden;
+}

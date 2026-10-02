@@ -170,7 +170,7 @@ export function BoardSelector() {
   };
 
   const panel = (className: string) => (
-    <div className={`${styles.panel} ${className}`}>
+    <div className={`${styles.panel} ${className}`} data-troupe="board-panel">
       {media?.type === 'video' ? (
         <video
           key={media.src}
@@ -209,6 +209,7 @@ export function BoardSelector() {
       className={`${landing.showcaseSection} ${styles.section}`}
       ref={sectionRef}
       data-reveal
+      data-troupe-section="board"
     >
       <div className={landing.showcaseDivider} aria-hidden="true">
         <Aurora

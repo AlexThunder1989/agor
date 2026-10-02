@@ -5,7 +5,6 @@ import type { CSSProperties } from 'react';
 import { AI_ENABLEMENT_POST_URL } from '../../lib/links';
 import { CloudCtaLink } from '../CloudCtaLink';
 import styles from '../LandingPage.module.css';
-import { DemoButton } from './DemoButton';
 import { LandingLink, LearnMore } from './LandingLink';
 import type { LandingPageId } from './pages';
 import { SectionHeroActions } from './SectionHeroActions';
@@ -92,6 +91,7 @@ export function GovernanceSection({
     <section
       className={hero ? `${styles.controlSection} ${styles.sectionHero}` : styles.controlSection}
       data-reveal
+      data-troupe-section="governance"
     >
       <div>
         {hero ? (
@@ -127,13 +127,8 @@ export function GovernanceSection({
             </p>
           </>
         )}
-        {hero ? (
-          <SectionHeroActions page="governance" align="start" />
-        ) : (
-          <div className={styles.controlActions}>
-            <DemoButton className={styles.secondaryButton}>Book an Agor demo</DemoButton>
-          </div>
-        )}
+        {/* Home keeps just the Explore link; the landing page gets the CTAs. */}
+        {hero && <SectionHeroActions page="governance" align="start" />}
         {sampler && <LearnMore page="governance" />}
       </div>
       <ul className={styles.busList}>

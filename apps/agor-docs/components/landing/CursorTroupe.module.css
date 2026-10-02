@@ -7,9 +7,11 @@
   transition: filter 0.6s ease;
 }
 
-/* The problem section's register: the cast dims and warms toward amber. */
-.layer[data-problem] {
-  filter: saturate(0.35) sepia(0.55) brightness(0.8);
+/* Trapped: behind the problem section (its sections sit at z-index 1), so
+ * the cards' frosted glass is in front, and in the problem register. */
+.layer[data-behind] {
+  z-index: 0;
+  filter: saturate(0.6) sepia(0.4) brightness(1.15);
 }
 
 .cursor {
@@ -18,5 +20,18 @@
   left: 0;
   opacity: 0;
   transform-origin: 2px 1px;
+  will-change: transform, opacity;
+}
+
+/* Click pulse, centered on the cursor tip. */
+.ring {
+  position: absolute;
+  top: -30px;
+  left: -30px;
+  width: 60px;
+  height: 60px;
+  border: 2px solid;
+  border-radius: 50%;
+  opacity: 0;
   will-change: transform, opacity;
 }

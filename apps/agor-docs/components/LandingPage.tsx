@@ -29,8 +29,9 @@ export function LandingPage() {
       <MultiplayerSection sampler />
       <BoardSection sampler />
       <TeammatesSection sampler />
-      <RosterSection sampler />
+      {/* Command center between the two circular sections (ring, radar). */}
       <CommandCenterSection sampler />
+      <RosterSection sampler />
       <GovernanceSection sampler />
     </LandingShell>
   );

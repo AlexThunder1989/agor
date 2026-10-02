@@ -75,11 +75,12 @@ export function LandingShell({ ctaPrefix, children }: LandingShellProps) {
     <main ref={landingRef} id="nextra-skip-nav" className={styles.landingShell}>
       {children}
 
-      <section className={styles.finalCta} data-reveal>
+      <section className={styles.finalCta} data-reveal data-troupe-section="final">
         <div className={styles.ctaCard}>
           <h2>
             Bring your <span className={styles.headingStrong}>team</span> and{' '}
-            <span className={styles.headingAccent}>agents</span> together
+            <span className={styles.headingAccent}>agents</span>{' '}
+            <span data-troupe="together">together</span>
           </h2>
           <p>
             Start on your own with Agor Community Edition and bring colleagues in as you go, or talk

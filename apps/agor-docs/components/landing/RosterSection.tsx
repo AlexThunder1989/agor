@@ -84,6 +84,7 @@ export function RosterSection({
       id="roster"
       className={hero ? `${styles.rosterSection} ${styles.rosterHero}` : styles.rosterSection}
       data-reveal
+      data-troupe-section="roster"
     >
       <div className={styles.rosterCopy}>
         <div className={styles.sectionHeader}>

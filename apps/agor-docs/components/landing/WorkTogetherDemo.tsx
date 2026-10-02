@@ -587,10 +587,14 @@ export function WorkTogetherDemo() {
             />
           ))}
 
-          {s.cursors.map((c) =>
+          {s.cursors.map((c, index) =>
             c.op > 0 ? (
               <div
                 key={c.name}
+                // The home page's cursor troupe follows these and stands in
+                // for them (hidden via html[data-troupe-wt]); see CursorTroupe.
+                data-troupe-cursor={index}
+                data-pressed={c.press ? '' : undefined}
                 className={styles.cursor}
                 style={{
                   transform: `translate(${c.x}px, ${c.y}px) scale(${c.press ? 0.85 : 1})`,
