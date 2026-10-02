@@ -38,6 +38,8 @@ const USER_NAMES = [
   'viewerRole',
 ] as const;
 type UserName = (typeof USER_NAMES)[number];
+/** Principals outside the predicates' contract: compared for parity only. */
+const PARITY_ONLY_PRINCIPALS = new Set(['unknown-principal', 'foreign-owner']);
 
 export interface SessionVisibilityFixture {
   users: Record<UserName, UserID>;
@@ -373,8 +375,12 @@ export async function seedSessionVisibilityFixture(
  * created_by / exact-id reads: for every principal x query shape it returns
  * exactly the rows, order, board ids and totals of the pre-change branch-set
  * composition, and exactly the rows the TypeScript point resolver allows.
- * `foreign` (PostgreSQL) is another tenant's fixture; its ids and principals
- * must never resolve here.
+ * `foreign` (PostgreSQL) is another tenant's fixture: its resources (session,
+ * branch and board ids, creators) must never resolve here. Principals are a
+ * different matter: the predicates assume an authenticated same-tenant
+ * caller (the hooks pass only the caller's own id), so an unknown or foreign
+ * principal is compared for parity only, never against the oracle; Others
+ * still applies to it in both forms.
  */
 export async function exerciseSessionVisibilityParity(
   db: Database,
@@ -403,7 +409,8 @@ export async function exerciseSessionVisibilityParity(
     ...USER_NAMES.map((name) => [name, users[name]] as [string, UserID]),
     // Superadmins and service accounts bypass at the hook: no visibleToUserId.
     ['unscoped', undefined],
-    // Outside the predicate contract (not a same-tenant principal); still identical.
+    // Not authenticated same-tenant callers (see PARITY_ONLY_PRINCIPALS).
+    ['unknown-principal', generateId() as UserID],
     ...(foreign ? [['foreign-owner', foreign.users.owner] as [string, UserID]] : []),
   ];
   const someIds = (pick: (index: number) => boolean) =>
@@ -503,7 +510,7 @@ export async function exerciseSessionVisibilityParity(
           sortUpdatedAt: -1,
         });
         expect(full.total).toBe(full.rows.length);
-        if (principalLabel !== 'foreign-owner') {
+        if (!PARITY_ONLY_PRINCIPALS.has(principalLabel)) {
           expect(new Set(full.rows.map(([id]) => id)), `${label} oracle`).toEqual(
             expectedIds(visibleToUserId, opts)
           );
