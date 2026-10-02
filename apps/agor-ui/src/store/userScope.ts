@@ -604,12 +604,12 @@ export async function startUserScope(
   // Every reference is known once all of my sessions and my branches are in;
   // teammates (U3) only shrink the id list, so they needn't succeed.
   const ok = (index: number) => settled[index].status === 'fulfilled' && settled[index].value;
-  if (!ok(0) || !ok(1)) return;
-  run.referencesKnown = true;
-  // Immediate catch-up scan (not debounced): references U1 added are queued now.
+  if (ok(0) && ok(1)) run.referencesKnown = true;
+  // Immediate catch-up scan (not debounced), even when U1 or U2 failed: the
+  // references a read that did land added are queued now. Resolve only once
+  // those follow-up id reads settle, so a caller holding the global snapshots
+  // for the scope doesn't release them before the U1-only references are on
+  // the wire. Completeness (`homeBranchesLoaded`) still needs referencesKnown.
   checkReferences(run);
-  // Resolve only once those follow-up id reads settle, so a caller holding
-  // the global snapshots for the scope doesn't release them before the
-  // U1-only references are on the wire.
   await idReadsDrained(run);
 }

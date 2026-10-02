@@ -1839,6 +1839,63 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
     await waitFor(() => expect(agorStore.getState().homeBranchesLoaded).toBe(true));
   });
 
+  it('sends the U1-only id reads before the global snapshots even when my branches fail', async () => {
+    window.history.pushState({}, '', '/');
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const page = Array.from({ length: 200 }, (_, i) =>
+      makeSession({ session_id: `s-${i}`, created_by: 'user-me', branch_id: 'b-1' })
+    );
+    const older = makeSession({ session_id: 's-older', created_by: 'user-me', branch_id: 'b-old' });
+    // The global session snapshot holds every session too, as the daemon's would.
+    const seed: Record<string, unknown[]> = {
+      'sessions:find': page,
+      'sessions:findAll': [...page, older],
+    };
+    const mock = makeMockClient(seed);
+    mock.onFetch('sessions', 'find', (call) => {
+      if (call === 2) seed['sessions:find'] = [...page, older];
+      return undefined;
+    });
+    // Hold the global branch snapshot so its compatibility pass can't settle
+    // b-old first; the order of the requests is what's under test.
+    let releaseGlobalBranches!: () => void;
+    const globalBranches = new Promise<void>((resolve) => {
+      releaseGlobalBranches = resolve;
+    });
+    mock.onFetch('branches', 'findAll', () => globalBranches);
+    const order: string[] = [];
+    const service = mock.client.service;
+    (mock.client as { service: unknown }).service = (name: string) => {
+      const svc = service(name);
+      for (const method of ['find', 'findAll'] as const) {
+        const original = svc[method];
+        svc[method] = vi.fn((args?: { query?: Record<string, unknown> }) => {
+          const ids = (args?.query?.branch_id as { $in?: string[] } | undefined)?.$in;
+          if (name === 'branches' && args?.query?.created_by) {
+            // U2 (my branches) fails transiently; U1 still succeeds.
+            order.push('u2');
+            return Promise.reject(new Error('socket timeout'));
+          }
+          order.push(ids ? `ids:${ids.join(',')}` : `${name}:${method}`);
+          return original(args);
+        });
+      }
+      return svc;
+    };
+    const { result } = renderHook(() => useAgorData(mock.client, authority));
+    await waitForInitialLoad(result);
+    const u1OnlyRead = () =>
+      order.findIndex((entry) => entry.startsWith('ids:') && entry.includes('b-old'));
+    await waitFor(() => {
+      expect(order).toContain('sessions:findAll');
+      expect(u1OnlyRead()).toBeGreaterThanOrEqual(0);
+    });
+    releaseGlobalBranches();
+    expect(order).toContain('u2');
+    expect(u1OnlyRead()).toBeLessThan(order.indexOf('sessions:findAll'));
+    expect(u1OnlyRead()).toBeLessThan(order.indexOf('branches:findAll'));
+  });
+
   it("never applies a load that outlived its mount into the next user's store", async () => {
     window.history.pushState({}, '', '/');
     const seed: Record<string, unknown[]> = {

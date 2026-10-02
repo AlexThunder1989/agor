@@ -305,6 +305,30 @@ describe('user scope', () => {
     });
   });
 
+  it('sends the id reads U1 triggered before resolving even when my branches fail', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { client, calls } = makeClient({
+      mine: () => [session('s-old', 'br-old')],
+      myBranches: () => Promise.reject(new Error('socket timeout')),
+      byIds: (ids) => ids.map((id) => branch(id)),
+    });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: false });
+    // Sent (and drained) before the start resolves, not by the debounced scan.
+    expect(
+      calls.some((c) =>
+        (c.query.branch_id as { $in?: string[] } | undefined)?.$in?.includes('br-old')
+      )
+    ).toBe(true);
+    expect(agorStore.getState().branchById.has('br-old')).toBe(true);
+    // Without my branches the references aren't all known: no completeness.
+    expect(flags()).toEqual({
+      mySessionsLoaded: true,
+      mySessionsTruncated: false,
+      teammatesLoaded: false,
+      homeBranchesLoaded: false,
+    });
+  });
+
   it('drops a run whose authority changed, and resets with the maps', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
