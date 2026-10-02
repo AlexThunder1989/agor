@@ -69,10 +69,11 @@ export interface ArtifactNodeData {
   x: number;
   y: number;
   /** Lifecycle-safe delete: removes filesystem + board object + DB record */
+  /** `ticket`: captured when the confirmation opened (`null` is refused). */
   onDeleteArtifact?: (
     objectId: string,
     artifactId: string,
-    ticket?: BoardWriteTicket | null
+    ticket: BoardWriteTicket | null
   ) => void;
   /** Capture the write ticket when the delete confirmation opens. */
   beginArtifactDelete?: () => BoardWriteTicket | null;
@@ -191,7 +192,7 @@ export const ArtifactNode = ({
   const [consentOpen, setConsentOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   // Captured when the delete confirmation opens: a board reload drops it.
-  const [deleteTicket, setDeleteTicket] = useState<BoardWriteTicket | null | undefined>(undefined);
+  const [deleteTicket, setDeleteTicket] = useState<BoardWriteTicket | null>(null);
   const lastHashRef = useRef<string | null>(null);
   const sandpackConfig = payload?.sandpack_config;
   const sandpackOptions = sandpackConfig?.options;
@@ -440,7 +441,8 @@ export const ArtifactNode = ({
             open={deleteConfirmOpen}
             destroyOnHidden
             onOpenChange={(open) => {
-              if (open && mutationGate.canMutate) setDeleteTicket(data.beginArtifactDelete?.());
+              if (open && mutationGate.canMutate)
+                setDeleteTicket(data.beginArtifactDelete?.() ?? null);
               if (!open || mutationGate.canMutate) setDeleteConfirmOpen(open);
             }}
             title="Delete artifact?"

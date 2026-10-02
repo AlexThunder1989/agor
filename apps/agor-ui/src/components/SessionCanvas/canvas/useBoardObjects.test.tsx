@@ -202,10 +202,13 @@ describe('updateObject', () => {
       objectId: string,
       objectData: BoardObject
     ) => Promise<boolean>;
-    const onDelete = data.onDelete as (objectId: string) => Promise<void>;
+    const onDelete = data.onDelete as (
+      objectId: string,
+      ticket?: BoardWriteTicket | null
+    ) => Promise<void>;
 
     rerender({ canEdit: false });
-    await expect(onUpdate('a', { ...note, content: 'Updated' })).resolves.toBe(false);
+    await expect(onUpdate('a', { ...note, content: 'Updated' })).resolves.toBe('stale');
     await onDelete('a');
 
     expect(patch).not.toHaveBeenCalled();
@@ -243,17 +246,26 @@ describe('board reloads', () => {
     expect(ticket).not.toBe(null);
     agorStore.getState().resetBoardPartitions();
     loadBoard();
-    const onUpdate = data.onUpdate as (
+    // The markdown node's own writes are a confirmation's delete; an editor's
+    // update goes through the zone node's ticketed `onUpdate` (same function).
+    const zoneUpdate = result.current.objects.buildObjectNode('z', {
+      type: 'zone',
+      x: 0,
+      y: 0,
+      width: 10,
+      height: 10,
+      label: 'Z',
+    }).data.onUpdate as (
       id: string,
       objectData: BoardObject,
-      ticket?: BoardWriteTicket | null
-    ) => Promise<boolean | undefined>;
+      ticket: BoardWriteTicket | null
+    ) => Promise<boolean | 'stale'>;
     const onDelete = data.onDelete as (
       id: string,
-      ticket?: BoardWriteTicket | null
+      ticket: BoardWriteTicket | null
     ) => Promise<void>;
-    // Resolves `undefined`, which closes a dialog (no retry of a stale draft).
-    await expect(onUpdate('a', { ...note, content: 'Edited' }, ticket)).resolves.toBe(undefined);
+    // Resolves `'stale'`: nothing is sent, and a dialog keeps its draft.
+    await expect(zoneUpdate('a', { ...note, content: 'Edited' }, ticket)).resolves.toBe('stale');
     await onDelete('a', ticket);
     await expect(
       result.current.objects.batchUpdateObjectPositions({ a: { x: 5, y: 5 } }, ticket)
@@ -262,8 +274,32 @@ describe('board reloads', () => {
     expect(setNodes).not.toHaveBeenCalled();
     // A write begun after the reload goes through.
     const fresh = (data.beginBoardWrite as () => BoardWriteTicket | null)();
-    await expect(onUpdate('a', { ...note, content: 'Edited' }, fresh)).resolves.toBe(true);
+    await expect(zoneUpdate('a', { ...note, content: 'Edited' }, fresh)).resolves.toBe(true);
     expect(patch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('buildObjectNode', () => {
+  it('gives an optimistic node the ticket plumbing of a hydrated one, and refuses a missing ticket', async () => {
+    const { client, patch } = makeClient();
+    const board = makeBoard({});
+    const { result } = renderReorder(board, client);
+    const kinds: Array<[string, BoardObject]> = [
+      ['zone-new', { type: 'zone', x: 0, y: 0, width: 400, height: 300, label: 'New Zone' }],
+      ['markdown-new', { type: 'markdown', x: 0, y: 0, width: 300, content: 'Draft' }],
+    ];
+    for (const [id, objectData] of kinds) {
+      const node = result.current.buildObjectNode(id, objectData);
+      expect(node.data.beginBoardWrite).toBeTypeOf('function');
+      expect(node.data.beginBoardWrite()).not.toBe(null);
+    }
+    const zone = result.current.buildObjectNode('zone-new', kinds[0][1]);
+    const markdown = result.current.buildObjectNode('markdown-new', kinds[1][1]);
+    // A delayed write with no ticket is refused, never captured afresh.
+    await expect(zone.data.onUpdate('zone-new', kinds[0][1], null)).resolves.toBe('stale');
+    await zone.data.onDelete('zone-new', false, null);
+    await markdown.data.onDelete('markdown-new', null);
+    expect(patch).not.toHaveBeenCalled();
   });
 });
 
@@ -281,14 +317,19 @@ describe('deleteArtifact', () => {
       },
     });
     const { result, rerender } = renderReorder(board, client);
-    const onDeleteArtifact = result.current.getBoardObjectNodes()[0]?.data.onDeleteArtifact as (
+    const data = result.current.getBoardObjectNodes()[0]?.data;
+    const onDeleteArtifact = data.onDeleteArtifact as (
       objectId: string,
-      artifactId: string
+      artifactId: string,
+      ticket: BoardWriteTicket | null
     ) => Promise<void>;
+    // The confirmation opened while the connection was usable.
+    const ticket = (data.beginArtifactDelete as () => BoardWriteTicket | null)();
+    expect(ticket).not.toBe(null);
 
     connectionState.connecting = true;
     rerender({ effectiveCanEdit: true });
-    await onDeleteArtifact('artifact', 'artifact-1');
+    await onDeleteArtifact('artifact', 'artifact-1', ticket);
 
     expect(service).not.toHaveBeenCalled();
   });

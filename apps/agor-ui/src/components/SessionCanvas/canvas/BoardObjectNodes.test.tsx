@@ -188,6 +188,34 @@ describe('ZoneNode settings modal', () => {
     expect(beginBoardWrite).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps a label draft rejected by a board reload and re-applies it under a new ticket', async () => {
+    const opened = { boardId: 'board-1', partition: null, authGeneration: 1 };
+    const fresh = { boardId: 'board-1', partition: null, authGeneration: 2 };
+    const beginBoardWrite = vi.fn().mockReturnValueOnce(opened).mockReturnValue(fresh);
+    const onUpdate = vi.fn().mockResolvedValueOnce('stale').mockResolvedValue(true);
+    renderZone(vi.fn(), CONNECTED, { onUpdate, beginBoardWrite });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename zone' }));
+    const input = screen.getByDisplayValue('My Zone');
+    fireEvent.change(input, { target: { value: 'Draft label' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(await screen.findByText(/Board reloaded — changes not saved/)).toBeTruthy();
+    expect(screen.getByDisplayValue('Draft label')).toBeTruthy();
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(onUpdate.mock.calls[0][2]).toBe(opened);
+    // Leaving the editor does not retry under the old ticket.
+    fireEvent.blur(screen.getByDisplayValue('Draft label'));
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Re-apply to reloaded board' }));
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(2));
+    expect(onUpdate.mock.calls[1][1]).toMatchObject({ label: 'Draft label' });
+    expect(onUpdate.mock.calls[1][2]).toBe(fresh);
+    await waitFor(() =>
+      expect(screen.queryByText(/Board reloaded — changes not saved/)).not.toBeInTheDocument()
+    );
+  });
+
   it('mounts the settings modal only when the user opens it', () => {
     renderZone(vi.fn(), CONNECTED);
 

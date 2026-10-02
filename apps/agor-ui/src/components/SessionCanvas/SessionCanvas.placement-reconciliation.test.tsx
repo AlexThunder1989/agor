@@ -16,6 +16,8 @@ import { ConnectionProvider } from '../../contexts/ConnectionContext';
 import { EMPTY_MAPS } from '../../store/agorMaps';
 import { boardObjectPatched, sessionPatched } from '../../store/agorRealtimeActions';
 import { agorStore } from '../../store/agorStore';
+import { ZoneNode } from './canvas/BoardObjectNodes';
+import { MarkdownNode } from './canvas/MarkdownNode';
 import SessionCanvas from './SessionCanvas';
 
 interface FlowNode {
@@ -50,6 +52,7 @@ vi.mock('reactflow', async () => {
       </button>
     ),
     MiniMap: () => null,
+    NodeResizer: () => null,
     ReactFlow: (
       props: CapturedFlowProps & { children?: ReactNode; onInit?: (value: unknown) => void }
     ) => {
@@ -60,6 +63,7 @@ vi.mock('reactflow', async () => {
           getNode: (id: string) => flowProps?.nodes.find((node) => node.id === id),
           getNodes: () => flowProps?.nodes ?? [],
           getZoom: () => 1,
+          getViewport: () => ({ x: 0, y: 0, zoom: 1 }),
           screenToFlowPosition: (position: { x: number; y: number }) => position,
         });
       }, []);
@@ -629,6 +633,191 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Comment' }));
     });
     expect(create).not.toHaveBeenCalled();
+  });
+
+  /** Every `boards.patch` the canvas sent with `_action`, in order. */
+  const boardPatches = (patch: ReturnType<typeof vi.fn>) =>
+    patch.mock.calls
+      .map((call) => call[1] as { _action?: string; objectId?: string; objectData?: unknown })
+      .filter((data) => data?._action);
+
+  const renderCanvas = (client: AgorClient, canvasBoard: Board = board) => {
+    const ui = (next: Board) => (
+      <App>
+        <ConnectionProvider value={connected}>
+          <SessionCanvas
+            currentUserId={adminUser.user_id}
+            board={next}
+            client={client}
+            branches={[branch]}
+          />
+        </ConnectionProvider>
+      </App>
+    );
+    const view = render(ui(canvasBoard));
+    return { ...view, rerenderBoard: (next: Board) => view.rerender(ui(next)) };
+  };
+
+  /** A board-object node rendered on its own, as React Flow would. */
+  const renderNode = (node: ReactNode) => {
+    const ui = (child: ReactNode) => (
+      <App>
+        <ConnectionProvider value={connected}>{child}</ConnectionProvider>
+      </App>
+    );
+    const view = render(ui(node));
+    return { ...view, rerenderNode: (next: ReactNode) => view.rerender(ui(next)) };
+  };
+
+  it('a new zone label editor opened before the first ack never saves across a reload', async () => {
+    const patch = vi.fn(async () => ({}));
+    const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
+    const canvas = renderCanvas(client);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: 'Add Zone' }));
+    const surface = screen.getByTestId('react-flow');
+    fireEvent.pointerDown(surface, { clientX: 100, clientY: 100, buttons: 1 });
+    fireEvent.pointerMove(surface, { clientX: 400, clientY: 400, buttons: 1 });
+    fireEvent.pointerUp(surface, { clientX: 400, clientY: 400 });
+    const created = boardPatches(patch).find((data) => data._action === 'upsertObject');
+    const zoneId = created?.objectId as string;
+    expect(zoneId).toMatch(/^zone-/);
+    type ZoneData = Parameters<typeof ZoneNode>[0]['data'];
+    const zoneData = () => (currentNode(zoneId) as FlowNode & { data: ZoneData }).data;
+
+    // The optimistic node: the label editor opens before the realtime ack.
+    const node = renderNode(<ZoneNode selected data={zoneData()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Rename zone' }));
+    const input = screen.getByDisplayValue('New Zone');
+
+    // The ack (a board event carries the zone), then a resync reload.
+    const acked = {
+      ...board,
+      objects: { ...board.objects, [zoneId]: created?.objectData },
+    } as unknown as Board;
+    act(() => canvas.rerenderBoard(acked));
+    node.rerenderNode(<ZoneNode selected data={zoneData()} />);
+    resyncReload();
+
+    fireEvent.change(input, { target: { value: 'Renamed after reload' } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+    expect(boardPatches(patch)).toHaveLength(1);
+  });
+
+  it('a new markdown note delete confirmed after a reload never dispatches', async () => {
+    const patch = vi.fn(async () => ({}));
+    const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
+    renderCanvas(client);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: 'Add Markdown Note' }));
+    act(() => {
+      (flowProps as unknown as { onPaneClick: (event: unknown) => void }).onPaneClick({
+        clientX: 50,
+        clientY: 60,
+      });
+    });
+    fireEvent.change(await screen.findByPlaceholderText(/# Title/), {
+      target: { value: 'A fresh note' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    });
+    expect(boardPatches(patch)).toHaveLength(1);
+    const noteNode = flowProps?.nodes.find((candidate) => candidate.type === 'markdown') as
+      | (FlowNode & { data: Parameters<typeof MarkdownNode>[0]['data'] })
+      | undefined;
+    expect(noteNode).toBeTruthy();
+
+    // Delete confirmation opened on the optimistic node, before the ack.
+    renderNode(<MarkdownNode data={noteNode?.data as never} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete note' }));
+    expect((await screen.findAllByText('Delete note?')).length).toBeGreaterThan(0);
+    resyncReload();
+    const okButtons = document.querySelectorAll<HTMLButtonElement>(
+      '.ant-modal-confirm-btns button'
+    );
+    await act(async () => {
+      fireEvent.click(okButtons[okButtons.length - 1]);
+    });
+    expect(boardPatches(patch).filter((data) => data._action === 'removeObject')).toHaveLength(0);
+  });
+
+  it('a resize batch suspended on its first PATCH sends nothing more once the canvas unmounts', async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const patch = vi.fn(async () => {
+      if (patch.mock.calls.length === 1) await pending;
+      return {};
+    });
+    const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
+    const view = renderCanvas(client);
+    await act(async () => {});
+    act(() => {
+      flowProps?.onNodesChange?.([
+        { type: 'dimensions', id: IMPLEMENTING_ZONE_ID, dimensions: { width: 2000, height: 900 } },
+        { type: 'dimensions', id: REVIEWING_ZONE_ID, dimensions: { width: 900, height: 900 } },
+      ]);
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(501);
+    });
+    expect(patch).toHaveBeenCalledTimes(1);
+    view.unmount();
+    await act(async () => {
+      release();
+    });
+    expect(patch).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a markdown draft rejected by a reload and saves it only on an explicit re-apply', async () => {
+    const noteBoard = {
+      ...board,
+      objects: {
+        ...board.objects,
+        'markdown-1': { type: 'markdown', x: 0, y: 0, width: 300, content: 'Old note' },
+      },
+    } as Board;
+    const patch = vi.fn(async () => ({}));
+    const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
+    renderCanvas(client, noteBoard);
+    await act(async () => {});
+    const note = currentNode('markdown-1') as FlowNode & {
+      data: { onEdit: (id: string, content: string, width: number) => void };
+    };
+    act(() => note.data.onEdit('markdown-1', 'Old note', 300));
+    fireEvent.change(await screen.findByDisplayValue('Old note'), {
+      target: { value: 'My careful draft' },
+    });
+    resyncReload();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    });
+    expect(patch).not.toHaveBeenCalled();
+    // The editor stays open with the draft and says why.
+    expect(screen.getByText('Edit Markdown Note')).toBeTruthy();
+    expect(screen.getByDisplayValue('My careful draft')).toBeTruthy();
+    expect(screen.getByText(/Board reloaded — changes not saved/)).toBeTruthy();
+    // Saving again under the old ticket still refuses.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    });
+    expect(patch).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Re-apply to reloaded board' }));
+    });
+    expect(boardPatches(patch)).toEqual([
+      expect.objectContaining({
+        _action: 'upsertObject',
+        objectId: 'markdown-1',
+        objectData: expect.objectContaining({ content: 'My careful draft' }),
+      }),
+    ]);
   });
 
   afterEach(() => {
