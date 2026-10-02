@@ -20,6 +20,8 @@ export interface CreateModalsProps {
   active: CreateModalKind | null;
   onClose: () => void;
   currentBoardId?: string;
+  /** Board pre-selected in the branch modal (current board, else main board). */
+  branchDefaultBoardId?: string;
   defaultPosition?: { x: number; y: number };
   availableAgents: AgenticToolOption[];
   currentUser?: User | null;
@@ -46,6 +48,7 @@ export const CreateModals: React.FC<CreateModalsProps> = ({
   active,
   onClose,
   currentBoardId,
+  branchDefaultBoardId,
   defaultPosition,
   availableAgents,
   currentUser,
@@ -73,6 +76,7 @@ export const CreateModals: React.FC<CreateModalsProps> = ({
       open={active === 'branch'}
       onClose={onClose}
       currentBoardId={currentBoardId}
+      defaultBoardId={branchDefaultBoardId}
       defaultPosition={defaultPosition}
       onCreateBranch={onCreateBranch}
       branchStorageConfig={branchStorageConfig}

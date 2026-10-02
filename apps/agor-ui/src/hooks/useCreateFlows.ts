@@ -7,7 +7,7 @@ import type {
   User,
 } from '@agor-live/client';
 import { getTeammateConfig } from '@agor-live/client';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { BranchStorageConfig } from '@/utils/branchStorage';
 import type { BranchUpdate } from '../components/BranchModal/useBranchModalForm';
 import type { BranchTabConfig } from '../components/CreateDialog/tabs/BranchTab';
@@ -42,7 +42,7 @@ export type CreateBranchFn = (
     ref: string;
     refType?: 'branch' | 'tag';
     createBranch: boolean;
-    sourceBranch: string;
+    sourceBranch?: string;
     sourceRemoteUrl?: string;
     pullLatest: boolean;
     issue_url?: string;
@@ -121,6 +121,15 @@ export function useCreateFlows(options: UseCreateFlowsOptions): UseCreateFlowsRe
     },
     [getDefaultPosition]
   );
+
+  // Default board for the branch modal: the board the user is on, else their
+  // accessible main board, else none (the field stays required). boardById only
+  // holds boards the user can access, so `.has` doubles as the access check.
+  const branchDefaultBoardId = useMemo(() => {
+    if (currentBoardId) return currentBoardId;
+    const mainBoardId = currentUser?.preferences?.mainBoardId;
+    return mainBoardId && agorStore.getState().boardById.has(mainBoardId) ? mainBoardId : undefined;
+  }, [currentBoardId, currentUser]);
 
   const openCreateBoardTeammate = useCallback(() => {
     if (!currentBoardId) return;
@@ -260,6 +269,7 @@ export function useCreateFlows(options: UseCreateFlowsOptions): UseCreateFlowsRe
       active: activeCreateModal,
       onClose: closeCreate,
       currentBoardId,
+      branchDefaultBoardId,
       defaultPosition: defaultPosition || undefined,
       availableAgents,
       currentUser,

@@ -22,7 +22,10 @@ export interface CreateBranchModalProps {
   onClose: () => void;
   /** Render edge-to-edge (mobile). */
   fullScreen?: boolean;
+  /** The board currently open; viewport-centre placement only applies to it. */
   currentBoardId?: string;
+  /** Board pre-selected in the form (current board, else accessible main board). */
+  defaultBoardId?: string;
   defaultPosition?: { x: number; y: number };
   onCreateBranch: (config: BranchTabConfig) => void | Promise<void>;
   branchStorageConfig?: BranchStorageConfig;
@@ -34,6 +37,7 @@ export const CreateBranchModal: React.FC<CreateBranchModalProps> = ({
   onClose,
   fullScreen,
   currentBoardId,
+  defaultBoardId,
   defaultPosition,
   onCreateBranch,
   branchStorageConfig,
@@ -86,6 +90,7 @@ export const CreateBranchModal: React.FC<CreateBranchModalProps> = ({
         repoById={repoById}
         boardById={boardById}
         currentBoardId={currentBoardId}
+        defaultBoardId={defaultBoardId}
         defaultPosition={defaultPosition}
         onValidityChange={setIsValid}
         formRef={formRef}
