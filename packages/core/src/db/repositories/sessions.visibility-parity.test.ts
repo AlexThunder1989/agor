@@ -45,6 +45,8 @@ dbTest('routes only bounded reads to the per-row probe', async ({ db }) => {
     // The ordered scan passes skip + limit of my rows before it can stop.
     ['deep offset', { ...ownPage, skip: 10_000 }, 'branch-set'],
     ['offset past the cap', { ...ownPage, skip: 1 }, 'branch-set'],
+    // Unreachable through the service ($skip >= 0), but never a small page here.
+    ['negative offset', { ...ownPage, skip: -1000, limit: 1100 }, 'branch-set'],
     ['limit past the cap', { ...ownPage, limit: 201 }, 'branch-set'],
     // Without the archived equality no index yields the order: every own row is probed.
     ['archived unset', { ...ownPage, archived: undefined }, 'branch-set'],

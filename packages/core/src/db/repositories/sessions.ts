@@ -154,6 +154,11 @@ export interface SessionPageOptions {
  */
 function probesVisibilityPerRow(opts: SessionPageOptions): boolean {
   if (opts.sessionIds !== undefined) return opts.sessionIds.length <= PAGINATION.MAX_ID_LIST;
+  // Checked here, not assumed from findPage's no-count guard: a missing,
+  // fractional or negative window must not pass as a small page.
+  const { limit, skip = 0 } = opts;
+  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 0) return false;
+  if (!Number.isInteger(skip) || skip < 0) return false;
   return (
     opts.createdBy !== undefined &&
     opts.createdBy === opts.visibleToUserId &&
@@ -163,7 +168,7 @@ function probesVisibilityPerRow(opts: SessionPageOptions): boolean {
     opts.boardId === undefined &&
     opts.branchId === undefined &&
     opts.branchIds === undefined &&
-    (opts.skip ?? 0) + opts.limit! <= PAGINATION.MAX_ID_LIST
+    limit + skip <= PAGINATION.MAX_ID_LIST
   );
 }
 
