@@ -141,6 +141,33 @@ export interface SessionPageOptions {
 }
 
 /**
+ * Whether `findPage` probes each candidate's branch instead of first building
+ * the caller's visible-branch set. The set has a fixed cost even for a few
+ * rows; a probe costs per candidate examined, so it is used only where that
+ * count is small:
+ * - an exact id list of at most `MAX_ID_LIST` (bounded by its length);
+ * - an uncounted, unscoped page of the caller's own sessions with `archived`
+ *   set and sorted by `updated_at`, so the `(archived, updated_at)` index
+ *   yields rows in order and the scan stops after about `skip + limit` own
+ *   rows. A heuristic, not a hard bound: own rows on branches the caller has
+ *   since lost still cost a probe each.
+ */
+function probesVisibilityPerRow(opts: SessionPageOptions): boolean {
+  if (opts.sessionIds !== undefined) return opts.sessionIds.length <= PAGINATION.MAX_ID_LIST;
+  return (
+    opts.createdBy !== undefined &&
+    opts.createdBy === opts.visibleToUserId &&
+    opts.includeTotal === false &&
+    opts.archived !== undefined &&
+    opts.sortUpdatedAt !== undefined &&
+    opts.boardId === undefined &&
+    opts.branchId === undefined &&
+    opts.branchIds === undefined &&
+    (opts.skip ?? 0) + opts.limit! <= PAGINATION.MAX_ID_LIST
+  );
+}
+
+/**
  * Session repository implementation
  */
 export class SessionRepository implements BaseRepository<Session, Partial<Session>> {
@@ -624,20 +651,10 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
       if (opts.archived !== undefined) conditions.push(eq(sessions.archived, opts.archived));
       if (opts.visibleToUserId) {
         // Same branch.view policy either way; only the evaluation shape differs.
-        // The branch-set form has a fixed cost (the caller's whole visible set)
-        // even for a few rows; the per-row probe costs per candidate examined.
-        // Use the probe only where that count is bounded: an exact id list, or
-        // an uncounted page of the caller's own sessions (which sit on branches
-        // they could open sessions on, so the scan stops after about `limit`).
         // Outer board/branch filters already pin the branch, so the probe
         // needs no scope. Parity: sessions.visibility-parity-test-helpers.ts.
-        const boundedCandidates =
-          (opts.sessionIds !== undefined && opts.sessionIds.length <= PAGINATION.MAX_ID_LIST) ||
-          (opts.createdBy === opts.visibleToUserId &&
-            opts.includeTotal === false &&
-            opts.limit! <= PAGINATION.MAX_ID_LIST);
         conditions.push(
-          boundedCandidates
+          probesVisibilityPerRow(opts)
             ? visibleBranchReferenceAccessExists(this.db, opts.visibleToUserId, sessions.branch_id)
             : inVisibleBranchSet(this.db, opts.visibleToUserId, sessions.branch_id, opts)
         );

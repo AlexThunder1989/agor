@@ -109,6 +109,14 @@ export async function legacySessionPage(db: Database, opts: SessionPageOptions):
   };
 }
 
+/** Which visibility form a captured sessions statement composed. */
+export function sessionVisibilityForm(statement: string): 'per-row' | 'branch-set' {
+  const perRow = statement.includes('"branches"."branch_id" = "sessions"."branch_id"');
+  const branchSet = /"sessions"\."branch_id" IN \(/.test(statement);
+  if (perRow === branchSet) throw new Error(`Ambiguous visibility form: ${statement}`);
+  return perRow ? 'per-row' : 'branch-set';
+}
+
 async function currentFindPage(db: Database, opts: SessionPageOptions): Promise<Page> {
   const page = await new SessionRepository(db).findPage(opts);
   return {
@@ -500,14 +508,19 @@ export async function exerciseSessionVisibilityParity(
             expectedIds(visibleToUserId, opts)
           );
         }
-        // Uncounted pages up to MAX_ID_LIST take the per-row probe for the
-        // caller's own sessions; larger ones keep the branch-set form.
-        for (const limit of [PAGINATION.MAX_ID_LIST, 1000]) {
-          await compare(`${label} archived=${archived} no-count limit=${limit}`, {
+        // Uncounted updated_at pages up to MAX_ID_LIST with `archived` set take
+        // the per-row probe for the caller's own sessions; other orders, larger
+        // pages and an unset `archived` keep the branch-set form.
+        for (const window of [
+          { limit: PAGINATION.MAX_ID_LIST, sortUpdatedAt: -1 as const },
+          { limit: PAGINATION.MAX_ID_LIST, sortUpdatedAt: 1 as const },
+          { limit: PAGINATION.MAX_ID_LIST, skip: 7, sortUpdatedAt: -1 as const },
+          { limit: 1000, sortCreatedAt: 1 as const },
+        ]) {
+          await compare(`${label} archived=${archived} no-count ${JSON.stringify(window)}`, {
             ...opts,
+            ...window,
             includeTotal: false,
-            limit,
-            sortCreatedAt: 1,
           });
         }
         await compare(`${label} archived=${archived} count-only`, { ...opts, limit: 0 });
@@ -525,13 +538,12 @@ export async function exerciseSessionVisibilityParity(
           });
         }
       }
-      // Walk pages past the end with both counted and no-count windows.
-      const total = (await compare(`${label} total`, { ...filter, visibleToUserId, limit: 0 }))
-        .total!;
+      // Walk active pages past the end with both counted and no-count windows.
+      const active = { ...filter, archived: false, visibleToUserId };
+      const total = (await compare(`${label} total`, { ...active, limit: 0 })).total!;
       for (let skip = 0; skip <= total + 4; skip += 4) {
         await compare(`${label} page skip=${skip}`, {
-          ...filter,
-          visibleToUserId,
+          ...active,
           sortUpdatedAt: -1,
           limit: 4,
           skip,
