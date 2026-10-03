@@ -115,7 +115,9 @@ for (const status of ['failed', 'cleaned', 'deleted', 'ready', 'creating'] as co
       });
       const maintenance = new BranchMaintenanceRepository(db);
       for (const kind of ['delete', 'cleanup', 'workspace_write'] as const) {
-        await expect(maintenance.claim(branch.branch_id, kind)).rejects.toThrow('overlaps');
+        await expect(maintenance.claim(branch.branch_id, kind)).rejects.toThrow(
+          /overlaps another branch; use Archive → Leave untouched.*installation operator/
+        );
       }
       expect((await branches.findById(branch.branch_id))?.deletion_status).toBeUndefined();
       const { claim } = await maintenance.claim(branch.branch_id, 'metadata_archive');
@@ -146,7 +148,12 @@ for (const literal of ['percent%', 'under_score', 'escape!', 'back\\slash']) {
         .replace('!', '')
         .replace('\\', '');
       await repo.update(branch.branch_id, {
-        path: relation === 'parent' || relation === 'unrelated-parent' ? `${path}/child` : path,
+        path:
+          relation === 'parent'
+            ? `${path}/child`
+            : relation === 'unrelated-parent'
+              ? `${lookalike}/child`
+              : path,
       });
       await repo.create({
         repo_id: branch.repo_id,
@@ -158,9 +165,7 @@ for (const literal of ['percent%', 'under_score', 'escape!', 'back\\slash']) {
             ? `${path}/child`
             : relation === 'unrelated-child'
               ? `${lookalike}/child`
-              : relation === 'unrelated-parent'
-                ? lookalike
-                : path,
+              : path,
         created_by: user.user_id,
       });
       const maintenance = new BranchMaintenanceRepository(db);

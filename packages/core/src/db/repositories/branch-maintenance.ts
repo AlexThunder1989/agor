@@ -165,7 +165,7 @@ export class BranchMaintenanceRepository {
           .one();
         if (overlap)
           throw new RepositoryError(
-            'Branch storage overlaps another branch; use metadata-only archival or reconcile ownership before filesystem maintenance'
+            'Branch storage overlaps another branch; use Archive → Leave untouched, or ask the installation operator to investigate conflicting workspace paths before filesystem maintenance'
           );
       }
       // This same Branch lock excludes new queued work and dispatch claims.

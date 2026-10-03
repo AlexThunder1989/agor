@@ -313,8 +313,8 @@ it.skipIf(!url || process.env.AGOR_DB_DIALECT !== 'postgresql')(
             created_by: user.user_id,
           });
           await maintenance.release((await maintenance.claim(branch.branch_id, 'cleanup')).claim);
-          await repo.update(branch.branch_id, { path: `${path}/child` });
-          await repo.update(sibling.branch_id, { path: lookalike });
+          await repo.update(branch.branch_id, { path: `${lookalike}/child` });
+          await repo.update(sibling.branch_id, { path });
           await maintenance.release((await maintenance.claim(branch.branch_id, 'cleanup')).claim);
           for (const siblingPath of [path, `${path}/child`, path.slice(0, path.lastIndexOf('/'))]) {
             await repo.update(branch.branch_id, { path });
