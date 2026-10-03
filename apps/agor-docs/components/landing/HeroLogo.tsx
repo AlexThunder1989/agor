@@ -1,74 +1,130 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { type CSSProperties, useEffect, useId, useRef, useState } from 'react';
 import styles from './HeroLogo.module.css';
 
-/* Geometry and motion from the app's loading spinner
-   (apps/agor-ui/src/components/AgorLogoSpinner): 734×734 viewBox, 29px
-   strokes, dots r=40 on a 297 orbit, inner ring r=189, centered at 367,367. */
+/*
+ * The Agor mark's reveal, ported from the reel intro
+ * (demo-videos/animated_agor_logo/index.html on the demo-videos-syllabus
+ * branch): the dots coalesce from the center and spin out to their resting
+ * angles, the comet-tail arcs and inner ring sweep on behind them, the A draws
+ * in one stroke, the crossbar shrinks up into place, and a shine crosses the
+ * finished mark. 734×734 viewBox, 29px strokes, everything on one 4.5s clock.
+ */
 const A_PATH =
   'M188,607 C188,607 306.427,380.615 351.693,294.083 C355.033,287.698 361.66,283.713 368.865,283.756 C376.071,283.799 382.649,287.862 385.914,294.286 C420.058,361.482 494,507 494,507';
 const CROSSBAR_PATH =
   'M293.84,404.67 C307.45,431.55 335.34,450 367.5,450 C400,450 428.13,431.17 441.58,403.83';
-const TAIL_PATHS = ['M367,70 A297,297 0 0,0 188,607', 'M367,664 A297,297 0 0,0 664,367'];
+const RING_PATH = 'M556,367 A189,189 0 1,0 178,367 A189,189 0 1,0 556,367';
+const ARC_PATHS = ['M367,70 A297,297 0 0,0 188,607', 'M367,664 A297,297 0 0,0 664,367'];
+/** Each dot and the angle its arm starts the spin from. */
 const DOTS = [
-  { cx: 367, cy: 70 },
-  { cx: 367, cy: 664 },
-  { cx: 188, cy: 607 },
-  { cx: 664, cy: 367 },
+  { cx: 367, cy: 70, start: 360 },
+  { cx: 367, cy: 664, start: 360 },
+  { cx: 188, cy: 607, start: 413 },
+  { cx: 664, cy: 367, start: 360 },
 ];
 
-/** How long the logo spins (on load, and each time it's clicked). */
-const SPIN_MS = 2600;
-
 /**
- * The home hero's Agor mark: it spins like the app's loading spinner when the
- * page loads (the cursor troupe emerges from behind it), then settles into
- * the static logo. Clicking it spins it again; the troupe listens for the same
- * click to start its show over.
+ * The home hero's Agor mark: plays its reveal on load (the cursor troupe
+ * emerges from behind it), then rests as the static logo. Clicking replays it;
+ * the troupe listens for the same click to start its show over.
  */
 export function HeroLogo({ className }: { className?: string }) {
-  const [spinning, setSpinning] = useState(true);
+  const [take, setTake] = useState(0);
+  const [ready, setReady] = useState(false);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const maskId = `agor-logo-mask-${useId().replace(/:/g, '')}`;
 
+  // Measure each drawn path (dash lengths), then start every animation on the
+  // same frame. Padded by 2: at dashoffset === dasharray exactly, some
+  // browsers paint a stray rounded-cap stub at the path's start.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure per take (remount)
   useEffect(() => {
-    if (!spinning) return;
-    const timer = setTimeout(() => setSpinning(false), SPIN_MS);
-    return () => clearTimeout(timer);
-  }, [spinning]);
+    const svg = svgRef.current;
+    if (!svg) return;
+    setReady(false);
+    for (const path of svg.querySelectorAll<SVGPathElement>(`.${styles.drawable}`)) {
+      path.style.setProperty('--len', String(path.getTotalLength() + 2));
+    }
+    let raf = requestAnimationFrame(() => {
+      raf = requestAnimationFrame(() => setReady(true));
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [take]);
 
   return (
     <button
       type="button"
-      className={`${styles.logo}${spinning ? ` ${styles.spinning}` : ''}${className ? ` ${className}` : ''}`}
-      onClick={() => setSpinning(true)}
+      className={`${styles.logo}${className ? ` ${className}` : ''}`}
+      onClick={() => setTake((n) => n + 1)}
       aria-label="Agor"
       title="Agor"
     >
       <svg
+        key={take}
+        ref={svgRef}
+        className={ready ? styles.ready : undefined}
         viewBox="0 0 734 734"
         aria-hidden="true"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={29}
-        strokeLinecap="round"
-        strokeLinejoin="round"
       >
-        <path d={CROSSBAR_PATH} />
-        <path d={A_PATH} />
-        <circle className={styles.ring} cx={367} cy={367} r={189} pathLength={100} />
-        <g className={styles.orbit}>
-          {TAIL_PATHS.map((d, index) => (
-            <path
-              key={d}
-              className={index === 1 ? `${styles.tail} ${styles.tailAlt}` : styles.tail}
-              d={d}
-              pathLength={100}
-            />
-          ))}
-          {DOTS.map(({ cx, cy }) => (
-            <circle key={`${cx},${cy}`} cx={cx} cy={cy} r={40} fill="currentColor" stroke="none" />
-          ))}
-        </g>
+        <defs>
+          <linearGradient id={`${maskId}-shine`} x1="0" y1="1" x2="0.7" y2="0">
+            <stop offset="0%" stopColor="#ffffff" stopOpacity="0" />
+            <stop offset="50%" stopColor="#ffffff" stopOpacity="0.4" />
+            <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+          </linearGradient>
+          {/* The finished silhouette: the shine only lights the mark itself. */}
+          <mask id={maskId} maskUnits="userSpaceOnUse" x="0" y="0" width="734" height="734">
+            <g
+              fill="none"
+              stroke="#fff"
+              strokeWidth="29"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d={RING_PATH} />
+              {ARC_PATHS.map((d) => (
+                <path key={d} d={d} />
+              ))}
+              <path d={A_PATH} />
+              <path d={CROSSBAR_PATH} />
+            </g>
+            <g fill="#fff">
+              {DOTS.map(({ cx, cy }) => (
+                <circle key={`${cx},${cy}`} cx={cx} cy={cy} r={40} />
+              ))}
+            </g>
+          </mask>
+        </defs>
+
+        {/* Under the frame, so while it grows any overhang is cropped by the
+            frame's own strokes on top. */}
+        <path className={`${styles.stroke} ${styles.crossbar}`} d={CROSSBAR_PATH} />
+        <path className={`${styles.stroke} ${styles.drawable} ${styles.apath}`} d={A_PATH} />
+        <path className={`${styles.stroke} ${styles.drawable} ${styles.ring}`} d={RING_PATH} />
+        {ARC_PATHS.map((d) => (
+          <path key={d} className={`${styles.stroke} ${styles.drawable} ${styles.arc}`} d={d} />
+        ))}
+        {DOTS.map(({ cx, cy, start }) => (
+          <g
+            key={`${cx},${cy}`}
+            className={styles.arm}
+            style={{ '--s': `${start}deg` } as CSSProperties}
+          >
+            {/* r=40 in markup: browsers that can't animate `r` still show it. */}
+            <circle className={styles.dot} cx={cx} cy={cy} r={40} />
+          </g>
+        ))}
+        <rect
+          className={styles.shine}
+          x="0"
+          y="0"
+          width="260"
+          height="734"
+          fill={`url(#${maskId}-shine)`}
+          mask={`url(#${maskId})`}
+        />
       </svg>
     </button>
   );
