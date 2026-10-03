@@ -33,7 +33,7 @@ const HERO_LINKS_DETAILS = new Set<LandingPageId>(['governance']);
 const PAGE_PROOF: Partial<Record<LandingPageId, ReactNode>> = {};
 
 /**
- * Spoke page: its section as the hero, jump links, the detail blocks
+ * Spoke page: its section as the hero, the detail blocks beside a section nav
  * (deep-link targets), proof, then docs and sibling pages.
  */
 export function FeatureLanding({ page }: { page: LandingPageId }) {
@@ -44,10 +44,19 @@ export function FeatureLanding({ page }: { page: LandingPageId }) {
   return (
     <LandingShell ctaPrefix={ctaPrefix}>
       {PAGE_HEROES[page]}
-      {details.length && !HERO_LINKS_DETAILS.has(page) ? <DetailNav details={details} /> : null}
-      {details.map((detail) => (
-        <DetailSection key={detail.id} detail={detail} />
-      ))}
+      {details.length && !HERO_LINKS_DETAILS.has(page) ? (
+        // Section nav rail beside the blocks (a pill row on narrow screens).
+        <div className={styles.detailLayout}>
+          <DetailNav details={details} />
+          <div className={styles.detailColumn}>
+            {details.map((detail) => (
+              <DetailSection key={detail.id} detail={detail} />
+            ))}
+          </div>
+        </div>
+      ) : (
+        details.map((detail) => <DetailSection key={detail.id} detail={detail} />)
+      )}
       {PAGE_PROOF[page]}
       <section className={styles.pageLinks} data-reveal>
         <div>

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef } from 'react';
+import { type MouseEvent, useEffect, useRef, useState } from 'react';
 import { HighlightedText } from '../heroCopy';
 import styles from '../LandingPage.module.css';
 import type { DetailMedia, LandingDetail } from './details/types';
@@ -105,12 +105,65 @@ export function DetailSection({ detail }: { detail: LandingDetail }) {
   );
 }
 
-/** Jump links under a landing hero; one per detail block. */
+/**
+ * Section nav for a landing page's detail blocks. At desktop widths it's a
+ * sticky rail beside the blocks that highlights the one in view; below that
+ * it's the pill row. Clicks scroll smoothly (instantly under reduced motion)
+ * and update the hash without a jump.
+ */
 export function DetailNav({ details }: { details: LandingDetail[] }) {
+  const [active, setActive] = useState(details[0]?.id);
+
+  useEffect(() => {
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const line = window.innerHeight * 0.35;
+      let current = details[0]?.id;
+      for (const detail of details) {
+        const el = document.getElementById(detail.id);
+        if (el && el.getBoundingClientRect().top <= line) current = detail.id;
+      }
+      setActive(current);
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    update();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, [details]);
+
+  const go = (event: MouseEvent<HTMLAnchorElement>, id: string) => {
+    const target = document.getElementById(id);
+    if (!target) return;
+    event.preventDefault();
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    target.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
+    window.history.replaceState(null, '', `#${id}`);
+    setActive(id);
+  };
+
   return (
     <nav className={styles.detailNav} aria-label="On this page">
+      <span className={styles.detailNavTitle}>On this page</span>
       {details.map((detail) => (
-        <a key={detail.id} href={`#${detail.id}`} className={styles.heroHubLink}>
+        <a
+          key={detail.id}
+          href={`#${detail.id}`}
+          className={
+            detail.id === active
+              ? `${styles.detailNavLink} ${styles.detailNavLinkActive}`
+              : styles.detailNavLink
+          }
+          aria-current={detail.id === active ? 'location' : undefined}
+          onClick={(event) => go(event, detail.id)}
+        >
           {detail.navLabel}
         </a>
       ))}

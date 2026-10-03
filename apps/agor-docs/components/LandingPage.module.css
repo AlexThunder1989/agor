@@ -2559,15 +2559,120 @@
 /* --- Landing-page detail blocks --------------------------------------------
  * Copy beside media, alternating sides down the page. Anchored by id so the
  * home page can deep-link; scroll-margin clears the sticky navbar. */
+/* Section nav + blocks. Narrow screens: the nav is a pill row above the
+ * blocks. Desktop: a sticky rail on the left, highlighting the block in view. */
+.detailLayout {
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
 .detailNav {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   justify-content: center;
-  /* A little wider than the content column so seven jump links fit a row. */
-  max-width: 1280px;
-  margin: 0 auto;
   padding: 40px 28px 0;
+}
+
+.detailNavTitle {
+  display: none;
+}
+
+.landingShell a.detailNavLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--landing-line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--landing-ink);
+  font-family: var(--font-mono-stack);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease;
+}
+
+.landingShell a.detailNavLink:hover {
+  border-color: rgba(52, 230, 196, 0.5);
+  color: var(--landing-teal);
+}
+
+.landingShell a.detailNavLinkActive {
+  border-color: rgba(52, 230, 196, 0.6);
+  background: rgba(52, 230, 196, 0.1);
+  color: var(--landing-teal);
+}
+
+.detailNavLink:focus-visible {
+  outline: 2px solid var(--landing-teal);
+  outline-offset: 2px;
+}
+
+@media (min-width: 1100px) {
+  .detailLayout {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: 40px;
+    padding: 0 28px;
+  }
+
+  .detailNav {
+    position: sticky;
+    top: 96px;
+    align-self: start;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    gap: 2px;
+    margin-top: clamp(64px, 9vh, 110px);
+    padding: 0 0 0 0;
+    border-left: 1px solid var(--landing-line);
+  }
+
+  .detailNavTitle {
+    display: block;
+    margin: 0 0 10px 16px;
+    color: #6f8e89;
+    font-family: var(--font-mono-stack);
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .landingShell a.detailNavLink {
+    min-height: 34px;
+    margin-left: -1px;
+    padding: 0 0 0 16px;
+    border: 0;
+    border-left: 2px solid transparent;
+    border-radius: 0;
+    background: none;
+    color: #8fa9a6;
+    font-family: var(--font-body-stack);
+    font-size: 0.95rem;
+    letter-spacing: 0;
+  }
+
+  .landingShell a.detailNavLink:hover {
+    color: var(--landing-ink);
+  }
+
+  .landingShell a.detailNavLinkActive {
+    border-left-color: var(--landing-teal);
+    background: none;
+    color: var(--landing-teal);
+  }
+
+  .detailColumn .detailSection {
+    max-width: none;
+    padding-left: 0;
+    padding-right: 0;
+  }
 }
 
 .detailSection {
@@ -2578,7 +2683,8 @@
   max-width: 1180px;
   margin: 0 auto;
   padding: clamp(64px, 9vh, 110px) 28px;
-  scroll-margin-top: 80px;
+  /* The block's own top padding clears most of the floating nav island. */
+  scroll-margin-top: 56px;
 }
 
 .detailSection:nth-of-type(even) .detailCopy {
@@ -2717,6 +2823,13 @@
   margin-top: clamp(88px, 11vh, 120px);
   padding-top: 66px;
   align-items: start;
+}
+
+/* /multiplayer hero: no full-screen min-height (it's tall enough), so the
+ * cards don't float above an empty band before the harness strip. */
+.liveSection.sectionHero {
+  min-height: 0;
+  padding-bottom: 48px;
 }
 
 /* /multiplayer hero: statement beside the live-presence loop. */
