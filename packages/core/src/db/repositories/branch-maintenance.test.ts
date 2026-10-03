@@ -126,6 +126,54 @@ for (const status of ['failed', 'cleaned', 'deleted', 'ready', 'creating'] as co
   }
 }
 
+for (const literal of ['percent%', 'under_score', 'escape!', 'back\\slash']) {
+  for (const relation of [
+    'equal',
+    'child',
+    'parent',
+    'unrelated-child',
+    'unrelated-parent',
+  ] as const) {
+    test(`overlap treats ${literal} literally for ${relation} paths`, async ({ db }) => {
+      const { branch, user } = await seedEnvironmentCommandBranch(db);
+      const repo = new BranchRepository(db);
+      const path = `/tmp/${literal}`;
+      const lookalike = path
+        .replace('%', 'wildcard')
+        .replace('_', 'X')
+        .replace('!', '')
+        .replace('\\', '');
+      await repo.update(branch.branch_id, {
+        path: relation === 'parent' || relation === 'unrelated-parent' ? `${path}/child` : path,
+      });
+      await repo.create({
+        repo_id: branch.repo_id,
+        name: 'literal-sibling',
+        ref: 'literal-sibling',
+        branch_unique_id: 9600002,
+        path:
+          relation === 'child'
+            ? `${path}/child`
+            : relation === 'unrelated-child'
+              ? `${lookalike}/child`
+              : relation === 'unrelated-parent'
+                ? lookalike
+                : path,
+        created_by: user.user_id,
+      });
+      const maintenance = new BranchMaintenanceRepository(db);
+      for (const kind of ['cleanup', 'workspace_write', 'delete'] as const) {
+        if (relation.startsWith('unrelated')) {
+          const { claim } = await maintenance.claim(branch.branch_id, kind);
+          if (kind !== 'delete') await maintenance.release(claim);
+        } else {
+          await expect(maintenance.claim(branch.branch_id, kind)).rejects.toThrow('overlaps');
+        }
+      }
+    });
+  }
+}
+
 test('environment admission and maintenance exclude each other under the branch lock', async ({
   db,
 }) => {

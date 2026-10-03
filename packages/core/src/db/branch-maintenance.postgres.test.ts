@@ -277,3 +277,57 @@ it.skipIf(!url || process.env.AGOR_DB_DIALECT !== 'postgresql')(
     }
   }
 );
+
+it.skipIf(!url || process.env.AGOR_DB_DIALECT !== 'postgresql')(
+  'overlap patterns treat path metacharacters literally and ignore foreign tenant paths',
+  async () => {
+    const db = createDatabase({ dialect: 'postgresql', url: url! });
+    try {
+      await runMigrations(db, { allowOfflineCutover: true });
+      const tenantA = `literal-a-${generateId()}`;
+      const tenantB = `literal-b-${generateId()}`;
+      for (const literal of ['percent%', 'under_score', 'escape!', 'back\\slash']) {
+        const path = `/tmp/${generateId()}/${literal}`;
+        await runWithTenantDatabaseScope(db, tenantB, async (scoped) => {
+          const { branch } = await seedEnvironmentCommandBranch(scoped);
+          await new BranchRepository(scoped).update(branch.branch_id, { path });
+        });
+        await runWithTenantDatabaseScope(db, tenantA, async (scoped) => {
+          const { branch, user } = await seedEnvironmentCommandBranch(scoped);
+          const repo = new BranchRepository(scoped);
+          const maintenance = new BranchMaintenanceRepository(scoped);
+          await repo.update(branch.branch_id, { path });
+          // A foreign tenant's equal path must not affect admission.
+          await maintenance.release((await maintenance.claim(branch.branch_id, 'cleanup')).claim);
+          const lookalike = path
+            .replace('%', 'wildcard')
+            .replace('_', 'X')
+            .replace('!', '')
+            .replace('\\', '');
+          const sibling = await repo.create({
+            repo_id: branch.repo_id,
+            name: 'literal-sibling',
+            ref: 'literal-sibling',
+            branch_unique_id: 9600007,
+            path: `${lookalike}/child`,
+            created_by: user.user_id,
+          });
+          await maintenance.release((await maintenance.claim(branch.branch_id, 'cleanup')).claim);
+          await repo.update(branch.branch_id, { path: `${path}/child` });
+          await repo.update(sibling.branch_id, { path: lookalike });
+          await maintenance.release((await maintenance.claim(branch.branch_id, 'cleanup')).claim);
+          for (const siblingPath of [path, `${path}/child`, path.slice(0, path.lastIndexOf('/'))]) {
+            await repo.update(branch.branch_id, { path });
+            await repo.update(sibling.branch_id, { path: siblingPath });
+            await expect(maintenance.claim(branch.branch_id, 'cleanup')).rejects.toThrow(
+              'overlaps'
+            );
+          }
+        });
+      }
+    } finally {
+      await (db as typeof db & { $client: { end(): Promise<void> } }).$client.end();
+    }
+  },
+  60_000
+);

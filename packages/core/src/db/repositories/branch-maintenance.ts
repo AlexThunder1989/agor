@@ -152,12 +152,15 @@ export class BranchMaintenanceRepository {
       // content, and failed siblings can retry under a different row lock.
       // Only a claim that cannot launch a filesystem executor may skip this.
       if (kind !== 'metadata_archive') {
+        // Escape LIKE patterns on both sides: stored paths are literals, not globs.
+        const escapedPath = row.data.path.replace(/[!%_]/g, '!$&');
+        const escapedSiblingPath = sql`replace(replace(replace(${branches.data} ->> 'path', '!', '!!'), '%', '!%'), '_', '!_')`;
         const overlap = await select(tx, { branch_id: branches.branch_id })
           .from(branches)
           .where(sql`${branches.branch_id} <> ${branchId} AND (
             ${branches.data} ->> 'path' = ${row.data.path}
-            OR ${branches.data} ->> 'path' LIKE ${`${row.data.path}/%`}
-            OR ${row.data.path} LIKE ((${branches.data} ->> 'path') || '/%'))`)
+            OR ${branches.data} ->> 'path' LIKE ${`${escapedPath}/%`} ESCAPE '!'
+            OR ${row.data.path} LIKE (${escapedSiblingPath} || '/%') ESCAPE '!')`)
           .limit(1)
           .one();
         if (overlap)
