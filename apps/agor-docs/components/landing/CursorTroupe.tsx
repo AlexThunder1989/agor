@@ -225,6 +225,8 @@ const centerBand = (r: DOMRect, vh: number) => r.top < vh * 0.6 && r.bottom > vh
 
 // Hero
 const pill = q('[class*="homeBadge"]');
+/** The hero logo's dots (HeroLogo): top, bottom-left, and right. */
+const logoDot = (i: number): Anchor => nth('[data-logo-dot]', [0, 2, 3][i]);
 const ROW_ITEM = 'a[class*="homeRowItem"]';
 const rowItem = (i: number) => nth(ROW_ITEM, i);
 const team = q('[data-wave-word]');
@@ -450,7 +452,7 @@ function driveConfidence(root: HTMLElement, phase: 'before' | 'play' | 'done', t
 
 const ROW_SWEEP = [0, 1, 2, 3, 4].map((k) => 1.4 + k * 0.38);
 const HERO_GATHER = ROW_SWEEP[4] + 0.6;
-const HERO_FRIENDS = HERO_GATHER + 2.4;
+const HERO_FRIENDS = HERO_GATHER + 0.9;
 // Around "team": the three mains, then the three guests in between.
 const TEAM_SPOTS = [200, 340, 90, 140, 40, 270];
 
@@ -459,14 +461,15 @@ const BEATS: Record<SectionId, Beat> = {
   // along the bottom, lighting each link; all three gather around "team"
   // pointing in, and its letters do a wave. Then three friends pop out of
   // Sign up, Book a demo, and Try Agor Cloud to join the huddle.
+  // They wait for the logo's dots to land, then emerge from behind them.
   hero: {
-    delay: 0.4,
-    active: (r, vh) => r.bottom > vh * 0.45,
-    mask: { anchor: pill, until: 1.4 },
+    delay: 0,
+    active: (r, vh, root) =>
+      r.bottom > vh * 0.45 && Boolean(root.querySelector('[data-dots-landed]')),
     parts: [0, 1, 2, 3, 4, 5].map((i): Part => {
-      const spot = around(team, 50, 24, TEAM_SPOTS[i]);
+      const spot = around(team, 40, 19, TEAM_SPOTS[i]);
       if (i >= 3) {
-        const appear = HERO_FRIENDS + (i - 3) * 0.3;
+        const appear = HERO_FRIENDS + (i - 3) * 0.15;
         return {
           appear,
           marks: [
@@ -477,10 +480,11 @@ const BEATS: Record<SectionId, Beat> = {
         };
       }
       return {
-        appear: i * 0.25,
+        appear: 0,
         marks: [
-          { at: 0, anchor: pill },
-          { at: 0.15 + i * 0.25, anchor: pill, fx: (i - 1) * 0.5, dx: (i - 1) * 36, dy: 34 },
+          // A speck behind its dot, then zooming out of it.
+          { at: 0, anchor: logoDot(i), size: 0.06, lock: true },
+          { at: 0.12 + i * 0.14, anchor: pill, fx: (i - 1) * 0.6, dx: (i - 1) * 40, dy: 44 },
           ...(i === 1
             ? ROW_SWEEP.map((when, k) => ({ at: when, anchor: rowItem(k), fx: -0.3, fy: -0.2 }))
             : []),

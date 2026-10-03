@@ -25,6 +25,9 @@ const DOTS = [
   { cx: 664, cy: 367, start: 360 },
 ];
 
+/** When the dots finish spinning out (60% of the 4.5s build). */
+const DOTS_LAND_MS = 2_700;
+
 /**
  * The home hero's Agor mark: plays its reveal on load (the cursor troupe
  * emerges from behind it), then rests as the static logo. Clicking replays it;
@@ -33,6 +36,9 @@ const DOTS = [
 export function HeroLogo({ className }: { className?: string }) {
   const [take, setTake] = useState(0);
   const [ready, setReady] = useState(false);
+  // Set once the dots have spun to rest (60% of the 4.5s build); the cursor
+  // troupe waits for it and emerges from the dots.
+  const [landed, setLanded] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
   const maskId = `agor-logo-mask-${useId().replace(/:/g, '')}`;
 
@@ -44,6 +50,7 @@ export function HeroLogo({ className }: { className?: string }) {
     const svg = svgRef.current;
     if (!svg) return;
     setReady(false);
+    setLanded(false);
     for (const path of svg.querySelectorAll<SVGPathElement>(`.${styles.drawable}`)) {
       path.style.setProperty('--len', String(path.getTotalLength() + 2));
     }
@@ -53,11 +60,24 @@ export function HeroLogo({ className }: { className?: string }) {
     return () => cancelAnimationFrame(raf);
   }, [take]);
 
+  useEffect(() => {
+    if (!ready) return;
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const timer = setTimeout(() => setLanded(true), reduced ? 0 : DOTS_LAND_MS);
+    return () => clearTimeout(timer);
+  }, [ready]);
+
   return (
     <button
       type="button"
       className={`${styles.logo}${className ? ` ${className}` : ''}`}
-      onClick={() => setTake((n) => n + 1)}
+      onClick={() => {
+        // Clear "landed" in this same render (not the effect's later one), so
+        // the troupe never sees the old flag after its replay.
+        setLanded(false);
+        setTake((n) => n + 1);
+      }}
+      data-dots-landed={landed ? '' : undefined}
       aria-label="Agor"
       title="Agor"
     >
@@ -113,7 +133,7 @@ export function HeroLogo({ className }: { className?: string }) {
             style={{ '--s': `${start}deg` } as CSSProperties}
           >
             {/* r=40 in markup: browsers that can't animate `r` still show it. */}
-            <circle className={styles.dot} cx={cx} cy={cy} r={40} />
+            <circle className={styles.dot} data-logo-dot="" cx={cx} cy={cy} r={40} />
           </g>
         ))}
         <rect

@@ -179,6 +179,26 @@
   animation: crossbar-grow 4.5s ease-out forwards;
 }
 
+/* Browsers that can't animate an SVG path's shape (older Safari): the crossbar
+ * just fades in, already in its final shape, at the same moment. */
+@keyframes crossbar-fade {
+  0%,
+  82% {
+    opacity: 0;
+  }
+
+  90%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@supports not (d: path("M0,0")) {
+  .crossbar {
+    animation: crossbar-fade 4.5s ease-out forwards;
+  }
+}
+
 /* A soft light sweep across the finished mark (animates `x`, not a transform:
  * a transformed masked element leaks outside its mask in Chrome). */
 @keyframes shine-sweep {
