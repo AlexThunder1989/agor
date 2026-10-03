@@ -25,6 +25,9 @@ const DOTS = [
   { cx: 664, cy: 367, start: 360 },
 ];
 
+/** How long the finished mark takes to fade before a replay. */
+const FADE_MS = 220;
+
 /** When the dots finish spinning out (60% of the 4.5s build). */
 const DOTS_LAND_MS = 2_700;
 
@@ -39,6 +42,7 @@ export function HeroLogo({ className }: { className?: string }) {
   // Set once the dots have spun to rest (60% of the 4.5s build); the cursor
   // troupe waits for it and emerges from the dots.
   const [landed, setLanded] = useState(false);
+  const [fading, setFading] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
   const maskId = `agor-logo-mask-${useId().replace(/:/g, '')}`;
 
@@ -72,10 +76,16 @@ export function HeroLogo({ className }: { className?: string }) {
       type="button"
       className={`${styles.logo}${className ? ` ${className}` : ''}`}
       onClick={() => {
+        if (fading) return;
         // Clear "landed" in this same render (not the effect's later one), so
         // the troupe never sees the old flag after its replay.
         setLanded(false);
-        setTake((n) => n + 1);
+        // Fade the finished mark out quickly, then replay the reveal.
+        setFading(true);
+        setTimeout(() => {
+          setFading(false);
+          setTake((n) => n + 1);
+        }, FADE_MS);
       }}
       data-dots-landed={landed ? '' : undefined}
       aria-label="Agor"
@@ -84,7 +94,9 @@ export function HeroLogo({ className }: { className?: string }) {
       <svg
         key={take}
         ref={svgRef}
-        className={ready ? styles.ready : undefined}
+        className={
+          [ready && styles.ready, fading && styles.fading].filter(Boolean).join(' ') || undefined
+        }
         viewBox="0 0 734 734"
         aria-hidden="true"
       >
