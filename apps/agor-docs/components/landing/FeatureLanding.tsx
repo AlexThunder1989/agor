@@ -24,10 +24,6 @@ const PAGE_HEROES: Record<LandingPageId, ReactNode> = {
   governance: <GovernanceSection hero />,
 };
 
-// Heroes whose own items already jump to every detail block (the /governance
-// trust list), so the separate "On this page" row would only repeat them.
-const HERO_LINKS_DETAILS = new Set<LandingPageId>(['governance']);
-
 // Proof that closes the story, after the detail blocks. (The teammates
 // roster moved to its own page, /agent-roster.)
 const PAGE_PROOF: Partial<Record<LandingPageId, ReactNode>> = {};
@@ -44,7 +40,7 @@ export function FeatureLanding({ page }: { page: LandingPageId }) {
   return (
     <LandingShell ctaPrefix={ctaPrefix}>
       {PAGE_HEROES[page]}
-      {details.length && !HERO_LINKS_DETAILS.has(page) ? (
+      {details.length ? (
         // Section nav rail beside the blocks (a pill row on narrow screens).
         <div className={styles.detailLayout}>
           <DetailNav details={details} />

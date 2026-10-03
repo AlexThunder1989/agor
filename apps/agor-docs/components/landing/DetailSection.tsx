@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { type MouseEvent, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, type MouseEvent, useEffect, useRef, useState } from 'react';
 import { HighlightedText } from '../heroCopy';
 import styles from '../LandingPage.module.css';
 import type { DetailMedia, LandingDetail } from './details/types';
@@ -164,6 +164,24 @@ export function DetailNav({ details }: { details: LandingDetail[] }) {
           aria-current={detail.id === active ? 'location' : undefined}
           onClick={(event) => go(event, detail.id)}
         >
+          {/* Rail node (desktop): a quiet ring on the line; the active one
+              lights up and pulses, like the trust list's bus. */}
+          <span className={styles.detailNavNode} aria-hidden="true">
+            {detail.id === active &&
+              [0, 1].map((ring) => (
+                <i
+                  key={ring}
+                  className={styles.busRipple}
+                  style={
+                    {
+                      '--ripple-size': '10px',
+                      '--ripple-delay': `${ring * 1500}ms`,
+                    } as CSSProperties
+                  }
+                />
+              ))}
+            <i className={styles.detailNavDot} />
+          </span>
           {detail.navLabel}
         </a>
       ))}

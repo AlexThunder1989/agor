@@ -2574,7 +2574,8 @@
   padding: 40px 28px 0;
 }
 
-.detailNavTitle {
+.detailNavTitle,
+.detailNavNode {
   display: none;
 }
 
@@ -2630,13 +2631,12 @@
     justify-content: flex-start;
     gap: 2px;
     margin-top: clamp(64px, 9vh, 110px);
-    padding: 0 0 0 0;
-    border-left: 1px solid var(--landing-line);
+    padding: 0;
   }
 
   .detailNavTitle {
     display: block;
-    margin: 0 0 10px 16px;
+    margin: 0 0 10px 30px;
     color: #6f8e89;
     font-family: var(--font-mono-stack);
     font-size: 0.7rem;
@@ -2644,12 +2644,12 @@
     text-transform: uppercase;
   }
 
+  /* Bus-style rail: ring nodes on a thin vertical line. */
   .landingShell a.detailNavLink {
-    min-height: 34px;
-    margin-left: -1px;
-    padding: 0 0 0 16px;
+    position: relative;
+    min-height: 36px;
+    padding: 0 0 0 30px;
     border: 0;
-    border-left: 2px solid transparent;
     border-radius: 0;
     background: none;
     color: #8fa9a6;
@@ -2658,14 +2658,67 @@
     letter-spacing: 0;
   }
 
+  .landingShell a.detailNavLink::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 9px;
+    width: 1px;
+    background: rgba(52, 230, 196, 0.22);
+  }
+
+  .landingShell a.detailNavLink:first-of-type::before {
+    top: 50%;
+  }
+
+  .landingShell a.detailNavLink:last-of-type::before {
+    bottom: 50%;
+  }
+
+  .detailNavNode {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    display: block;
+    width: 19px;
+    height: 19px;
+    margin-top: -9.5px;
+  }
+
+  .detailNavDot {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 9px;
+    height: 9px;
+    margin: -4.5px 0 0 -4.5px;
+    border: 1.5px solid rgba(52, 230, 196, 0.45);
+    border-radius: 50%;
+    background: #08110f;
+    transition:
+      border-color 160ms ease,
+      background-color 160ms ease;
+  }
+
   .landingShell a.detailNavLink:hover {
+    background: none;
     color: var(--landing-ink);
   }
 
+  .landingShell a.detailNavLink:hover .detailNavDot {
+    border-color: var(--landing-teal);
+  }
+
   .landingShell a.detailNavLinkActive {
-    border-left-color: var(--landing-teal);
     background: none;
     color: var(--landing-teal);
+  }
+
+  .detailNavLinkActive .detailNavDot {
+    border: 2px solid var(--landing-teal);
+    background: rgba(52, 230, 196, 0.35);
+    animation: busPulse 3s ease-in-out infinite;
   }
 
   .detailColumn .detailSection {
@@ -3498,6 +3551,11 @@ a.radarBlip .blipName {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .detailNavLinkActive .detailNavDot,
+  .detailNavNode .busRipple {
+    animation: none;
+  }
+
   :global(html[data-troupe-wave]) .waveWord > span {
     animation: none;
   }
