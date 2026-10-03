@@ -283,7 +283,48 @@ function performAt(root: HTMLElement, k: number): { x: number; y: number; ripple
   const frame = track.cursors[id].frames[index];
   if (!frame) return null;
   const r = video.getBoundingClientRect();
-  return { x: r.left + frame[0] * r.width, y: r.top + frame[1] * r.height, ripple: frame[2] };
+  // Tracks keep off-frame tips (the camera pans past them): hug the edge.
+  const clamp = (v: number) => Math.min(0.985, Math.max(0.015, v));
+  return {
+    x: r.left + clamp(frame[0]) * r.width,
+    y: r.top + clamp(frame[1]) * r.height,
+    ripple: frame[2],
+  };
+}
+
+/** "What needs you" still: where the glowing card sits in the screenshot (0..1). */
+const LIT_CARD = { left: 0.041, top: 0.127, right: 0.479, bottom: 0.62 };
+/** Spots around the lit card for friends who are just interested in it. */
+function aroundLitCard(
+  root: HTMLElement,
+  k: number,
+  t: number
+): { x: number; y: number; cx: number; cy: number } | null {
+  const img = root.querySelector<HTMLImageElement>('[data-troupe="board-panel"] img');
+  if (!img?.naturalWidth) return null;
+  // The still is object-fit: contain; find the drawn image's box.
+  const box = img.getBoundingClientRect();
+  const scale = Math.min(box.width / img.naturalWidth, box.height / img.naturalHeight);
+  const w = img.naturalWidth * scale;
+  const h = img.naturalHeight * scale;
+  const x0 = box.left + (box.width - w) / 2;
+  const y0 = box.top + (box.height - h) / 2;
+  const cx = x0 + ((LIT_CARD.left + LIT_CARD.right) / 2) * w;
+  const cy = y0 + ((LIT_CARD.top + LIT_CARD.bottom) / 2) * h;
+  // Under and beside the card, each bobbing a little on its own beat.
+  const spots = [
+    [LIT_CARD.left + 0.06, LIT_CARD.bottom + 0.07],
+    [(LIT_CARD.left + LIT_CARD.right) / 2, LIT_CARD.bottom + 0.1],
+    [LIT_CARD.right - 0.05, LIT_CARD.bottom + 0.07],
+    [LIT_CARD.right + 0.05, (LIT_CARD.top + LIT_CARD.bottom) / 2],
+  ];
+  const [sx, sy] = spots[k % spots.length];
+  return {
+    x: x0 + sx * w + Math.sin(t * 1.6 + k * 1.9) * 5,
+    y: y0 + sy * h + Math.cos(t * 1.3 + k * 2.4) * 4,
+    cx,
+    cy,
+  };
 }
 // Teammates
 const RING_NODE = 'a[class*="ringNode"]';
@@ -1005,6 +1046,19 @@ export function CursorTroupe() {
                   pulse = role.ripple;
                   press = role.ripple < 0.25;
                 }
+              } else if (aroundLitCard(root, current.perform, t)) {
+                // The "What needs you" still: gather round the card that's
+                // glowing for attention, pointing at it.
+                const spot = aroundLitCard(root, current.perform, t) as {
+                  x: number;
+                  y: number;
+                  cx: number;
+                  cy: number;
+                };
+                target = { x: spot.x + sx, y: spot.y + sy };
+                const deg =
+                  (Math.atan2(spot.cy + sy - state.y, spot.cx + sx - state.x) * 180) / Math.PI;
+                pointRot = ((deg - ARROW_ANGLE + 540) % 360) - 180;
               } else {
                 // Not in this clip: watch from under the panel, pointing in.
                 target = {

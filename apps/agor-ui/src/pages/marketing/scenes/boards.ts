@@ -83,7 +83,9 @@ const COCKPIT: [number, number] = [1010, 330];
 // + offset (560,300) → abs (690,1470).
 const REPLY_COMMENT_ID = '019ee88d-demo-comment-0000-000000000302';
 const REPLY_TEXT = '@mina capped at five with a +7 chip — done ✅';
-const REPLY_PIN: [number, number] = [652, 1502];
+// On the pin's avatar circle (measured at the 1.8s click: the old point sat
+// ~90 flow px below it, so the click missed the pin).
+const REPLY_PIN: [number, number] = [678, 1411];
 
 // AgorClaw's pickup beat on the card at its Review drop spot: header point
 // and a session row (same offsets that read well on the Teammates card).
@@ -191,7 +193,7 @@ export const boardsScene: SceneDefinition = {
     },
     {
       // AgorClaw, with purpose: once Ari drops the card in Review, sweep to
-      // it and click-pulse a session row (the agent picks up the work), then
+      // it and trace a session row (the agent picks up the work), then
       // head home to the Teammates zone as the camera arrives there.
       userIndex: 0,
       user: demoAgentUser,
@@ -205,7 +207,8 @@ export const boardsScene: SceneDefinition = {
         [7_000, ...CLAW_REST],
         [8_000, CLAW_REST[0], CLAW_REST[1], 'hold'],
       ]),
-      ripple: clickPulses([5_300, 5_750]),
+      // No clicks: the session row has no visible response, so they read as
+      // aimless. The sweep to the card carries the pickup on its own.
     },
   ],
   nodePlacements: [

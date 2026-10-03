@@ -128,7 +128,9 @@ const captureScene = async (browser, name, config, args) => {
             if (!tip) return [];
             const r = tip.getBoundingClientRect();
             const opacity = Number(getComputedStyle(cursor).opacity);
-            if (opacity < 0.1 || r.left < -20 || r.top < -20 || r.left > width || r.top > height) {
+            // Off-frame tips are kept (the camera pans past them); players
+            // clamp them to the frame's edge.
+            if (opacity < 0.1 || Math.abs(r.left) > width * 3 || Math.abs(r.top) > height * 3) {
               return [];
             }
             return [
