@@ -168,14 +168,14 @@ export function DetailNav({ details }: { details: LandingDetail[] }) {
               lights up and pulses, like the trust list's bus. */}
           <span className={styles.detailNavNode} aria-hidden="true">
             {detail.id === active &&
-              [0, 1].map((ring) => (
+              [0, 1, 2].map((ring) => (
                 <i
                   key={ring}
                   className={styles.busRipple}
                   style={
                     {
                       '--ripple-size': '10px',
-                      '--ripple-delay': `${ring * 1500}ms`,
+                      '--ripple-delay': `${ring * 1000}ms`,
                     } as CSSProperties
                   }
                 />

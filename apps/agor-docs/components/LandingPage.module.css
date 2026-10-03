@@ -2629,7 +2629,9 @@
     flex-direction: column;
     flex-wrap: nowrap;
     justify-content: flex-start;
-    gap: 2px;
+    /* No gap: each item's line segment meets the next, so the rail is one
+     * continuous line. */
+    gap: 0;
     margin-top: clamp(64px, 9vh, 110px);
     padding: 0;
   }
@@ -2717,7 +2719,8 @@
 
   .detailNavLinkActive .detailNavDot {
     border: 2px solid var(--landing-teal);
-    background: rgba(52, 230, 196, 0.35);
+    background: var(--landing-teal);
+    box-shadow: 0 0 10px rgba(52, 230, 196, 0.6);
     animation: busPulse 3s ease-in-out infinite;
   }
 
