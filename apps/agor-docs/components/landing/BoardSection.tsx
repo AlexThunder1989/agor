@@ -3,7 +3,7 @@
 import Aurora from '../Aurora/Aurora';
 import styles from '../LandingPage.module.css';
 import { BoardSelector } from './BoardSelector';
-import selector from './BoardSelector.module.css';
+import selector from './FeatureSelector.module.css';
 import { SectionHeroActions } from './SectionHeroActions';
 
 /**

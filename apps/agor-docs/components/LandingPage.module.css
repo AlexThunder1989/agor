@@ -42,8 +42,8 @@
     radial-gradient(circle at 82% 8%, rgba(46, 154, 146, 0.12), transparent 34rem),
     linear-gradient(180deg, #07100f 0%, #0a1614 36%, #081210 72%, #07100f 100%);
   /* clip (not hidden): still contains the problem-section fly-ins, but does
-   * not create a scroll container — position: sticky inside the shell (the
-   * scroll-locked surface carousel) must stick to the VIEWPORT. */
+   * not create a scroll container — position: sticky inside the shell must
+   * stick to the VIEWPORT. */
   overflow: clip;
 }
 
@@ -639,76 +639,6 @@
   padding-top: 0;
 }
 
-/* Product-surfaces explorer: side rail + large screenshot stage */
-/* Phone-only scroll-locked surface carousel (see the compound media block at
- * the end of the file) — desktop and reduced-motion phones never show it. */
-.surfaceScrolly {
-  display: none;
-}
-
-/* Capabilities carousel — same grammar as the showcase reel above (tab
- * pills, chrome frame, sliding track, arrows). Slides stack an info bar over
- * the screenshot; clicking the screenshot advances. */
-.surfaceExplorer {
-  margin-top: 10px;
-}
-
-.surfaceSlide {
-  flex-shrink: 0;
-  min-width: 0;
-}
-
-.surfaceShotButton {
-  display: block;
-  width: 100%;
-  padding: 0;
-  border: 0;
-  background: none;
-  cursor: pointer;
-}
-
-.surfaceShot {
-  display: block;
-  width: auto;
-  max-width: 100%;
-  height: auto;
-  /* Viewport-aware ceiling: header + tabs + info bar + nav cost
-   * ~533px, so the shot scales to the largest size that keeps the WHOLE
-   * section on screen — natural aspect ratio, never cropped. */
-  max-height: clamp(230px, calc(100dvh - 533px), 600px);
-  margin: 0 auto;
-}
-
-.surfaceInfo {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 28px;
-  padding: 20px 34px;
-  border-bottom: 1px solid rgba(52, 230, 196, 0.1);
-}
-
-.surfaceInfo .secondaryButton {
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.surfaceInfo h3 {
-  margin: 0;
-  color: var(--landing-teal);
-  font-family: var(--font-display-stack);
-  font-size: 1.5rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.surfaceInfo p {
-  max-width: 62ch;
-  margin: 10px 0 0;
-  color: var(--landing-muted);
-  line-height: 1.6;
-}
-
 /* "Compound Amplifying Bus" section — the calm mint answer that lands right
  * after the amber traffic pileup. Left: copy with the giant gradient
  * "compound"; right: six trust items strung down a vertical spine with
@@ -1035,10 +965,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .showcaseTrack {
-    transition: none;
-  }
-
   .landingShell [data-reveal],
   .landingShell .isVisible {
     opacity: 1;
@@ -1081,103 +1007,6 @@
    * above; only the bottom dissolves into the page. */
   mask-image: linear-gradient(180deg, #000, #000 55%, transparent 96%);
   -webkit-mask-image: linear-gradient(180deg, #000, #000 55%, transparent 96%);
-}
-
-.showcaseTabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.showcaseTab {
-  padding: 9px 18px;
-  border: 1px solid rgba(52, 230, 196, 0.16);
-  border-radius: 999px;
-  background: rgba(52, 230, 196, 0.04);
-  color: var(--landing-muted);
-  font-family: var(--font-display-stack);
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition:
-    border-color 0.25s,
-    background 0.25s,
-    color 0.25s;
-}
-
-.showcaseTab:hover {
-  border-color: rgba(52, 230, 196, 0.4);
-  color: var(--landing-ink);
-}
-
-.showcaseTabActive,
-.showcaseTabActive:hover {
-  background: var(--landing-teal);
-  border-color: var(--landing-teal);
-  color: #04110e;
-}
-
-.showcaseFrame {
-  position: relative;
-  margin-top: 24px;
-  overflow: hidden;
-  border: 1px solid rgba(52, 230, 196, 0.14);
-  border-radius: 20px;
-  background: #081210;
-  box-shadow: 0 50px 120px -50px rgba(0, 0, 0, 0.8);
-}
-
-/* Prev/next carousel arrows — circular glass buttons hugging the stage edges.
- * They sit inside the data-reveal section but not ON the reveal element, so
- * they own their transition list (hover animates instead of snapping). */
-.showcaseArrow {
-  position: absolute;
-  top: 50%;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border: 1px solid rgba(52, 230, 196, 0.25);
-  border-radius: 50%;
-  background: rgba(8, 18, 16, 0.55);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  color: var(--landing-muted);
-  cursor: pointer;
-  translate: 0 -50%;
-  transition:
-    border-color 0.25s ease,
-    background 0.25s ease,
-    color 0.25s ease,
-    scale 0.25s ease;
-}
-
-.showcaseArrow:hover {
-  border-color: rgba(52, 230, 196, 0.6);
-  background: rgba(10, 24, 21, 0.75);
-  color: var(--landing-teal);
-  scale: 1.07;
-}
-
-.showcaseArrowLeft {
-  left: 14px;
-}
-
-.showcaseArrowRight {
-  right: 14px;
-}
-
-.showcaseViewport {
-  overflow: hidden;
-}
-
-.showcaseTrack {
-  display: flex;
-  width: 400%;
-  transform: var(--showcase-transform);
-  transition: transform 0.55s cubic-bezier(0.65, 0, 0.35, 1);
 }
 
 /* Two-tone statement headline + numbered card grid (multiplayer section) */
@@ -2069,14 +1898,6 @@
     animation: none;
   }
 
-  .surfaceShot {
-    height: clamp(240px, 52vw, 420px);
-  }
-
-  .surfaceInfo {
-    padding: 20px 22px 24px;
-  }
-
   .liveSection,
   .workspaceSection,
   .controlSection {
@@ -2221,19 +2042,6 @@
     padding: 48px 24px;
   }
 
-  /* Tab pills stay usable at phone widths; the floating arrows would sit on
-   * top of the slide content, so drop them. */
-  .showcaseArrow {
-    display: none;
-  }
-
-  /* Info row can't fit copy + button side by side — stack them. */
-  .surfaceInfo {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 16px;
-  }
-
   .landingFooter {
     padding: 48px 24px 72px;
   }
@@ -2275,196 +2083,9 @@
   }
 }
 
-/* --- Phone carousels: native side-swipe via CSS scroll-snap, not a pinned
- * scroll-jack. Both tracks are normal-height, in-flow elements — flicking
- * vertically scrolls straight past them like any other section; a horizontal
- * flick within the frame swipes the cards. See the matching scroll-listener
- * effects in LandingPage.tsx that keep status line/dots/video-gating in
- * sync with wherever a swipe settles. --- */
 @media (max-width: 720px) {
   .showcaseSection {
     padding: 64px 24px 0;
-  }
-
-  /* Match the surface carousel's look: status line + dots instead of tab
-   * pills; the chrome caption moves below the video. */
-  .showcaseTabs {
-    display: none;
-  }
-
-  .showcaseFrame {
-    margin-top: 12px;
-    overflow: visible;
-    border: 0;
-    border-radius: 0;
-    background: none;
-    box-shadow: none;
-  }
-
-  .showcaseViewport {
-    overflow-x: auto;
-    overflow-y: hidden;
-    scroll-snap-type: x mandatory;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-  }
-
-  .showcaseViewport::-webkit-scrollbar {
-    display: none;
-  }
-
-  /* Neutralize the desktop transform — position comes from native scroll
-   * instead — and let the track size itself to the (single) visible slide
-   * rather than the desktop 400%. */
-  .showcaseViewport .showcaseTrack {
-    width: 100%;
-    transform: none;
-    transition: none;
-  }
-
-  .surfaceExplorer {
-    display: none;
-  }
-
-  .surfaceScrolly {
-    display: block;
-    margin-top: 8px;
-  }
-
-  .scrollySticky {
-    padding: 0;
-  }
-
-  .scrollyStatus {
-    display: flex;
-    align-items: baseline;
-    gap: 12px;
-    padding: 0 24px;
-    margin-bottom: 16px;
-  }
-
-  .scrollyStatusCount {
-    color: var(--landing-teal);
-    font-family: var(--font-mono-stack);
-    font-size: 0.78rem;
-    letter-spacing: 0.08em;
-  }
-
-  .scrollyStatusTitle {
-    color: var(--landing-muted);
-    font-family: var(--font-mono-stack);
-    font-size: 0.78rem;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-
-  /* .scrollyTrack is the scroll container itself (no separate viewport
-   * wrapper needed, unlike the showcase reel above). */
-  .scrollyTrack {
-    display: flex;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scroll-snap-type: x mandatory;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-  }
-
-  .scrollyTrack::-webkit-scrollbar {
-    display: none;
-  }
-
-  .scrollyCard {
-    flex: 0 0 100%;
-    box-sizing: border-box;
-    scroll-snap-align: center;
-    padding: 0 24px;
-  }
-
-  .scrollyShot {
-    width: 100%;
-    max-height: 44dvh;
-    object-fit: cover;
-    object-position: top left;
-    border: 1px solid rgba(52, 230, 196, 0.16);
-    border-radius: 16px;
-    background: #081210;
-  }
-
-  .scrollyCard h3 {
-    margin: 18px 0 8px;
-    color: var(--landing-ink);
-    font-family: var(--font-display-stack);
-    font-size: 1.35rem;
-    font-weight: 600;
-  }
-
-  .scrollyCard p {
-    margin: 0;
-    color: var(--landing-muted);
-    font-size: 0.94rem;
-    line-height: 1.55;
-  }
-
-  .scrollyDots {
-    display: flex;
-    justify-content: center;
-    gap: 7px;
-    margin-top: 22px;
-  }
-
-  .scrollyDot {
-    width: 8px;
-    height: 8px;
-    border-radius: 4px;
-    background: rgba(238, 244, 241, 0.22);
-    transition:
-      width 150ms ease,
-      background 150ms ease;
-  }
-
-  .scrollyDotActive {
-    width: 22px;
-    background: var(--landing-teal);
-  }
-}
-
-/* --- Short desktop viewports: the capability slide goes side-by-side (info
- * rail left, screenshot right) so the image keeps real size without pushing
- * the section past one screen. Tall viewports keep info stacked above. --- */
-@media (min-width: 721px) and (max-height: 980px) {
-  .surfaceSlide {
-    display: grid;
-    grid-template-columns: minmax(280px, 0.34fr) 1fr;
-    align-items: stretch;
-  }
-
-  .surfaceInfo {
-    flex-direction: column;
-    align-items: flex-start;
-    justify-content: center;
-    gap: 14px;
-    /* Left padding clears the floating prev-arrow at the frame's edge. */
-    padding: 16px 28px 16px 86px;
-    border-bottom: 0;
-    border-right: 1px solid rgba(52, 230, 196, 0.1);
-  }
-
-  .surfaceInfo p {
-    margin-top: 6px;
-  }
-
-  .surfaceShotButton {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 18px;
-  }
-
-  .surfaceShot {
-    /* Less vertical overhead with the info rail beside the image; the
-     * 300px floor keeps squat windows from shrinking the shot to a stamp
-     * (the section scrolls a little instead). */
-    max-height: max(300px, calc(100dvh - 438px));
   }
 }
 
