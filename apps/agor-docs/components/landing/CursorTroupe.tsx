@@ -273,14 +273,34 @@ function loadTrack(url: string): CursorTrack | null {
   }
   return typeof cached === 'string' ? null : cached;
 }
-/** Where role k's cursor is right now in the panel's video (viewport px). */
-function performAt(root: HTMLElement, k: number): { x: number; y: number; ripple: number } | null {
+// Which friend plays which role rotates each time a clip starts (or loops),
+// tag-team style: in a two-role clip the two on the sidelines swap in next
+// time. `since` lets the troupe glide into a new clip's roles before locking.
+const clip = { key: '', last: 0, offset: 0, since: 0 };
+function clipFor(video: HTMLVideoElement, url: string) {
+  const now = performance.now();
+  if (url !== clip.key || video.currentTime < clip.last - 0.5) {
+    clip.offset = clip.key ? (clip.offset + 2) % 4 : 0;
+    clip.key = url;
+    clip.since = now;
+  }
+  clip.last = video.currentTime;
+  return { offset: clip.offset, age: (now - clip.since) / 1000 };
+}
+
+/** Where cast slot k's role is right now in the panel's video (viewport px). */
+function performAt(
+  root: HTMLElement,
+  k: number
+): { x: number; y: number; ripple: number; age: number } | null {
   const video = root.querySelector<HTMLVideoElement>('video[data-troupe-video]');
   const url = video?.dataset.troupeVideo;
   if (!video || !url) return null;
   const track = loadTrack(url);
-  const id = track?.roles?.[k];
-  if (!track || !id) return null;
+  if (!track?.roles) return null;
+  const { offset, age } = clipFor(video, url);
+  const id = track.roles[(k - offset + 4) % 4];
+  if (!id) return null;
   const index = Math.min(track.frameCount - 1, Math.floor(video.currentTime * track.fps));
   const frame = track.cursors[id].frames[index];
   if (!frame) return null;
@@ -291,6 +311,7 @@ function performAt(root: HTMLElement, k: number): { x: number; y: number; ripple
     x: r.left + clamp(frame[0]) * r.width,
     y: r.top + clamp(frame[1]) * r.height,
     ripple: frame[2],
+    age,
   };
 }
 
@@ -339,7 +360,7 @@ const LINKED_BLIP = 'a[class*="radarBlip"]';
 const blip = (i: number) => nth(LINKED_BLIP, i);
 const radarScope = q('[class*="radarScope"]');
 const rosterLink = q('a[href="/agent-roster"]');
-const ROSTER_PARK = 9.9;
+const ROSTER_PARK = 5.8;
 /** Just outside the radar, `lag` degrees behind its sweep. */
 const chaseSweep =
   (lag: number): Anchor =>
@@ -398,28 +419,68 @@ function pulled(pulls: Array<[number, number, number, number]>, t: number): numb
 
 // Board: the panel is hauled in from the right in three heaves.
 const BOARD_PULLS: Array<[number, number, number, number]> = [
-  [1.55, 2.15, 0, 0.3],
-  [2.55, 3.15, 0.3, 0.62],
-  [3.55, 4.5, 0.62, 1],
+  [0.9, 1.35, 0, 0.3],
+  [1.6, 2.05, 0.3, 0.62],
+  [2.3, 2.9, 0.62, 1],
 ];
-const boardOffsets = new WeakMap<Element, number>();
+/** When the haul is done and the troupe takes its roles. */
+const BOARD_HAULED = 2.9;
+// Per panel: the transform last written, and its untransformed left edge
+// (measured once per viewport width, not every frame, so the drive never
+// forces layout while the page scrolls).
+const boardState = new WeakMap<
+  Element,
+  { offset: string; left: number; vw: number; played: boolean }
+>();
 function driveBoard(root: HTMLElement, phase: 'before' | 'play' | 'done', t: number) {
   const panel = boardPanel(root) as HTMLElement | null;
   if (!panel) return;
+  const video = panel.querySelector('video');
+  let state = boardState.get(panel);
   if (phase === 'done') {
-    if (boardOffsets.has(panel)) {
+    if (state && state.offset) {
       panel.style.transform = '';
-      boardOffsets.delete(panel);
+      state.offset = '';
+    }
+    if (state && !state.played && video) {
+      state.played = true;
+      video.play().catch(() => {});
     }
     return;
   }
-  const applied = boardOffsets.get(panel) ?? 0;
-  const baseLeft = panel.getBoundingClientRect().left - applied;
+  const vw = window.innerWidth;
+  if (!state || state.vw !== vw) {
+    const prev = panel.style.transform;
+    panel.style.transform = '';
+    state = {
+      offset: '',
+      left: panel.getBoundingClientRect().left,
+      vw,
+      played: state?.played ?? false,
+    };
+    panel.style.transform = prev;
+    boardState.set(panel, state);
+  }
   // Peek ~70px of the panel's left edge in from the viewport's right edge.
-  const start = Math.max(0, window.innerWidth - 70 - baseLeft);
-  const offset = start * (1 - (phase === 'play' ? pulled(BOARD_PULLS, t) : 0));
-  boardOffsets.set(panel, offset);
-  panel.style.transform = offset ? `translateX(${offset.toFixed(1)}px)` : '';
+  const start = Math.max(0, vw - 70 - state.left);
+  const progress = phase === 'play' ? pulled(BOARD_PULLS, t) : 0;
+  const offset = start * (1 - progress);
+  const transform = offset > 0.5 ? `translateX(${offset.toFixed(0)}px)` : '';
+  if (transform !== state.offset) {
+    panel.style.transform = transform;
+    state.offset = transform;
+  }
+  // The clip waits at its first frame until it's hauled in, then plays.
+  if (video) {
+    if (progress < 1) {
+      if (!video.paused) video.pause();
+      if (video.currentTime > 0.05) video.currentTime = 0;
+      state.played = false;
+    } else if (!state.played) {
+      state.played = true;
+      video.play().catch(() => {});
+    }
+  }
 }
 
 // Governance: "confidence" starts at heading size and is stretched to full.
@@ -552,17 +613,17 @@ const BEATS: Record<SectionId, Beat> = {
         (fy, i): Part => ({
           marks: [
             { at: 0, anchor: boardPanel, fx: -0.5, fy, dx: 16 },
-            { at: 1.1, anchor: boardPanel, fx: -0.5, fy, dx: 16, lock: true },
-            { at: 4.7, anchor: boardPanel, perform: i },
+            { at: 0.6, anchor: boardPanel, fx: -0.5, fy, dx: 16, lock: true },
+            { at: BOARD_HAULED + 0.1, anchor: boardPanel, perform: i },
           ],
-          cues: BOARD_PULLS.map(([a]) => ({ at: a - 0.3, gesture: 'heave' as const })),
-          busy: [[1.0, 4.7]],
+          cues: BOARD_PULLS.map(([a]) => ({ at: a - 0.25, gesture: 'heave' as const })),
+          busy: [[0.5, BOARD_HAULED + 0.1]],
         })
       ),
       {
         marks: [
           { at: 0, anchor: offstage(boardPanel, 2) },
-          { at: 4.3, anchor: boardPanel, perform: 3 },
+          { at: BOARD_HAULED - 0.3, anchor: boardPanel, perform: 3 },
         ],
       },
     ],
@@ -637,16 +698,43 @@ const BEATS: Record<SectionId, Beat> = {
           { at: 0.9, anchor: chaseSweep(lag), point: radarScope, lock: true },
         ],
       })),
-    ].map(
-      (part, i): Part => ({
-        // Two laps of the sweep (4.5s each), then a tight huddle under the link.
-        ...part,
-        marks: [
-          ...part.marks,
-          { at: ROSTER_PARK + i * 0.15, anchor: rosterLink, fx: -0.3, dx: i * 14, fy: 0.5, dy: 18 },
-        ],
-      })
-    ),
+    ]
+      .map(
+        (part, i): Part => ({
+          // About a lap of the sweep, then a tight huddle under the link.
+          ...part,
+          marks: [
+            ...part.marks,
+            {
+              at: ROSTER_PARK + i * 0.15,
+              anchor: rosterLink,
+              fx: -0.3,
+              dx: i * 14,
+              fy: 0.5,
+              dy: 18,
+            },
+          ],
+        })
+      )
+      .concat(
+        // The three friends come in from off screen to join the huddle.
+        ([0, 1, 2] as const).map(
+          (side): Part => ({
+            marks: [
+              { at: 0, anchor: offstage(radarScope, side) },
+              {
+                at: ROSTER_PARK - 0.4 + side * 0.15,
+                anchor: rosterLink,
+                fx: -0.3,
+                dx: (3 + side) * 14,
+                fy: 0.5,
+                dy: 18,
+              },
+            ],
+            busy: [[ROSTER_PARK - 0.4, ROSTER_PARK + 1.2]],
+          })
+        )
+      ),
     events: [
       ...[0, 1, 2, 3, 4].map((k) => ({
         at: 0.55 + k * 1.1,
@@ -697,6 +785,17 @@ const BEATS: Record<SectionId, Beat> = {
         ],
         busy: [[5.5, 7.2]],
       },
+      // The friends hang back under the stretch, then take the other pulses.
+      ...([0, 1, 2] as const).map(
+        (j): Part => ({
+          marks: [
+            { at: 0, anchor: confidenceWord, fx: -0.3 + j * 0.25, dy: 110 + (j % 2) * 18 },
+            { at: 4.6 + j * 0.35, anchor: busDot(j * 2) },
+          ],
+          cues: [{ at: 5.4 + j * 0.35, gesture: 'click' as const }],
+          busy: [[4.5, 6.4 + j * 0.35]],
+        })
+      ),
     ],
   },
   // Circle the wagons: all six ring "together", pointing in, turning slowly.
@@ -716,7 +815,7 @@ const BEATS: Record<SectionId, Beat> = {
         const side = (k - 3) as 0 | 1 | 2;
         return {
           marks: [
-            { at: 0, anchor: offstage(together, side) },
+            { at: 0, anchor: together, dx: (side - 1) * 80, dy: -60 },
             { at: 0.3 + side * 0.2, anchor: together, orbit: ring, point: together },
             { at: 3.6 + side * 0.15, anchor: offstage(together, side) },
           ],
@@ -863,8 +962,15 @@ export function CursorTroupe() {
     let finished = false;
     let raf = 0;
 
-    const sectionRoot = (id: SectionId) =>
-      document.querySelector<HTMLElement>(`[data-troupe-section="${id}"]`);
+    // Cached: the director checks every section each frame.
+    const roots = new Map<SectionId, HTMLElement | null>();
+    const sectionRoot = (id: SectionId) => {
+      const cached = roots.get(id);
+      if (cached?.isConnected) return cached;
+      const found = document.querySelector<HTMLElement>(`[data-troupe-section="${id}"]`);
+      roots.set(id, found);
+      return found;
+    };
 
     // The pill starts the whole show again.
     const heroRoot = sectionRoot('hero');
@@ -1044,7 +1150,8 @@ export function CursorTroupe() {
               const role = performAt(root, current.perform);
               if (role) {
                 target = { x: role.x + sx, y: role.y + sy };
-                locked = true;
+                // Glide into a new clip's role, then lock on.
+                locked = role.age > 0.7;
                 performing = true;
                 if (role.ripple > 0 && role.ripple <= 1) {
                   pulse = role.ripple;
