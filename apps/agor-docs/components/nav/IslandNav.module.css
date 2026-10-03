@@ -77,6 +77,8 @@
 .triggers {
   display: flex;
   align-items: center;
+  /* Breathing room, so an open trigger and a hovered one don't touch. */
+  gap: 3px;
 }
 
 .barLeft {
