@@ -8,7 +8,7 @@
  * connector tests never need a Discord account or network access.
  */
 
-import { REST } from '@discordjs/rest';
+import { REST, type RESTOptions } from '@discordjs/rest';
 import { WebSocketManager, WebSocketShardEvents } from '@discordjs/ws';
 import {
   ApplicationFlags,
@@ -21,11 +21,14 @@ import {
 } from 'discord-api-types/v10';
 import type {
   ChannelType,
+  DiscordAgentChannelHistoryRequest,
+  DiscordChannelHistoryResult,
   DiscordGatewayConfig,
   DiscordThreadCoordinates,
   GatewayConnectionTestResult,
 } from '../../types/gateway';
 import {
+  isDiscordDirectMessagesEnabled,
   isDiscordSnowflake,
   isDiscordThreadCoordinates,
   validateDiscordConfig,
@@ -42,6 +45,8 @@ import type {
 } from '../connector';
 import type { DiscordDeliveryNonce } from '../discord-identifiers';
 import {
+  buildDiscordDirectMessageMetadata,
+  buildDiscordDirectMessageThreadKey,
   buildDiscordInboundMetadata,
   buildDiscordLegacyThreadKey,
   buildDiscordMessageThreadKey,
@@ -52,13 +57,21 @@ import {
 } from '../discord-identifiers';
 import { GatewayListenerError } from '../listener-error';
 import { gatewayFailureCode } from '../provider-error';
-import { fetchDiscordProviderHistory } from './discord-history';
+import {
+  createDiscordReadBudget,
+  type DiscordReadBudget,
+  fetchDiscordChannelHistory,
+  fetchDiscordProviderHistory,
+  getDiscordRecordWithinBudget,
+} from './discord-history';
 
 const DISCORD_MESSAGE_LIMIT = 2000;
 const DISCORD_TEXT_CHANNEL_TYPE = 0;
 const DISCORD_PUBLIC_THREAD_TYPES = new Set([10, 11]);
 const DISCORD_TEXT_MESSAGE_TYPES = new Set([0, 19]);
 const DISCORD_NONCE_RECOVERY_WINDOW_MS = 5 * 60_000;
+const DISCORD_ADMINISTRATOR_PERMISSION = PermissionFlagsBits.Administrator;
+const DISCORD_ALL_PERMISSIONS = (1n << 64n) - 1n;
 const DISCORD_VIEW_CHANNEL_PERMISSION = PermissionFlagsBits.ViewChannel;
 const DISCORD_SEND_MESSAGES_PERMISSION = PermissionFlagsBits.SendMessages;
 const DISCORD_READ_MESSAGE_HISTORY_PERMISSION = PermissionFlagsBits.ReadMessageHistory;
@@ -69,7 +82,7 @@ const DISCORD_MESSAGE_CONTENT_FLAGS =
   BigInt(ApplicationFlags.GatewayMessageContentLimited);
 
 interface DiscordRestTransport {
-  get(route: string): Promise<unknown>;
+  get(route: string, options?: { signal?: AbortSignal }): Promise<unknown>;
   post(route: string, options?: { body?: unknown }): Promise<unknown>;
 }
 
@@ -92,7 +105,14 @@ interface DiscordGatewayTransport {
 
 interface DiscordTransport {
   rest: DiscordRestTransport;
+  /**
+   * REST client for agent history reads. It rejects instead of sleeping on a
+   * rate limit so the row's rate-limit budget applies. Other reads use `rest`,
+   * whose member lookups fail fast while other routes retain library handling.
+   */
+  historyRest: DiscordRestTransport;
   createGateway(options: {
+    intents: number;
     checkpoint: Record<string, unknown> | null | undefined;
     onSessionInfo: (sessionInfo: unknown) => Promise<void>;
   }): DiscordGatewayTransport;
@@ -103,18 +123,63 @@ interface VerifiedDiscordThread {
   type: number;
 }
 
+export function createDiscordRest(token: string, makeRequest?: RESTOptions['makeRequest']): REST {
+  return new REST({
+    version: '10',
+    rejectOnRateLimit: (data) => /^\/guilds\/[^/]+\/members\/[^/]+$/.test(data.route),
+    ...(makeRequest ? { makeRequest } : {}),
+  }).setToken(token);
+}
+
+export class DiscordDirectMessageError extends Error {
+  readonly name = 'DiscordDirectMessageError';
+  constructor(
+    readonly code:
+      | 'discord_direct_messages_disabled'
+      | 'discord_dm_channel_mismatch'
+      | 'discord_dm_target_not_member'
+      | 'discord_dm_unreachable'
+      | 'discord_dm_verification_unavailable',
+    readonly status?: number
+  ) {
+    super(code);
+  }
+
+  /** Only a failed pre-send recipient check is safe to retry: no message POST was attempted. */
+  get retryable(): boolean {
+    return this.code === 'discord_dm_verification_unavailable';
+  }
+}
+
 function defaultDiscordTransport(token: string): DiscordTransport {
-  const rest = new REST({ version: '10' }).setToken(token);
+  // Clients are built on first use: connectors are often created only to
+  // validate config or serve one read, and each REST client starts recurring
+  // cache sweeper timers that are never cleared.
+  let rest: REST | undefined;
+  const sharedRest = () => {
+    rest ??= createDiscordRest(token);
+    return rest;
+  };
+  let historyRest: DiscordRestTransport | undefined;
   return {
-    rest,
-    createGateway: ({ onSessionInfo }) =>
+    get rest() {
+      return sharedRest();
+    },
+    // Agent history reads are one-shot, so this client runs no sweeper timers.
+    get historyRest() {
+      historyRest ??= new REST({
+        version: '10',
+        rejectOnRateLimit: () => true,
+        hashSweepInterval: 0,
+        handlerSweepInterval: 0,
+      }).setToken(token);
+      return historyRest;
+    },
+    createGateway: ({ onSessionInfo, intents }) =>
       new WebSocketManager({
         token,
-        rest,
-        intents:
-          GatewayIntentBits.Guilds |
-          GatewayIntentBits.GuildMessages |
-          GatewayIntentBits.MessageContent,
+        rest: sharedRest(),
+        intents,
         shardCount: 1,
         updateSessionInfo: async (shardId, sessionInfo) => {
           if (sessionInfo) await onSessionInfo(sessionInfo);
@@ -132,8 +197,14 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 /** Keep only numeric retry metadata when sanitizing a provider error. */
 function withDeliveryErrorMetadata(error: unknown, message: string): Error {
-  const wrapped = new Error(message);
   const record = asRecord(error);
+  if (record?.code === 50007 || record?.code === 50278) {
+    return new DiscordDirectMessageError(
+      'discord_dm_unreachable',
+      typeof record.status === 'number' ? record.status : undefined
+    );
+  }
+  const wrapped = new Error(message);
   if (!record) return wrapped;
   const status = record.status ?? record.statusCode ?? record.code;
   if (typeof status === 'number') {
@@ -330,11 +401,20 @@ function existingThreadId(parentChannelId: string, threadChannelId: string): str
 function parseThreadId(threadId: string): {
   channelId: string;
   messageId?: string;
+  directMessageUserId?: string;
   parentChannelId?: string;
   existingThread: boolean;
   providerThread: boolean;
 } {
   const parsed = parseDiscordThreadKey(threadId);
+  if (parsed?.kind === 'direct_message') {
+    return {
+      channelId: parsed.channelId,
+      directMessageUserId: parsed.userId,
+      existingThread: false,
+      providerThread: false,
+    };
+  }
   if (parsed?.kind === 'legacy_thread') {
     return {
       channelId: parsed.threadChannelId,
@@ -574,7 +654,9 @@ function effectiveChannelPermissions(
   botUserId: string
 ): bigint {
   const direct = permissionBits(member?.permissions);
-  if (direct !== 0n) return direct;
+  if (direct !== 0n) {
+    return (direct & DISCORD_ADMINISTRATOR_PERMISSION) !== 0n ? DISCORD_ALL_PERMISSIONS : direct;
+  }
   const roles = Array.isArray(guild?.roles) ? guild.roles.map(asRecord).filter(Boolean) : [];
   const memberRoles = Array.isArray(member?.roles)
     ? member.roles.filter((role): role is string => typeof role === 'string')
@@ -586,7 +668,8 @@ function effectiveChannelPermissions(
       permissions |= permissionBits(role.permissions);
     }
   }
-  if ((permissions & (1n << 3n)) !== 0n) return permissions;
+  // Administrator grants every permission and bypasses channel overwrites.
+  if ((permissions & DISCORD_ADMINISTRATOR_PERMISSION) !== 0n) return DISCORD_ALL_PERMISSIONS;
   const overwrites = Array.isArray(channel?.permission_overwrites)
     ? channel.permission_overwrites.map(asRecord).filter(Boolean)
     : [];
@@ -692,6 +775,24 @@ export class DiscordConnector implements GatewayConnector {
     } catch (error) {
       if (this.providerStatus(error) === 404) return null;
       throw error;
+    }
+  }
+
+  private async lookupGuildMember(userId: string): Promise<Record<string, unknown> | null> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3_000);
+    try {
+      return asRecord(
+        await this.transport.rest.get(
+          Routes.guildMember(configuredString(this.config, 'guild_id'), userId),
+          { signal: controller.signal }
+        )
+      );
+    } catch (error) {
+      if (this.providerStatus(error) === 404) return null;
+      throw error;
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
@@ -867,7 +968,8 @@ export class DiscordConnector implements GatewayConnector {
     channelId: string,
     threadId: string,
     ids: string[],
-    permalink = true
+    permalink = true,
+    directMessage = parseDiscordThreadKey(threadId)?.kind === 'direct_message'
   ): GatewaySendReceipt {
     const firstId = ids[0];
     const lastId = ids[ids.length - 1];
@@ -875,12 +977,12 @@ export class DiscordConnector implements GatewayConnector {
       messageId: lastId,
       messageIds: ids,
       threadId,
-      replyAliases: replyAliases(channelId, ids),
+      replyAliases: directMessage ? [] : replyAliases(channelId, ids),
       platformChannelId: channelId,
       platformThreadId: threadId,
       ...(permalink
         ? {
-            permalink: `https://discord.com/channels/${configuredString(this.config, 'guild_id')}/${channelId}/${firstId}`,
+            permalink: `https://discord.com/channels/${directMessage ? '@me' : configuredString(this.config, 'guild_id')}/${channelId}/${firstId}`,
           }
         : {}),
     };
@@ -911,7 +1013,37 @@ export class DiscordConnector implements GatewayConnector {
       }
       parentChannelId = snowflake(thread.parent_id) ?? '';
     }
-    if (!configuredChannelIds(this.config).includes(parentChannelId)) {
+    if (parsed.directMessageUserId) {
+      if (!isDiscordDirectMessagesEnabled(this.config)) {
+        throw new DiscordDirectMessageError('discord_direct_messages_disabled');
+      }
+      let dm: Record<string, unknown> | null;
+      try {
+        dm = await this.getProviderRecord(Routes.channel(parsed.channelId));
+      } catch (error) {
+        const status = this.providerStatus(error);
+        // A definitive refusal proves the recipient cannot be verified; anything else is transient.
+        if (
+          status !== undefined &&
+          status >= 400 &&
+          status < 500 &&
+          ![408, 409, 425, 429].includes(status)
+        ) {
+          throw new DiscordDirectMessageError('discord_dm_channel_mismatch', status);
+        }
+        throw new DiscordDirectMessageError('discord_dm_verification_unavailable', status);
+      }
+      const recipients = dm?.recipients;
+      if (
+        dm?.id !== parsed.channelId ||
+        dm.type !== 1 ||
+        !Array.isArray(recipients) ||
+        recipients.length !== 1 ||
+        asRecord(recipients[0])?.id !== parsed.directMessageUserId
+      ) {
+        throw new DiscordDirectMessageError('discord_dm_channel_mismatch');
+      }
+    } else if (!configuredChannelIds(this.config).includes(parentChannelId)) {
       throw new Error('Discord replies must remain in an allowed channel');
     }
     const explicitReply = metadata?.[DISCORD_METADATA_KEY.replyToMessageId];
@@ -932,7 +1064,7 @@ export class DiscordConnector implements GatewayConnector {
           await this.sendChunk(
             parsed.channelId,
             chunk,
-            parsed.providerThread ? undefined : replyTo,
+            parsed.providerThread || parsed.directMessageUserId ? undefined : replyTo,
             nonceOptions
           )
         ).id
@@ -973,6 +1105,112 @@ export class DiscordConnector implements GatewayConnector {
     return fetchDiscordProviderHistory(this.transport.rest, this.config, req);
   }
 
+  /**
+   * Agent channel-history read (`agent_tools.channel_history`). The target
+   * must be an allowlisted public parent channel or a public thread under one,
+   * and the bot must hold View Channel and Read Message History there: Discord
+   * answers a missing Read Message History with an empty list, not an error,
+   * so an empty result is only trusted after this check. Resolution, access
+   * checks, and pages share one deadline and rate-limit budget.
+   */
+  async fetchChannelHistory(
+    req: DiscordAgentChannelHistoryRequest
+  ): Promise<DiscordChannelHistoryResult> {
+    this.validate();
+    const budget = createDiscordReadBudget(this.config);
+    const channelId =
+      req.channelId ??
+      (req.sessionThreadKey
+        ? await this.resolveHistoryParentChannel(req.sessionThreadKey, budget)
+        : undefined);
+    if (!channelId) throw new Error('A Discord channel or session thread is required.');
+    await this.requireChannelHistoryAccess(channelId, budget);
+    return fetchDiscordChannelHistory(
+      this.transport.historyRest,
+      this.config,
+      {
+        channelId,
+        ...(req.before ? { before: req.before } : {}),
+        ...(req.after ? { after: req.after } : {}),
+        ...(req.limit !== undefined ? { limit: req.limit } : {}),
+        ...(req.includeBotMessages !== undefined
+          ? { includeBotMessages: req.includeBotMessages }
+          : {}),
+      },
+      budget
+    );
+  }
+
+  /** The allowlisted parent channel behind a Discord gateway thread key. */
+  private async resolveHistoryParentChannel(
+    threadKey: string,
+    budget: DiscordReadBudget
+  ): Promise<string> {
+    const parsed = parseDiscordThreadKey(threadKey);
+    let parentChannelId: string | undefined;
+    if (parsed?.kind === 'legacy_thread') parentChannelId = parsed.parentChannelId;
+    else if (parsed?.kind === 'message') parentChannelId = parsed.channelId;
+    else if (parsed?.kind === 'provider_thread') {
+      const thread = await getDiscordRecordWithinBudget(
+        this.transport.historyRest,
+        Routes.channel(parsed.channelId),
+        budget
+      );
+      parentChannelId = snowflake(thread?.parent_id);
+    }
+    if (!parentChannelId || !configuredChannelIds(this.config).includes(parentChannelId)) {
+      throw new Error(
+        'Could not resolve an allowed Discord parent channel for this session; pass discordChannelId.'
+      );
+    }
+    return parentChannelId;
+  }
+
+  private async requireChannelHistoryAccess(
+    channelId: string,
+    budget: DiscordReadBudget
+  ): Promise<void> {
+    const get = (route: string) =>
+      getDiscordRecordWithinBudget(this.transport.historyRest, route, budget);
+    const guildId = configuredString(this.config, 'guild_id');
+    const allowedChannelIds = configuredChannelIds(this.config);
+    const denied = () =>
+      new Error(
+        `Discord channel ${channelId} is not an allowed channel, or a public thread under one, for this gateway channel.`
+      );
+    if (!isDiscordSnowflake(channelId)) throw denied();
+    const target = await get(Routes.channel(channelId));
+    if (!target || target.id !== channelId || target.guild_id !== guildId) throw denied();
+    let parent: Record<string, unknown> | null = target;
+    if (!allowedChannelIds.includes(channelId)) {
+      const parentChannelId = snowflake(target.parent_id);
+      if (
+        !DISCORD_PUBLIC_THREAD_TYPES.has(target.type as number) ||
+        !parentChannelId ||
+        !allowedChannelIds.includes(parentChannelId)
+      ) {
+        throw denied();
+      }
+      parent = await get(Routes.channel(parentChannelId));
+      if (parent?.id !== parentChannelId || parent.guild_id !== guildId) throw denied();
+    }
+    if (!isPublicTextChannel(parent, guildId)) throw denied();
+
+    // Threads inherit their parent's permission overwrites.
+    const botUserId = configuredString(this.config, 'application_id');
+    const [guild, member] = await Promise.all([
+      get(Routes.guild(guildId)),
+      get(Routes.guildMember(guildId, botUserId)),
+    ]);
+    const permissions = effectiveChannelPermissions(guild, member, parent, guildId, botUserId);
+    const required = DISCORD_VIEW_CHANNEL_PERMISSION | DISCORD_READ_MESSAGE_HISTORY_PERMISSION;
+    if ((permissions & required) !== required) {
+      throw new Error(
+        `The Discord bot lacks View Channel or Read Message History on channel ${channelId}; grant both in Discord to read its history.`
+      );
+    }
+  }
+
   async sendDirectMessage(req: {
     target: string;
     text: string;
@@ -981,19 +1219,46 @@ export class DiscordConnector implements GatewayConnector {
     metadata?: Record<string, unknown>;
   }): Promise<GatewaySendReceipt> {
     this.validate();
-    const match = /^channel:(\d{17,20})$/.exec(req.target.trim());
-    if (!match) throw new Error('Invalid Discord outbound target. Expected channel:<snowflake>');
-    const channelId = match[1];
-    if (!configuredChannelIds(this.config).includes(channelId)) {
-      throw new Error('Discord outbound target must be one of the allowed channels');
+    const match = /^(channel|user):(\d{17,20})$/.exec(req.target.trim());
+    if (!match) {
+      throw new Error(
+        'Invalid Discord outbound target. Expected channel:<snowflake> or user:<snowflake>'
+      );
+    }
+    const directMessage = match[1] === 'user';
+    let channelId = match[2];
+    if (directMessage && !isDiscordDirectMessagesEnabled(this.config)) {
+      throw new DiscordDirectMessageError('discord_direct_messages_disabled');
     }
     if (req.threadId) throw new Error('Discord proactive outbound does not accept thread targets');
+    if (directMessage) {
+      if (!(await this.lookupGuildMember(match[2]))) {
+        throw new DiscordDirectMessageError('discord_dm_target_not_member');
+      }
+      let dm: Record<string, unknown> | null;
+      try {
+        dm = asRecord(
+          await this.transport.rest.post(Routes.userChannels(), {
+            body: { recipient_id: match[2] },
+          })
+        );
+      } catch (error) {
+        throw withDeliveryErrorMetadata(error, `Discord API failure: ${gatewayFailureCode(error)}`);
+      }
+      const dmId = snowflake(dm?.id);
+      if (!dmId || dm?.type !== 1) {
+        throw new DiscordDirectMessageError('discord_dm_channel_mismatch');
+      }
+      channelId = dmId;
+    } else if (!configuredChannelIds(this.config).includes(channelId)) {
+      throw new Error('Discord outbound target must be one of the allowed channels');
+    }
     const ids: string[] = [];
     for (const chunk of chunkDiscordMessage(req.text)) {
       ids.push((await this.sendChunk(channelId, chunk)).id);
     }
     const threadId = messageThreadId(channelId, ids[0]);
-    return this.receipt(channelId, threadId, ids);
+    return this.receipt(channelId, threadId, ids, true, directMessage);
   }
 
   formatMessage(markdown: string): string {
@@ -1009,16 +1274,20 @@ export class DiscordConnector implements GatewayConnector {
     prepareDelivery?: InboundMessage['prepareDelivery'];
   }> {
     const author = asRecord(message.author);
-    const member = asRecord(message.member);
+    let member = asRecord(message.member);
     const channelId = snowflake(message.channel_id);
     const guildId = snowflake(message.guild_id);
     const messageId = snowflake(message.id);
     const authorId = snowflake(author?.id);
     const botUserId = this.botUserId;
-    if (!author || !channelId || !guildId || !messageId || !authorId || !botUserId) {
+    const directMessage = message.guild_id === undefined || message.guild_id === null;
+    if (!author || !channelId || !messageId || !authorId || !botUserId) {
       return { accepted: false };
     }
-    if (guildId !== configuredString(this.config, 'guild_id')) return { accepted: false };
+    if (directMessage) {
+      if (!isDiscordDirectMessagesEnabled(this.config) || message.channel_type !== 1)
+        return { accepted: false };
+    } else if (guildId !== configuredString(this.config, 'guild_id')) return { accepted: false };
     if (
       author.bot === true ||
       author.system === true ||
@@ -1031,25 +1300,9 @@ export class DiscordConnector implements GatewayConnector {
       return { accepted: false };
     }
 
-    const allowedUsers = Array.isArray(this.config.allowed_user_ids)
-      ? this.config.allowed_user_ids.filter((id): id is string => typeof id === 'string')
-      : [];
-    const allowedRoles = Array.isArray(this.config.allowed_role_ids)
-      ? this.config.allowed_role_ids.filter((id): id is string => typeof id === 'string')
-      : [];
-    const roles = Array.isArray(member?.roles)
-      ? member.roles.filter((id): id is string => typeof id === 'string')
-      : [];
-    if (
-      !allowedUsers.includes(String(author.id)) &&
-      !roles.some((role) => allowedRoles.includes(role))
-    ) {
-      return { accepted: false };
-    }
-
     const rawContent = typeof message.content === 'string' ? message.content : '';
     const mentioned = hasStructuredDiscordBotMention(message, botUserId);
-    if (!mentioned) return { accepted: false };
+    if (!directMessage && !mentioned) return { accepted: false };
     const rawAttachments = message.attachments;
     if (rawAttachments !== undefined && !Array.isArray(rawAttachments)) {
       return { accepted: false };
@@ -1063,6 +1316,52 @@ export class DiscordConnector implements GatewayConnector {
     }
     const text = stripStructuredDiscordBotMention(rawContent, botUserId);
     if (!text) return { accepted: false };
+
+    const allowedUsers = Array.isArray(this.config.allowed_user_ids)
+      ? this.config.allowed_user_ids.filter((id): id is string => typeof id === 'string')
+      : [];
+    const allowedRoles = Array.isArray(this.config.allowed_role_ids)
+      ? this.config.allowed_role_ids.filter((id): id is string => typeof id === 'string')
+      : [];
+    if (directMessage) {
+      // No role can admit an unlisted author, so skip the serialized member lookup.
+      if (!allowedUsers.includes(String(author.id)) && allowedRoles.length === 0) {
+        return { accepted: false };
+      }
+      try {
+        member = await this.lookupGuildMember(authorId);
+      } catch (error) {
+        console.warn('[discord] DM membership lookup failed:', providerError(error));
+        return { accepted: false };
+      }
+      if (!member) return { accepted: false };
+    }
+    const roles = Array.isArray(member?.roles)
+      ? member.roles.filter((id): id is string => typeof id === 'string')
+      : [];
+    if (
+      !allowedUsers.includes(String(author.id)) &&
+      !roles.some((role) => allowedRoles.includes(role))
+    ) {
+      return { accepted: false };
+    }
+
+    if (directMessage) {
+      if (!roles.every(isDiscordSnowflake)) return { accepted: false };
+      return {
+        accepted: true,
+        threadId: buildDiscordDirectMessageThreadKey(channelId, authorId),
+        text,
+        ...(files ? { files } : {}),
+        metadata: buildDiscordDirectMessageMetadata({
+          channelId,
+          messageId,
+          authorId,
+          roleIds: roles,
+          botUserId,
+        }),
+      };
+    }
 
     const configuredChannelIdsList = configuredChannelIds(this.config);
     let isThread = false;
@@ -1096,7 +1395,7 @@ export class DiscordConnector implements GatewayConnector {
       text,
       ...(files ? { files } : {}),
       metadata: buildDiscordInboundMetadata({
-        guildId,
+        guildId: guildId!,
         channelId,
         messageId,
         authorId,
@@ -1209,6 +1508,11 @@ export class DiscordConnector implements GatewayConnector {
     this.lastSequence = -1;
 
     this.gateway = this.transport.createGateway({
+      intents:
+        GatewayIntentBits.Guilds |
+        GatewayIntentBits.GuildMessages |
+        GatewayIntentBits.MessageContent |
+        (isDiscordDirectMessagesEnabled(this.config) ? GatewayIntentBits.DirectMessages : 0),
       checkpoint: undefined,
       onSessionInfo: async () => undefined,
     });
@@ -1398,6 +1702,7 @@ export class DiscordConnector implements GatewayConnector {
         ...(botOk && botUserId ? { verifiedInstallationId: botUserId } : {}),
         team: { id: String(guild?.id ?? this.config.guild_id), name: String(guild?.name ?? '') },
         channelAccess,
+        directMessages: { enabled: isDiscordDirectMessagesEnabled(this.config) },
         ...(messageContent === undefined
           ? {
               verification: {
@@ -1410,6 +1715,11 @@ export class DiscordConnector implements GatewayConnector {
           : { verification: { status: 'verified' as const, warnings: [] } }),
         failures,
         notVerifiable: [
+          ...(isDiscordDirectMessagesEnabled(this.config)
+            ? [
+                'Direct messages are enabled; end-to-end DM delivery cannot be proven by this probe.',
+              ]
+            : []),
           'End-to-end send/reply permission for every configured channel and thread cannot be proven by this REST-only probe; sampled view, send, history, public-thread creation, and thread-reply bits are reported in channelAccess.',
           'Whether the bot can receive MESSAGE_CREATE events end to end; the probe does not open a listener or use live credentials beyond these REST calls.',
           'Whether every configured allowlisted user or role can currently see the channel and is role-matchable at delivery time.',

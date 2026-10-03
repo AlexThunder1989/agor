@@ -27,6 +27,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { loadManagedAgenticToolSdk } from '@agor/core/agentic-integrations';
+import { agorHomePath } from '@agor/core/config';
 import { shortId } from '@agor/core/db';
 import {
   getMcpServersForSession,
@@ -43,7 +44,7 @@ import {
   renderAgorSystemPrompt,
 } from '@agor/core/templates/session-context';
 import { mergeMCPRemoteHeaders } from '@agor/core/tools/mcp/http-headers';
-import type { CodexSandboxMode, ContextUsageSnapshot, MCPServer } from '@agor/core/types';
+import type { CodexSandboxMode, ContextUsageSnapshot, MCPServer, Session } from '@agor/core/types';
 import {
   getDefaultPermissionMode,
   isGatewaySession,
@@ -446,12 +447,12 @@ export class CodexPromptService {
 
   /**
    * Delete `agor-codex-instructions-*.md` files in `os.tmpdir()` (and the
-   * `~/.agor/tmp` fallback dir) older than 24h. Bounds the disk leak from
+   * `<agor home>/tmp` fallback dir) older than 24h. Bounds the disk leak from
    * the missing close hook described in the constructor.
    */
   private async sweepStaleInstructionsFiles(): Promise<void> {
     const cutoffMs = Date.now() - 24 * 60 * 60 * 1000;
-    const candidateDirs = [os.tmpdir(), path.join(os.homedir(), '.agor', 'tmp')];
+    const candidateDirs = [os.tmpdir(), agorHomePath('tmp')];
 
     for (const dir of candidateDirs) {
       let entries: string[];
@@ -510,14 +511,15 @@ export class CodexPromptService {
   private buildCodexOptions(
     apiKey: string | undefined,
     baseUrl: string | undefined,
-    config: CodexConfigObject | undefined
+    config: CodexConfigObject | undefined,
+    includePlugins = false
   ): ConstructorParameters<typeof CodexSdk.Codex>[0] {
     const useSubscription = this.useNativeAuth && !apiKey;
 
     const options: ConstructorParameters<typeof CodexSdk.Codex>[0] = {
       ...(apiKey ? { apiKey } : {}),
       ...(baseUrl ? { baseUrl } : {}),
-      config: applyAgorCodexLaunchPolicy(config),
+      config: applyAgorCodexLaunchPolicy(config, includePlugins),
     };
 
     if (useSubscription) {
@@ -589,12 +591,16 @@ export class CodexPromptService {
    * rotated MCP bearer tokens invalidate the cache even when the config
    * shape stays the same — see `snapshotMcpEnvValues()`.
    */
-  private async ensureCodexClient(config: CodexConfigObject): Promise<void> {
+  private async ensureCodexClient(
+    config: CodexConfigObject,
+    includePlugins = false
+  ): Promise<void> {
     const baseUrl = this.resolveBaseUrl();
     const fingerprint = JSON.stringify({
       apiKey: this.apiKey || '',
       baseUrl: baseUrl ?? '',
       useNativeAuth: this.useNativeAuth,
+      includePlugins,
       config,
       mcpEnv: this.snapshotMcpEnvValues(),
     });
@@ -606,7 +612,9 @@ export class CodexPromptService {
     codexDebug(
       `🔄 [Codex] Per-session config changed, reinitializing SDK (apiKey=${this.apiKey ? 'set' : 'unset'}, useNativeAuth=${this.useNativeAuth})`
     );
-    await this.replaceCodexClient(this.buildCodexOptions(this.apiKey, baseUrl, config));
+    await this.replaceCodexClient(
+      this.buildCodexOptions(this.apiKey, baseUrl, config, includePlugins)
+    );
     this.lastApiKey = this.apiKey || null;
     this.lastBaseUrl = baseUrl ?? null;
     this.lastClientFingerprint = fingerprint;
@@ -673,13 +681,13 @@ export class CodexPromptService {
 
     const fileName = `agor-codex-instructions-${sessionId}.md`;
 
-    // Try /tmp first; fall back to ~/.agor/tmp if /tmp is unavailable
+    // Try /tmp first; fall back to `<agor home>/tmp` if /tmp is unavailable
     // (sandboxed executors / containers without /tmp).
     let filePath = path.join(os.tmpdir(), fileName);
     try {
       await fs.writeFile(filePath, agorSystemPrompt, { encoding: 'utf-8', mode: 0o600 });
     } catch {
-      const fallbackBase = path.join(os.homedir(), '.agor', 'tmp');
+      const fallbackBase = agorHomePath('tmp');
       console.warn('⚠️  [Codex] Primary instructions-file write failed; using fallback storage');
       await fs.mkdir(fallbackBase, { recursive: true, mode: 0o700 });
       filePath = path.join(fallbackBase, fileName);
@@ -1063,6 +1071,7 @@ export class CodexPromptService {
     session: {
       genealogy?: { forked_from_session_id?: SessionID };
       sdk_session_id?: string | null;
+      permission_config?: Session['permission_config'];
     }
   ): Promise<void> {
     if (session.sdk_session_id) return;
@@ -1092,6 +1101,7 @@ export class CodexPromptService {
 
     const forkedThreadId = await forkCodexThreadViaAppServer(parentSession.sdk_session_id, {
       env: appServerEnv,
+      includePlugins: session.permission_config?.codex?.includePlugins === true,
     });
     await this.sessionsRepo.update(sessionId, { sdk_session_id: forkedThreadId });
     session.sdk_session_id = forkedThreadId;
@@ -1233,7 +1243,10 @@ export class CodexPromptService {
 
     // Recreate Codex instance only if the per-session config payload (or
     // apiKey/baseUrl) actually changed — issue #133 protection.
-    await this.ensureCodexClient(codexConfigPayload);
+    await this.ensureCodexClient(
+      codexConfigPayload,
+      session.permission_config?.codex?.includePlugins === true
+    );
 
     codexDebug(
       `   Configured: sandboxMode=${sandboxMode}, approvalPolicy=${approvalPolicy}, networkAccess=${networkAccess}, ${mcpServerCount} MCP server(s)`
@@ -1892,7 +1905,7 @@ export class CodexPromptService {
     const candidatePaths = new Set<string>([
       ...(recordedPath ? [recordedPath] : []),
       path.join(os.tmpdir(), fileName),
-      path.join(os.homedir(), '.agor', 'tmp', fileName),
+      agorHomePath('tmp', fileName),
     ]);
 
     for (const filePath of candidatePaths) {

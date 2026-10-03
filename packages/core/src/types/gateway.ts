@@ -204,12 +204,17 @@ export interface DiscordGatewayConfig {
   message_content_enabled?: boolean;
   thread_mode?: 'public_thread_per_summon';
   thread_auto_archive_minutes?: 60 | 1440 | 4320 | 10080;
+  direct_messages_enabled?: boolean;
   align_discord_users?: boolean;
   user_map?: Record<string, string>;
   catch_up?: DiscordCatchUpConfig;
   /** Opt-in bounded PNG/JPEG ingestion for live Discord messages. */
   files?: boolean;
-  agent_tools?: never[];
+  /**
+   * Agent-callable MCP tool toggles. `[]` is the legacy all-off value and
+   * stays valid; see {@link resolveDiscordAgentTools}.
+   */
+  agent_tools?: DiscordAgentToolsConfig | never[];
   outbound_enabled?: boolean;
   default_outbound_target?: string | null;
 }
@@ -295,6 +300,11 @@ export function isDiscordSnowflake(value: unknown): value is string {
   }
 }
 
+/** Decode the provider timestamp of an already-validated Discord Snowflake. */
+export function discordSnowflakeTimestampMs(id: string): number {
+  return Number((BigInt(id) >> 22n) + 1420070400000n);
+}
+
 /** Compare two already-validated Discord Snowflakes without losing precision. */
 export function compareDiscordSnowflakes(a: string, b: string): number {
   if (!isDiscordSnowflake(a) || !isDiscordSnowflake(b)) {
@@ -328,6 +338,113 @@ function validateCatchUpConfig(raw: unknown, errors: string[]): void {
       );
     }
   }
+}
+
+/**
+ * Per-channel toggles for agent-callable Discord MCP tools, stored at
+ * `config.agent_tools` on Discord gateway channels. Every capability is off
+ * unless an admin enables it; the legacy `[]` value means all off.
+ */
+export interface DiscordAgentToolsConfig {
+  /** Read allowlisted channel history (agor_gateway_discord_channel_history_get). */
+  channel_history?: boolean;
+}
+
+export type DiscordAgentToolCapability = keyof DiscordAgentToolsConfig;
+
+export const DISCORD_AGENT_TOOL_DEFAULTS: Record<DiscordAgentToolCapability, boolean> = {
+  channel_history: false,
+};
+
+function validateDiscordAgentTools(raw: unknown, errors: string[]): void {
+  if (raw === undefined) return;
+  if (Array.isArray(raw)) {
+    if (raw.length > 0) errors.push('agent_tools must be [] or an object of capability toggles');
+    return;
+  }
+  if (!isRecord(raw)) {
+    errors.push('agent_tools must be [] or an object of capability toggles');
+    return;
+  }
+  for (const [key, value] of Object.entries(raw)) {
+    if (!Object.hasOwn(DISCORD_AGENT_TOOL_DEFAULTS, key)) {
+      errors.push(`agent_tools.${key} is not a supported Discord agent tool`);
+    } else if (typeof value !== 'boolean') {
+      errors.push(`agent_tools.${key} must be a boolean`);
+    }
+  }
+}
+
+/**
+ * Resolve a Discord channel's `config.agent_tools` value (absent, legacy `[]`,
+ * or a toggle object) into a fully-populated capability map.
+ */
+export function resolveDiscordAgentTools(
+  raw: unknown
+): Record<DiscordAgentToolCapability, boolean> {
+  const resolved = { ...DISCORD_AGENT_TOOL_DEFAULTS };
+  if (!isRecord(raw)) return resolved;
+  for (const capability of Object.keys(resolved) as DiscordAgentToolCapability[]) {
+    if (typeof raw[capability] === 'boolean') resolved[capability] = raw[capability] as boolean;
+  }
+  return resolved;
+}
+
+/** One agent read of recent messages from an already-authorized channel. */
+export interface DiscordChannelHistoryRequest {
+  channelId: string;
+  /** Exclusive cursor: return the newest matches older than this message. */
+  before?: string;
+  /** Exclusive cursor: return the oldest matches newer than this message. */
+  after?: string;
+  /** Matching messages to return (1–200, default 50). */
+  limit?: number;
+  /** Include bot and system messages. Defaults to false. */
+  includeBotMessages?: boolean;
+}
+
+/**
+ * Connector-level agent read: an explicit channel, or the allowlisted parent
+ * channel of a Discord gateway session's thread.
+ */
+export interface DiscordAgentChannelHistoryRequest
+  extends Omit<DiscordChannelHistoryRequest, 'channelId'> {
+  channelId?: string;
+  /** Gateway session thread key whose allowlisted parent channel is read. */
+  sessionThreadKey?: string;
+}
+
+export interface DiscordChannelHistoryAttachment {
+  filename: string;
+  content_type?: string;
+  size: number;
+}
+
+export interface DiscordChannelHistoryMessage {
+  id: string;
+  iso_time: string;
+  actor_label: string;
+  author_id?: string;
+  text: string;
+  /** Set when the text alone exceeded the byte budget and was cut. */
+  text_truncated?: true;
+  is_bot: boolean;
+  is_system: boolean;
+  is_mention: boolean;
+  /** Set for a forward; text and attachments are the forwarded message's. */
+  is_forwarded?: true;
+  attachments?: DiscordChannelHistoryAttachment[];
+  /** Thread started from this message, readable with the same tool. */
+  thread_id?: string;
+}
+
+export interface DiscordChannelHistoryResult {
+  channelId: string;
+  /** Chronological order. */
+  messages: DiscordChannelHistoryMessage[];
+  has_more: boolean;
+  /** Cursor for the next call in the same direction; null when complete. */
+  next_cursor: { before: string } | { after: string } | null;
 }
 
 /** Fill only non-authority defaults; Message Content and identity stay explicit. */
@@ -442,16 +559,17 @@ export function validateDiscordConfig(
     errors.push('user_map must contain at least one entry when align_discord_users is true');
   }
 
+  if (
+    raw.direct_messages_enabled !== undefined &&
+    typeof raw.direct_messages_enabled !== 'boolean'
+  ) {
+    errors.push('direct_messages_enabled must be a boolean');
+  }
   validateCatchUpConfig(raw.catch_up, errors);
   if (raw.files !== undefined && typeof raw.files !== 'boolean') {
     errors.push('files must be a boolean');
   }
-  if (
-    raw.agent_tools !== undefined &&
-    (!Array.isArray(raw.agent_tools) || raw.agent_tools.length > 0)
-  ) {
-    errors.push('agent_tools must be an empty array');
-  }
+  validateDiscordAgentTools(raw.agent_tools, errors);
 
   if (raw.outbound_enabled !== undefined && typeof raw.outbound_enabled !== 'boolean') {
     errors.push('outbound_enabled must be a boolean');
@@ -576,6 +694,10 @@ export interface GatewayConnectionTestChannelAccess {
   permissions?: GatewayConnectionTestPermissionDetails;
 }
 
+export function isDiscordDirectMessagesEnabled(config: DiscordGatewayConfig): boolean {
+  return config.direct_messages_enabled === true;
+}
+
 /**
  * Result of a best-effort gateway connector connection probe.
  *
@@ -584,6 +706,7 @@ export interface GatewayConnectionTestChannelAccess {
  * guarantee; connector-specific optional fields carry richer details.
  */
 export interface GatewayConnectionTestResult {
+  directMessages?: { enabled: boolean };
   ok: boolean;
   team?: { id: string; name: string };
   bot?: { userId: string; name: string };
@@ -717,6 +840,7 @@ type ReferencedGatewayAgenticConfig = {
   codexSandboxMode?: never;
   codexApprovalPolicy?: never;
   codexNetworkAccess?: never;
+  codexIncludePlugins?: never;
 };
 
 type InlineGatewayAgenticConfig = {
@@ -726,6 +850,7 @@ type InlineGatewayAgenticConfig = {
   codexSandboxMode?: CodexSandboxMode;
   codexApprovalPolicy?: CodexApprovalPolicy;
   codexNetworkAccess?: boolean;
+  codexIncludePlugins?: boolean;
 };
 
 export type GatewayAgenticConfig = GatewayAgenticConfigBase &
@@ -740,6 +865,7 @@ export type PersistedGatewayAgenticConfig = GatewayAgenticConfigBase & {
   codexSandboxMode?: CodexSandboxMode;
   codexApprovalPolicy?: CodexApprovalPolicy;
   codexNetworkAccess?: boolean;
+  codexIncludePlugins?: boolean;
 };
 
 // ============================================================================

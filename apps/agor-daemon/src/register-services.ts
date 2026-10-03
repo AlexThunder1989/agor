@@ -153,8 +153,10 @@ import { getAgenticToolDaemonContribution } from './agentic-tool-daemon-contribu
 import { authenticatedTaskExecutorRuntimeScope } from './auth/executor-runtime-scope.js';
 import {
   hasSecureLocalCredentialOverlay,
+  isHostedOpenCode,
   resolveBranchSdkHomeCompatibility,
   resolveBranchSdkHomeLaunch,
+  resolveExecutionSdkHomeEnv,
   sessionUsesBranchSdkHome,
 } from './branch-sdk-home.js';
 import { invalidateLiveBranchCodexCredentialBinds } from './codex-auth-bind-invalidation.js';
@@ -172,6 +174,7 @@ import {
   trackExecutorProcess,
 } from './executor-tracking.js';
 import { assertHaTaskPermissionSupported, isConstrainedHa } from './ha-support.js';
+import { createDeploymentToolUnsupportedGate } from './integrations/opencode/deployment-capabilities.js';
 import { registerOpenCodeServices } from './integrations/opencode/index.js';
 import {
   inOpenCodeNativeStateMutationSlot,
@@ -547,8 +550,11 @@ export async function registerServices(ctx: RegisterServicesContext): Promise<Re
   // Core services: sessions, tasks, messages
   // ============================================================================
 
-  const sessionsService = createSessionsService(db, app, (tool) =>
-    isDeploymentAgenticToolAvailable(tool, deploymentAgenticToolPolicy)
+  const sessionsService = createSessionsService(
+    db,
+    app,
+    (tool) => isDeploymentAgenticToolAvailable(tool, deploymentAgenticToolPolicy),
+    createDeploymentToolUnsupportedGate(config)
   ) as unknown as SessionsServiceImpl;
   const tasksService = createTasksService(db, app, sessionTokenService);
   app.use('/sessions', sessionsService, {
@@ -1376,6 +1382,7 @@ function createExecuteHandler(
         config,
         modelConfig: session.model_config ?? undefined,
         sessionOwnerId: session.created_by,
+        sessionSdkHomeScope: session.sdk_home_scope,
         prompterUserId: userId,
       });
     }
@@ -1495,14 +1502,14 @@ function createExecuteHandler(
         throw new Error(`Branch-scoped session ${session.session_id} has no branch`);
       }
       const branchId = session.branch_id as string;
-      // A relocatable directory is necessary but not sufficient: OpenCode's
-      // current XDG data home also contains its native credential file. Until
-      // its actor credential namespace is split from branch-owned state, a
-      // branch home would either lose configured credentials or share them.
+      // A relocatable directory is necessary but not sufficient: local OpenCode's
+      // XDG data home also contains its native credential file, so only hosted
+      // OpenCode (credentials on Job scratch) may use a branch home.
       const compatibility = await runWithTenantDatabaseScope(db, tenantId, (tenantDb) =>
         resolveBranchSdkHomeCompatibility({
           tool: sdkHomeTool,
           delegated: isDelegatedExecution,
+          hostedOpenCode: isHostedOpenCode(config),
           secureLocalCredentialOverlay: hasSecureLocalCredentialOverlay(config),
           userId,
           db: tenantDb,
@@ -1697,14 +1704,21 @@ function createExecuteHandler(
       scrubMCPSecretsFromExecutorEnv(executorEnv, [...usableAttached, ...global]);
     });
 
-    // Point the tool's SDK/config-home env var(s) at the per-branch SDK home
-    // (design §8). These are relocations, NOT credentials — so the MCP scrub
+    // Explicitly project the selected execution home for Gemini, then apply
+    // the session's branch SDK-home override (design §8). These are NOT credentials — so the MCP scrub
     // above leaves them alone, and they compose with the caller-scoped
     // credential env injected by createUserProcessEnvironment (#2555): different
     // keys, no collision (verified — the branch home never carries a credential,
     // §8A.3). Skipped in delegated mode (the launcher owns the environment).
-    if (branchSdkHomeEnv) {
-      Object.assign(executorEnv, branchSdkHomeEnv);
+    if (!isDelegatedExecution) {
+      Object.assign(
+        executorEnv,
+        resolveExecutionSdkHomeEnv({
+          tool: sdkHomeTool,
+          executionHome: executorHomeDir,
+          branchEnv: branchSdkHomeEnv,
+        })
+      );
     }
 
     executorEnv.DAEMON_URL = daemonUrl;
@@ -1721,7 +1735,9 @@ function createExecuteHandler(
       return contribution.getExecutorLaunch({
         tenantId,
         session,
+        taskId: data.taskId,
         homeDir: executorHomeDir,
+        config,
       });
     })();
 
@@ -1959,7 +1975,7 @@ function createExecuteHandler(
       },
     });
 
-    if (executorLaunch) {
+    if (executorLaunch?.requiresLocalContainment) {
       const ready = createDeferredSignal();
       const finished = createDeferredSignal();
       let spawned = false;
@@ -4321,23 +4337,14 @@ export async function registerMCPServices(
   );
   app.use(
     '/mcp-marketplace/remove-unattached',
-    new MCPMarketplaceRemoveServerService(db, (userIds, params, serverId) => {
-      emitMarketplaceChanged(app, params.tenant?.tenant_id, userIds);
-      scheduleMcpRuntimeHint(
-        db,
-        params.tenant?.tenant_id,
-        'marketplace_server_removed',
-        () =>
-          (
-            app as unknown as {
-              signalMcpServerAuthorityChange?: (
-                serverId: string,
-                params: AuthenticatedParams
-              ) => Promise<void>;
-            }
-          ).signalMcpServerAuthorityChange?.(serverId, params) ?? Promise.resolve()
-      );
-    }),
+    new MCPMarketplaceRemoveServerService(
+      db,
+      (userIds, params) => emitMarketplaceChanged(app, params.tenant?.tenant_id, userIds),
+      (operationDb, serverId, params) =>
+        runWithMCPServerMutationDatabase(operationDb, () =>
+          app.service('mcp-servers').remove(serverId, params)
+        )
+    ),
     { methods: ['create'] }
   );
   app.use(
@@ -4370,10 +4377,9 @@ export async function registerMCPServices(
     }),
     { methods: ['create'] }
   );
-  // Action replies are private acknowledgements. These services mutate through
-  // repository transactions, so they explicitly emit the user-targeted empty
-  // Marketplace freshness hint rather than pretending the ordinary MCP CRUD
-  // service emitted a lifecycle event.
+  // Action replies are private acknowledgements. The user-targeted empty
+  // Marketplace hint also covers repository-only tool changes; removal now
+  // emits the ordinary, redacted MCP lifecycle event after its transaction commits.
   for (const path of [
     'mcp-marketplace/remove-unattached',
     'mcp-marketplace/tool-permission',

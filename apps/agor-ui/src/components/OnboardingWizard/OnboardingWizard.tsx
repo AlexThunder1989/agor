@@ -1,4 +1,5 @@
 // biome-ignore-all lint/plugin/noHardcodedColorLiteral: intentional dark-glass first-run surface — bespoke gradient/particle/glass values with no semantic-token equivalent; semantic text/primary/border already use theme tokens
+import { ToolBetaBadge } from '../ToolIcon/ToolBetaBadge';
 /**
  * OnboardingWizard — 5-step first-run flow.
  *
@@ -340,7 +341,6 @@ const ONB_ANIM_CSS = `
   }
 
   @media (max-height: 600px) {
-    .onb-workspace-intro-copy,
     .onb-workspace-helper { display: none !important; }
   }
 
@@ -710,8 +710,8 @@ export function OnboardingWizard({
       }
       if (agent === 'gemini') return !!(gemini?.GEMINI_API_KEY || user.env_vars?.GEMINI_API_KEY);
       if (agent === 'opencode') {
-        const opencode = user.agentic_tools?.opencode;
-        return !!opencode?.[TOOL_API_KEY_NAMES.opencode ?? 'ANTHROPIC_API_KEY'];
+        // Hosted OpenCode stores one key per provider id; local mode keeps none here.
+        return Object.values(user.agentic_tools?.opencode ?? {}).some(Boolean);
       }
       return false;
     },
@@ -1628,6 +1628,7 @@ export function OnboardingWizard({
                       <span style={{ color: TEXT_PRIMARY, fontWeight: 600, fontSize: 14 }}>
                         {option.title}
                       </span>
+                      <ToolBetaBadge tool={option.agent} />
                       {option.provider && (
                         <span style={{ color: TEXT_MUTED, fontSize: 12 }}>
                           by {option.provider}
@@ -2312,7 +2313,7 @@ export function OnboardingWizard({
               // high enough that the fixed height is honored on typical laptop
               // viewports so the goals grid + footer are never clipped.
               boxSizing: 'border-box',
-              height: 'min(460px, calc(100dvh - 192px))',
+              height: 'min(620px, calc(100dvh - 192px))',
               position: 'relative',
               zIndex: 1,
               // Step 2 owns its scrolling via an inner two-region layout (fixed

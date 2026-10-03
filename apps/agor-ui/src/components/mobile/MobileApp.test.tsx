@@ -29,6 +29,8 @@ vi.mock('../BranchModal', () => ({
 }));
 
 vi.mock('./MobileNavTree', () => ({ MobileNavTree: () => null }));
+// Home is the shared HomePage (covered by its own suites); these cases drive the tab-bar Ask.
+vi.mock('../HomePage', () => ({ HomePage: () => null }));
 
 // Counts mounts so a test can prove the picker is re-created (keyed) per signed-in identity.
 const teammatePicker = vi.hoisted(() => ({ mounts: 0, props: {} as Record<string, unknown> }));
@@ -230,9 +232,8 @@ describe('MobileApp branch actions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Ask your primary assistant' }));
     await waitFor(() => expect(onCreateSession).toHaveBeenCalledTimes(1));
 
-    // Both Ask surfaces are refused while the first creation is pending (the Home one reads "loading Ask").
+    // A repeated tap is refused while the first creation is pending.
     fireEvent.click(screen.getByRole('button', { name: 'Ask your primary assistant' }));
-    fireEvent.click(screen.getByRole('button', { name: /Ask$/ }));
     await act(async () => {});
     expect(onCreateSession).toHaveBeenCalledTimes(1);
 
@@ -347,7 +348,7 @@ describe('MobileApp branch actions', () => {
         agent: DEFAULT_AGENTIC_TOOL_NAME,
         permissionMode: 'acceptEdits',
         modelConfig: { model: 'saved-model' },
-        mcpServerIds: ['branch-mcp'],
+        mcpServerIds: undefined,
         agenticToolPresetId: USER_DEFAULT_AGENTIC_CONFIGURATION,
       }),
       'board-1',

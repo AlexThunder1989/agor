@@ -1,6 +1,6 @@
 # context/ — fast orientation for agents
 
-This folder is **not** Agor's documentation. The user-facing docs live in [`apps/agor-docs/pages/guide/`](../apps/agor-docs/pages/guide/) and on [agor.live](https://agor.live).
+This folder is **not** Agor's documentation. The user-facing docs live in [`apps/agor-docs/content/guide/`](../apps/agor-docs/content/guide/) and on [agor.live](https://agor.live).
 
 This folder is a small set of **agent-oriented cheat sheets** — tight pointers, file maps, gotchas, and design rationale that an LLM dropped into the repo would actually want to skim before opening code.
 
@@ -40,6 +40,8 @@ Tight, code-pointer-heavy notes on internals.
 
 Step-by-step implementation guides referenced from code.
 
+- [`Publishing Agor`](../PUBLISH.md) — SDK/model changes, aligned releases, tag and approval steps, npm verification, and upgrades.
+
 - [`creating-database-migrations.md`](guides/creating-database-migrations.md) — Drizzle migrations (sqlite + postgres).
 - [`extending-feathers-services.md`](guides/extending-feathers-services.md) — Adding services, methods, hooks.
 - [`rbac-and-unix-isolation.md`](guides/rbac-and-unix-isolation.md) — Implementation guide for branch RBAC and simple/sandbox/delegated execution.
@@ -58,7 +60,7 @@ Step-by-step implementation guides referenced from code.
 
 Designs that are referenced from code or in flight. Anything here is either still being built or documents a security/behavior contract you'd want before touching the relevant code.
 
-- [`executor-isolation.md`](explorations/executor-isolation.md) — executor process / unix isolation architecture (referenced from `packages/executor/` and `apps/agor-docs/pages/guide/architecture.mdx`).
+- [`executor-isolation.md`](explorations/executor-isolation.md) — executor process / unix isolation architecture (referenced from `packages/executor/` and `apps/agor-docs/content/guide/architecture.mdx`).
 - [`executor-expansion.md`](explorations/executor-expansion.md) — referenced from `packages/core/src/config/`.
 - [`executor-implementation-plan.md`](explorations/executor-implementation-plan.md) — phased plan for executor work.
 - [`env-var-access.md`](explorations/env-var-access.md) — per-user / per-session env var access model (referenced from schemas, types, and migrations).
@@ -67,6 +69,7 @@ Designs that are referenced from code or in flight. Anything here is either stil
 - [`teammate-kb-namespace-memory-plan.md`](explorations/teammate-kb-namespace-memory-plan.md) — implementation plan for teammate primary KB namespaces, memory append tools, and branch-scoped namespace grants.
 - [`kb-namespace-rbac-v1.md`](explorations/kb-namespace-rbac-v1.md) — directed V1 plan for Knowledge namespace RBAC and teammate home namespaces.
 - [`session-sharing.md`](explorations/session-sharing.md) — tenant/branch gates, immutable Session compatibility, and caller identity for shared prompts.
+- [`opencode-cloud.md`](explorations/opencode-cloud.md) — hosted OpenCode: capability gate, single-key provider snapshot, and checkpointed native state (referenced from `packages/agentic-tool-opencode/`).
 - [`parent-session-callbacks.md`](explorations/parent-session-callbacks.md) — child-session completion notifications (referenced from `docs/never-lose-prompt-design.md`).
 - [`task-runtime-architecture.md`](explorations/task-runtime-architecture.md) — discontinued runtime ownership exploration retained as a source for future targeted improvements.
 - [`frontend-hardcoded-colors.md`](explorations/frontend-hardcoded-colors.md) — Biome/GritQL color audit, classification, and enforcement rollout.
@@ -87,12 +90,12 @@ Assets used by docs in this folder.
 
 A previous version of this folder had ~95 files (concepts/, archives/, explorations/, projects/) totaling ~57k lines. Most was either:
 
-- duplicated by the user-facing guide pages in `apps/agor-docs/pages/guide/*.mdx`,
+- duplicated by the user-facing guide pages in `apps/agor-docs/content/guide/*.mdx`,
 - design exploration for features that have since shipped (the code is the source of truth),
 - or stale plans for features that never shipped.
 
 If you're looking for a topic and don't see it here, try (in order):
 
-1. The relevant guide page in `apps/agor-docs/pages/guide/`
+1. The relevant guide page in `apps/agor-docs/content/guide/`
 2. `git log --all --diff-filter=D -- 'context/**'` to find the deleted version
 3. The actual code under `packages/` or `apps/`

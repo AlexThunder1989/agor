@@ -181,7 +181,12 @@ export function repoCreated(repo: Repo) {
   });
 }
 export function repoPatched(repo: Repo) {
-  setMap('repoById', (prev) => replaceIfChanged(prev, repo.repo_id, repo));
+  setMap('repoById', (prev) => {
+    // Events can arrive out of order and last_updated does not prove write order; a retry gets a new row.
+    const status = prev.get(repo.repo_id)?.clone_status;
+    if ((status === 'ready' || status === 'failed') && repo.clone_status === 'cloning') return prev;
+    return replaceIfChanged(prev, repo.repo_id, repo);
+  });
 }
 export function repoRemoved(repo: Repo) {
   setMap('repoById', (prev) => {
@@ -256,6 +261,7 @@ export function userRemoved(user: User) {
 
 // ── MCP servers ───────────────────────────────────────────────────────────--
 export function mcpServerCreated(server: MCPServer) {
+  if (agorStore.getState().deletedMcpServerIds.has(server.mcp_server_id)) return;
   bumpRevision('mcpServers');
   setMap('mcpServerById', (prev) => {
     if (prev.has(server.mcp_server_id)) return prev; // Already exists, shouldn't happen
@@ -265,16 +271,31 @@ export function mcpServerCreated(server: MCPServer) {
   });
 }
 export function mcpServerPatched(server: MCPServer) {
+  if (agorStore.getState().deletedMcpServerIds.has(server.mcp_server_id)) return;
   bumpRevision('mcpServers');
   setMap('mcpServerById', (prev) => replaceIfChanged(prev, server.mcp_server_id, server));
 }
-export function mcpServerRemoved(server: MCPServer) {
+export function mcpServerRemoved(server: Pick<MCPServer, 'mcp_server_id'>) {
   bumpRevision('mcpServers');
-  setMap('mcpServerById', (prev) => {
-    if (!prev.has(server.mcp_server_id)) return prev; // Doesn't exist, nothing to remove
-    const next = new Map(prev);
-    next.delete(server.mcp_server_id);
-    return next;
+  bumpRevision('sessionMcp');
+  agorStore.setState((prev) => {
+    const mcpServerById = new Map(prev.mcpServerById);
+    mcpServerById.delete(server.mcp_server_id);
+    const sessionMcpServerIds = new Map(prev.sessionMcpServerIds);
+    for (const [sessionId, ids] of sessionMcpServerIds) {
+      if (!ids.includes(server.mcp_server_id)) continue;
+      const remaining = ids.filter((id) => id !== server.mcp_server_id);
+      if (remaining.length) sessionMcpServerIds.set(sessionId, remaining);
+      else sessionMcpServerIds.delete(sessionId);
+    }
+    const userAuthenticatedMcpServerIds = new Set(prev.userAuthenticatedMcpServerIds);
+    userAuthenticatedMcpServerIds.delete(server.mcp_server_id);
+    return {
+      mcpServerById,
+      sessionMcpServerIds,
+      userAuthenticatedMcpServerIds,
+      deletedMcpServerIds: new Set(prev.deletedMcpServerIds).add(server.mcp_server_id),
+    };
   });
 }
 
