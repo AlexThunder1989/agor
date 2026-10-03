@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, expect, vi } from 'vitest';
 import { generateId } from '../../lib/ids';
-import type { UserID } from '../../types';
+import type { TenantID, UploadMetadata, UploadOwner, UploadRef, UserID } from '../../types';
 import { lockBranchForAdmission } from '../branch-admission';
 import { runDatabaseTransaction, select, update } from '../database-wrapper';
 import { branches } from '../schema';
@@ -16,6 +16,8 @@ import { seedEnvironmentCommandBranch } from './environment-commands.test-suppor
 import { RepoRepository } from './repos';
 import { SessionRepository } from './sessions';
 import { TaskRepository } from './tasks';
+import { UploadRepository } from './uploads';
+import { UserPrimaryTeammateRepository } from './user-primary-teammate';
 
 const test = ownedDbTest;
 afterEach(() => vi.useRealTimers());
@@ -330,7 +332,9 @@ test('maintenance discovery returns only deleting routing identities and honors 
   const { claim } = await maintenance.claim(branch.branch_id, 'delete');
   const refs = await discovery.findDeletingRefs({ tenantId: 'default' });
   expect(refs).toEqual([{ tenant_id: 'default', branch_id: branch.branch_id }]);
-  expect(await discovery.findDeletingRefs({ tenantId: 'default', after: refs[0] })).toEqual([]);
+  expect(
+    await discovery.findDeletingRefs({ tenantId: 'default' as TenantID, after: refs[0] })
+  ).toEqual([]);
   await maintenance.fail(claim, 'Fixture settled before dispatch');
   expect(await discovery.findDeletingRefs({ tenantId: 'default' })).toEqual([]);
   await expect(discovery.findDeletingRefs({})).rejects.toThrow('PostgreSQL');
@@ -420,3 +424,120 @@ test('startup never releases a metadata claim behind a deletion fence', async ({
   const row = await select(db).from(branches).where(eq(branches.branch_id, branch.branch_id)).one();
   expect(row?.data.maintenance?.operation_id).toBe(claim.operation_id);
 });
+
+for (const [guard, message] of [
+  ['primary', 'Primary teammate'],
+  ['queued', 'unfinished tasks'],
+  ['running', 'unfinished tasks'],
+  ['awaiting_permission', 'unfinished tasks'],
+  ['upload', 'upload staging'],
+  ['starting', 'environment is active'],
+  ['running-environment', 'environment is active'],
+  ['stopping', 'environment is active'],
+  ['command', 'environment is active'],
+  ['creating', 'materialization'],
+  ['deleting', 'deletion cannot be cancelled'],
+  ['deletion_failed', 'deletion cannot be cancelled'],
+  ['maintenance', 'maintenance is already in progress'],
+] as const) {
+  test(`metadata-only overlap escape retains the ${guard} guard without mutation`, async ({
+    db,
+  }) => {
+    const { branch, user } = await seedEnvironmentCommandBranch(db);
+    const repo = new BranchRepository(db);
+    const maintenance = new BranchMaintenanceRepository(db);
+    switch (guard) {
+      case 'primary':
+        await new UserPrimaryTeammateRepository(db).setPrimaryTeammate(
+          user.user_id,
+          branch.branch_id,
+          {
+            source: 'explicit',
+          }
+        );
+        break;
+      case 'queued':
+      case 'running':
+      case 'awaiting_permission':
+      case 'upload': {
+        const session = await new SessionRepository(db).create({
+          branch_id: branch.branch_id,
+          agentic_tool: 'codex',
+          created_by: user.user_id,
+        });
+        if (guard !== 'upload') {
+          await new TaskRepository(db).create({
+            session_id: session.session_id,
+            created_by: user.user_id,
+            status: guard,
+          });
+        } else {
+          const owner: UploadOwner = {
+            tenantId: 'default' as TenantID,
+            branchId: branch.branch_id,
+            sessionId: session.session_id,
+            createdBy: user.user_id,
+          };
+          const metadata: UploadMetadata = {
+            ref: `upl_${generateId()}` as UploadRef,
+            name: 'pending.txt',
+            mimeType: 'text/plain',
+            size: 4,
+            createdAt: new Date().toISOString(),
+            expiresAt: null,
+            provenance: 'browser',
+          };
+          await new UploadRepository(db).reserve(owner, metadata);
+        }
+        break;
+      }
+      case 'starting':
+      case 'running-environment':
+      case 'stopping':
+        await repo.update(branch.branch_id, {
+          environment_instance: { status: guard === 'running-environment' ? 'running' : guard },
+        });
+        break;
+      case 'command':
+        await new EnvironmentCommandRepository(db).admit({
+          branch,
+          userId: user.user_id,
+          action: 'stop',
+          attemptId: generateId(),
+        });
+        break;
+      case 'creating':
+        await repo.update(branch.branch_id, { filesystem_status: 'creating' });
+        break;
+      case 'deleting':
+      case 'deletion_failed':
+        await update(db, branches)
+          .set({ deletion_status: guard })
+          .where(eq(branches.branch_id, branch.branch_id))
+          .run();
+        break;
+      case 'maintenance':
+        await maintenance.claim(branch.branch_id, 'workspace_write');
+        break;
+    }
+    await repo.create({
+      repo_id: branch.repo_id,
+      name: 'guard-sibling',
+      ref: 'guard-sibling',
+      branch_unique_id: 9600008,
+      path: branch.path,
+      created_by: user.user_id,
+      filesystem_status: 'failed',
+    });
+    const before = await select(db)
+      .from(branches)
+      .where(eq(branches.branch_id, branch.branch_id))
+      .one();
+    await expect(maintenance.claim(branch.branch_id, 'metadata_archive')).rejects.toThrow(message);
+    const after = await select(db)
+      .from(branches)
+      .where(eq(branches.branch_id, branch.branch_id))
+      .one();
+    expect(after).toEqual(before);
+  });
+}

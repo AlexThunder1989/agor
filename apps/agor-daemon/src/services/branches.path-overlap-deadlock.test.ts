@@ -227,7 +227,7 @@ for (const status of ['cleaned', 'failed'] as const) {
   });
 }
 
-test('a failed sibling retry cannot race an admitted deletion of its shared workspace', async ({
+test('a failed sibling retry is safe because shared-workspace deletion is never admitted', async ({
   db,
 }) => {
   const root = await mkdtemp(join(tmpdir(), 'agor-overlap-retry-'));
@@ -250,24 +250,19 @@ test('a failed sibling retry cannot race an admitted deletion of its shared work
     await runWithTenantContext('default', async () => {
       const params = paramsFor(user);
       markBranchArchiveDeleteAuthorized(params, branch.branch_id, 'delete');
-      const deletion = await service
-        .archiveOrDelete(
+      await expect(
+        service.archiveOrDelete(
           branch.branch_id,
-          {
-            metadataAction: 'delete',
-            filesystemAction: 'deleted',
-          },
+          { metadataAction: 'delete', filesystemAction: 'deleted' },
           params
         )
-        .then(
-          () => 'admitted',
-          (error: Error) => error.message
-        );
+      ).rejects.toThrow('overlaps');
+      expect(spawnExecutor).not.toHaveBeenCalled();
+      expect(requestExecutor).not.toHaveBeenCalled();
       const retry = await branches.claimForProvisioning(sibling.branch_id, 'retry-attempt');
       expect(retry.claimed).toBe(true);
       await writeFile(join(root, 'new-workspace.txt'), 'retry content');
       expect(await readFile(join(root, 'new-workspace.txt'), 'utf8')).toBe('retry content');
-      expect(deletion).toContain('overlaps');
       expect(spawnExecutor).not.toHaveBeenCalled();
       expect((await branches.findById(branch.branch_id))?.deletion_status).toBeUndefined();
       // The reverse ordering (retry already creating) also remains protected.
@@ -282,6 +277,8 @@ test('a failed sibling retry cannot race an admitted deletion of its shared work
           params
         )
       ).rejects.toThrow('overlaps');
+      expect(spawnExecutor).not.toHaveBeenCalled();
+      expect(requestExecutor).not.toHaveBeenCalled();
     });
   } finally {
     await rm(root, { recursive: true, force: true });
