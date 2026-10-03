@@ -7,9 +7,19 @@
 
 import { randomUUID } from 'node:crypto';
 import { constants, existsSync, readdirSync } from 'node:fs';
-import { lstat, mkdir, mkdtemp, open, readdir, readFile, rm, stat } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  stat,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { simpleGit } from 'simple-git';
 import { resolveGitBinary } from './git-binary';
 import {
@@ -1493,6 +1503,30 @@ export interface EnsureRemoteUrlResult {
   previousUrl: string | undefined;
 }
 
+function isStrictlyInsideDirectory(root: string, candidate: string): boolean {
+  const rel = relative(root, candidate);
+  return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+
+/**
+ * Canonicalize a managed repository path and prove it lies strictly inside
+ * `allowedRoot` after resolving symlinks, so a stored path cannot select a
+ * repository outside the caller's tenant.
+ */
+export async function resolveContainedRepoPath(
+  repoPath: string,
+  allowedRoot: string
+): Promise<string> {
+  if (!isAbsolute(repoPath)) {
+    throw new Error('Repository path is outside the managed repositories root');
+  }
+  const [root, repository] = await Promise.all([realpath(allowedRoot), realpath(repoPath)]);
+  if (!isStrictlyInsideDirectory(root, repository)) {
+    throw new Error('Repository path is outside the managed repositories root');
+  }
+  return repository;
+}
+
 /**
  * Realign `remote.<name>.url` to `expectedUrl`, leaving other remotes alone.
  * No-op when already matching; deliberately does NOT create the remote when
@@ -2565,7 +2599,11 @@ export async function cleanBranch(branchPath: string): Promise<{ filesRemoved: n
 }
 
 /** Ignored-only cleanup. No preview, file list, output parser, or warning-as-success. */
-export async function cleanIgnoredWorkspace(branchPath: string, timeoutMs: number): Promise<void> {
+export async function cleanIgnoredWorkspace(
+  branchPath: string,
+  timeoutMs: number,
+  options: { selfContainedClone?: boolean } = {}
+): Promise<void> {
   const { git } = createGit(branchPath, timeoutMs);
   git.outputHandler((_command, stdout, stderr) => {
     // simple-git normally buffers every chunk before invoking its parser. This
@@ -2576,7 +2614,16 @@ export async function cleanIgnoredWorkspace(branchPath: string, timeoutMs: numbe
       stream.resume();
     }
   });
-  await git.raw(['clean', '-fdX']);
+  // External cleanup runs outside the branch-shell sandbox. Pin the worktree
+  // explicitly so mutable core.worktree configuration cannot redirect deletion.
+  // The caller verifies that .git is a real in-branch directory before entry.
+  await git.raw([
+    ...(options.selfContainedClone
+      ? [`--git-dir=${join(branchPath, '.git')}`, `--work-tree=${branchPath}`]
+      : []),
+    'clean',
+    '-fdX',
+  ]);
 }
 
 /**

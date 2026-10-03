@@ -21,6 +21,7 @@ import {
   BRANCH_CLEANUP_COMMAND,
   BRANCH_CLEANUP_COMMAND_MAX_LENGTH,
   BRANCH_DELETION_COMMAND,
+  ENVIRONMENT_COMMAND_BUDGET as ENV_BUDGET,
 } from '@agor/core/types';
 import { z } from 'zod';
 
@@ -414,6 +415,16 @@ const BranchMaintenanceParamsSchema = z.object({
   generation: z.number().int().positive(),
   executionId: z.string().uuid(),
   deadlineAt: z.number().positive(),
+  delegatedStorage: z
+    .object({
+      tenantDataRoot: z.string().min(1),
+      branchesRoot: z.string().min(1),
+      branchPath: z.string().min(1),
+      repoPath: z.string().min(1),
+      storageMode: z.literal('clone'),
+    })
+    .strict()
+    .optional(),
 });
 const BranchCleanupParamsSchema = BranchMaintenanceParamsSchema.extend({
   filesystemAction: z.literal('cleaned'),
@@ -682,7 +693,11 @@ export const EnvironmentLifecyclePayloadSchema = BasePayloadSchema.extend({
         claimDeadline: z.string().datetime(),
         commandDeadline: z.string().datetime(),
         resultDeadline: z.string().datetime(),
-        externalJobDeadlineMs: z.number().int().min(305000).max(365000),
+        externalJobDeadlineMs: z
+          .number()
+          .int()
+          .min(ENV_BUDGET.commandMs + ENV_BUDGET.cleanupMs)
+          .max(ENV_BUDGET.claimMs + ENV_BUDGET.commandMs + ENV_BUDGET.cleanupMs),
       }),
 
       /** Shell start command. Required for start. */
@@ -763,6 +778,8 @@ export const GitRepoRealignOriginPayloadSchema = BasePayloadSchema.extend({
     remoteUrl: z.string().min(1),
     /** Redacted human-readable identifier for the security log. */
     repoSlug: z.string().min(1),
+    /** Tenant-scoped managed repositories root that must contain `repoPath`. */
+    reposRoot: z.string().min(1),
   }),
 });
 

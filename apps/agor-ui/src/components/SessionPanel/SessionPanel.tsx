@@ -16,6 +16,7 @@ import type {
 } from '@agor-live/client';
 import {
   getDefaultPermissionMode,
+  hasFullSessionDetails,
   isAgenticToolName,
   mapToCodexPermissionConfig,
   SessionStatus,
@@ -37,10 +38,10 @@ import {
 import type { InputRef, MenuProps } from 'antd';
 import {
   Alert,
-  App,
   Badge,
   Button,
   Dropdown,
+  Flex,
   Input,
   Modal,
   Space,
@@ -54,8 +55,8 @@ import { getDaemonUrl } from '../../config/daemon';
 import { useAppActions } from '../../contexts/AppActionsContext';
 import { useRecenterMap } from '../../contexts/CanvasNavigationContext';
 import { useConnectionDisabled } from '../../contexts/ConnectionContext';
+import { useConfirmArchiveSession } from '../../hooks/useConfirmArchiveSession';
 import { useIsMobileViewport } from '../../hooks/useIsMobileViewport';
-import { ARCHIVE_REFRESH_WARNING, useSessionActions } from '../../hooks/useSessionActions';
 import { useSessionSearch } from '../../hooks/useSessionSearch';
 import { useSharedReactiveSession } from '../../hooks/useSharedReactiveSession';
 import { useAgorStore } from '../../store/agorStore';
@@ -76,15 +77,16 @@ import {
   readPromptDraftSeed,
   savePromptDraft,
 } from '../../utils/promptDrafts';
+import { getSessionStatusLabel } from '../../utils/sessionStatus';
 import { getSessionDisplayTitle, getSessionTitleStyles } from '../../utils/sessionTitle';
 import { AgentSelectionGrid } from '../AgentSelectionGrid/AgentSelectionGrid';
 import { AutocompleteTextarea } from '../AutocompleteTextarea';
 import { FileUpload } from '../FileUpload';
 import { ForkSpawnModal } from '../ForkSpawnModal/ForkSpawnModal';
 import type { ModelConfig } from '../ModelSelector';
-import { CreatedByTag } from '../metadata';
 import { getUrlDisplayLabel } from '../Pill/url-helpers';
 import { ToolIcon } from '../ToolIcon';
+import { UserIdentityAvatar } from '../UserIdentityAvatar';
 import {
   buildPromptWithAttachments,
   getComposerAttachmentFailureMessage,
@@ -364,8 +366,7 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
   const mobileHeaderButtonStyle: React.CSSProperties | undefined = isMobileShell
     ? { minWidth: MOBILE_TOUCH_TARGET, minHeight: MOBILE_TOUCH_TARGET }
     : undefined;
-  const { modal } = App.useApp();
-  const { showSuccess, showInfo, showError, showWarning } = useThemedMessage();
+  const { showSuccess, showInfo, showError } = useThemedMessage();
   const connectionDisabled = useConnectionDisabled();
   const recenterMap = useRecenterMap();
 
@@ -390,7 +391,7 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
     availableAgents,
   } = useAppActions();
 
-  const { archiveSession } = useSessionActions(client);
+  const confirmArchive = useConfirmArchiveSession(client);
 
   // Click-to-edit session title, inline in the header — see render below.
   // Draft is seeded from the *explicit* title only (not the description
@@ -827,7 +828,17 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
   // The composer subtree only depends on composer/draft state — memoize it so
   // ordinary SessionPanel re-renders (reactive-session notifies, store
   // patches) hand the memoized SessionFooter a reference-stable slot.
-  const sessionCustomContext = session?.custom_context as Record<string, unknown> | undefined;
+  // Store rows may be lean list rows that withhold the SDK-reported
+  // slash_commands / skills inventories; the reactive session holds the full
+  // record from `sessions.get` (kept current by realtime patches). Fall back to
+  // the store row only when it is itself a full record.
+  const fullSession =
+    reactiveSessionState?.session?.session_id === session?.session_id
+      ? reactiveSessionState?.session
+      : session && hasFullSessionDetails(session)
+        ? session
+        : null;
+  const sessionCustomContext = fullSession?.custom_context as Record<string, unknown> | undefined;
   const promptInputSlot = React.useMemo(() => {
     if (!session) return null;
     return (
@@ -937,24 +948,7 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
       return;
     }
 
-    modal.confirm({
-      title: 'Archive session and same-branch children?',
-      content:
-        'This archives the session and its same-branch forked or spawned descendants. Remote-created sessions remain active.',
-      okText: 'Archive',
-      cancelText: 'Cancel',
-      onOk: async () => {
-        const archived = await archiveSession(session.session_id);
-        if (archived?.reconciliation === 'refresh-required') {
-          showWarning(ARCHIVE_REFRESH_WARNING);
-        } else if (archived) {
-          showSuccess('Session and same-branch children archived');
-          onClose();
-        } else {
-          showError('Failed to archive session');
-        }
-      },
-    });
+    confirmArchive(session.session_id, { onArchived: onClose });
   };
 
   const hasBranchActions = !!branch;
@@ -1373,6 +1367,16 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
     }
   };
 
+  const creator =
+    session.created_by && session.created_by !== currentUserId
+      ? userById.get(session.created_by)
+      : undefined;
+  const creatorName = creator
+    ? creator.name || creator.email.split('@')[0]
+    : session.created_by === 'anonymous'
+      ? 'Anonymous'
+      : 'Unknown user';
+
   const getStatusColor = () => {
     switch (session.status) {
       case 'running':
@@ -1464,14 +1468,22 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
       <div
         style={{
           flexShrink: 0,
-          padding: `${token.sizeUnit * 3}px ${token.sizeUnit * 6}px`,
+          padding: `${token.paddingSM}px ${token.padding}px`,
           borderBottom: `1px solid ${token.colorBorder}`,
           background: token.colorBgContainer,
         }}
       >
         {/* Row 1: icon + title + badge + actions, center-aligned */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: token.marginXS,
+              alignItems: 'center',
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
             {/* Mobile: a full-screen session reads as a dismissible overlay, so a
                 leading Close (X) is the right metaphor. Desktop keeps its
                 trailing Close on the right (below). */}
@@ -1487,7 +1499,7 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
               </Tooltip>
             )}
             <div style={{ flexShrink: 0 }}>
-              <ToolIcon tool={session.agentic_tool} size={40} />
+              <ToolIcon tool={session.agentic_tool} size={24} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               {editingTitle ? (
@@ -1507,7 +1519,11 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
                   }}
                   placeholder="Untitled session"
                   variant="borderless"
-                  style={{ fontSize: 18, fontWeight: 600, padding: 0 }}
+                  style={{
+                    fontSize: token.fontSizeLG,
+                    fontWeight: token.fontWeightStrong,
+                    padding: 0,
+                  }}
                 />
               ) : (
                 <Tooltip title="Click to rename">
@@ -1535,7 +1551,10 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
                   >
                     <Typography.Text
                       strong
-                      style={{ fontSize: 18, ...getSessionTitleStyles(isMobileShell ? 1 : 2) }}
+                      style={{
+                        fontSize: token.fontSizeLG,
+                        ...getSessionTitleStyles(isMobileShell ? 1 : 2),
+                      }}
                     >
                       {session.title || session.description
                         ? getSessionDisplayTitle(session, { includeAgentFallback: false })
@@ -1553,17 +1572,27 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
                   </button>
                 </Tooltip>
               )}
-              <Badge status={getStatusColor()} text={session.status.toUpperCase()} />
-              {session.created_by && (
-                <div style={{ marginTop: token.sizeUnit }}>
-                  <CreatedByTag
-                    createdBy={session.created_by}
-                    currentUserId={currentUserId}
-                    userById={userById}
-                    prefix="Created by"
-                  />
-                </div>
-              )}
+              <Flex align="center" gap={token.marginXXS} wrap>
+                <Badge status={getStatusColor()} />
+                <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
+                  {getSessionStatusLabel(session.status)}
+                </Typography.Text>
+                {session.created_by && session.created_by !== currentUserId && (
+                  <>
+                    <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
+                      ·
+                    </Typography.Text>
+                    <Tooltip title={`Created by ${creatorName}`}>
+                      <Flex align="center" gap={token.marginXXS}>
+                        <UserIdentityAvatar user={creator} size={16} style={{ flexShrink: 0 }} />
+                        <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
+                          {creatorName}
+                        </Typography.Text>
+                      </Flex>
+                    </Tooltip>
+                  </>
+                )}
+              </Flex>
             </div>
           </div>
           <Space size={4}>
@@ -1645,7 +1674,7 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
               </Typography.Text>
             )}
             {!query && !isMobileShell && (
-              <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+              <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
                 Esc to close
               </Typography.Text>
             )}
@@ -1715,9 +1744,7 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
               >
                 <SearchOutlined style={{ fontSize: 16, color: token.colorTextTertiary }} />
               </div>
-              <Typography.Text strong style={{ fontSize: 13 }}>
-                No results
-              </Typography.Text>
+              <Typography.Text strong>No results</Typography.Text>
               <Typography.Text
                 type="secondary"
                 style={{ fontSize: 12, textAlign: 'center', lineHeight: 1.5, maxWidth: 200 }}
@@ -1856,7 +1883,7 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
           onCancel={() => setSwitchToolOpen(false)}
           footer={null}
         >
-          <Typography.Paragraph type="secondary" style={{ fontSize: 13 }}>
+          <Typography.Paragraph type="secondary">
             Choose a different tool for this session. Since nothing has been sent yet, this replaces
             the session in place.
           </Typography.Paragraph>

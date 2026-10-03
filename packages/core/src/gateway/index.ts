@@ -22,6 +22,7 @@ export { getConnector, hasConnector, registerConnector } from './connector-regis
 export {
   chunkDiscordMessage,
   DiscordConnector,
+  DiscordDirectMessageError,
   extractDiscordInboundFiles,
   isAllowedDiscordAttachmentUrl,
   stripDiscordBotMention,
@@ -30,7 +31,12 @@ export type {
   DiscordHistoryFailureKind,
   DiscordHistoryRestTransport,
 } from './connectors/discord-history';
-export { DiscordHistoryError, fetchDiscordProviderHistory } from './connectors/discord-history';
+export {
+  DISCORD_CHANNEL_HISTORY_DEFAULT_LIMIT,
+  DISCORD_CHANNEL_HISTORY_MAX_LIMIT,
+  DiscordHistoryError,
+  fetchDiscordProviderHistory,
+} from './connectors/discord-history';
 export type {
   DiscordConnectionVerification,
   DiscordSetupArtifact,
@@ -105,6 +111,8 @@ export type {
 export {
   buildDiscordDeliveryMetadata,
   buildDiscordDeliveryNonce,
+  buildDiscordDirectMessageMetadata,
+  buildDiscordDirectMessageThreadKey,
   buildDiscordInboundMetadata,
   buildDiscordLegacyThreadKey,
   buildDiscordMessageThreadKey,

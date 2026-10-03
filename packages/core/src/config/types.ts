@@ -19,6 +19,9 @@ export interface AgorAgenticToolsSettings {
    * Default: enabled; false is an explicit opt-out. Provider approval remains a release prerequisite.
    */
   claude_subscription_oauth?: boolean;
+
+  /** Hosted OpenCode with checkpointed native state. Default: enabled when every hosted prerequisite holds; 'disabled' opts out. */
+  opencode_hosted_native_state?: 'checkpointed' | 'disabled';
 }
 
 /**
@@ -109,6 +112,12 @@ export interface AgorDaemonSettings {
    * Displayed as a popover around the instance label Tag. */
   instanceDescription?: string;
 
+  /** External app link (e.g. a hosting console) shown in the settings menu; opens in a new tab. */
+  externalAppLink?: string;
+
+  /** Settings-menu label for `externalAppLink` (defaults to the link itself). */
+  externalAppLabel?: string;
+
   /** Maximum expiry for impersonation tokens in ms (default: 3600000 = 1 hour, capped at 1 hour) */
   impersonation_token_expiry_ms?: number;
 
@@ -141,6 +150,16 @@ export interface AgorDaemonSettings {
    * Default: 0 (do not trust X-Forwarded-* headers).
    */
   trust_proxy_hops?: number;
+
+  /**
+   * Compress Socket.IO WebSocket frames with RFC 7692 permessage-deflate
+   * (default: true). The zlib profile is fixed by the daemon; this is only an
+   * on/off switch. Each compressing socket holds up to ~224 KiB of zlib state
+   * (~192 KiB deflate + up to ~32 KiB inflate, depending on the window each
+   * client negotiates; buffers and bookkeeping excluded), and a broadcast is
+   * compressed once per recipient. A change applies to new connections only. Env override: `AGOR_WEBSOCKET_COMPRESSION`.
+   */
+  websocket_compression?: boolean;
 }
 
 /**
@@ -389,7 +408,7 @@ export interface AgorDatabaseSettings {
 
   /** SQLite configuration */
   sqlite?: {
-    /** Database file path (default: '~/.agor/agor.db') */
+    /** Database file path (default: `<agor home>/agor.db`) */
     path?: string;
 
     /** Enable WAL mode (default: true) */
@@ -1156,7 +1175,7 @@ export interface AgorPathSettings {
    * When set, repos and branches are stored here instead of under agor_home.
    * Useful for k8s deployments where branches need to be on shared storage (EFS).
    *
-   * Default: same as agor_home (~/.agor)
+   * Default: same as the Agor home (`AGOR_HOME`, else `~/.agor`)
    *
    * Environment variable: AGOR_DATA_HOME (takes precedence over config)
    *
@@ -1385,7 +1404,7 @@ export interface AgorMultiTenancySettings {
 
   /**
    * Parent directory for tenant data. Absolute paths and paths relative to
-   * `~/.agor` are supported. Defaults to `~/.agor/tenants`.
+   * `~/.agor` are supported. Defaults to `<agor home>/tenants`.
    */
   tenants_base_folder?: string;
 
@@ -1405,7 +1424,7 @@ export interface AgorMultiTenancySettings {
 /** Canonical upload storage and lifecycle settings. */
 export interface AgorUploadSettings {
   /**
-   * Base local directory or S3 URI. Defaults to `~/.agor`.
+   * Base local directory or S3 URI. Defaults to the Agor home (`AGOR_HOME`, else `~/.agor`).
    * Agor manages the tenant and feature namespaces below this base.
    * Credentials are resolved out-of-band and must not be embedded in this URI.
    */

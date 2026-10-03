@@ -51,7 +51,14 @@ the canonical SVG with:
 
 ```bash
 apps/agor-docs/scripts/generate-apple-touch-icon.sh
+pnpm --filter @agor/docs validate:brand-assets
 ```
+
+This stable Apple-touch URL is also a Google Search favicon candidate. Keep
+the complete badge and transparent outer corners; PNG header dimensions alone
+cannot detect missing artwork. Validation decodes and compares the raster to
+the canonical SVG. After a docs build, add `--export` to validate the actual
+homepage icon links and published asset bytes (also checked in docs PR CI).
 
 Screenshots, social-card images, generated video frames, and third-party tool
 logos are content assets rather than alternate Agor marks and keep the format
@@ -59,18 +66,26 @@ required by their destination.
 
 ## Structure
 
+```text
+content/              # Published MDX, including unlisted pages
+├── guide/            # Getting started, using, operating, developing/reference
+├── blog/             # Historical posts and case studies
+└── api-reference/    # Public API documentation
+app/                  # App Router routes and static page enumeration
+lib/docsNavigation.ts # Shared guide navigation, imported by guide/_meta.ts
+public/               # Static assets, OpenAPI schema, and LLM documentation indexes
 ```
-pages/
-├── index.mdx          # Landing page (symlink to README.md)
-├── guide/             # User guides
-│   ├── getting-started.mdx
-│   ├── docker.mdx
-│   └── development.mdx
-├── cli/               # CLI reference (auto-generated in Phase 2)
-│   └── index.mdx
-└── api/               # API reference (auto-generated in Phase 2)
-    └── index.mdx
-```
+
+The catch-all route recursively publishes MDX from `content/`; hiding a page in
+navigation does not unpublish it. The homepage has its own route.
+
+Organize guide navigation by reader task: **Getting started**, **Using Agor**,
+**Operating Agor**, and **Developing & Reference**. Keep everyday workflow and
+permission guidance accessible to users; put deployment configuration, migrations,
+and administrative recovery under Operating Agor. Contributor internals belong
+in development/reference, not feature introductions. Prefer stable URLs and
+leave a linked compatibility heading or anchor when moving an existing section.
+Update `public/llms.txt` and `public/llms-full.txt` when adding reader entry points.
 
 ## Page metadata and social previews
 
@@ -96,51 +111,51 @@ them into absolute `og:image` and `twitter:image` URLs using `NEXT_PUBLIC_SITE_U
 `/screenshots/board-hero.png`. Add `imageWidth` and `imageHeight` only when you know the exact image
 dimensions.
 
-## Phase 1 (Complete)
+## Blog listing dates
 
-- ✅ Nextra setup with dark mode
-- ✅ Agor brand colors (#2e9a92 teal)
-- ✅ Landing page from README.md
-- ✅ Basic navigation structure
-- ✅ Guide pages (Getting Started, Docker, Development)
-- ✅ Auto-generated CLI docs from oclif
-- ✅ Auto-generated API docs from FeathersJS services
+Keep each post's `date: YYYY-MM-DD` frontmatter in sync with `lib/blogPosts.ts`.
+The `/blog` listing reveals a post at **06:00 PST (fixed UTC−08:00 / 14:00 UTC)**
+on that date, including during daylight-saving time. `/blog?all` shows every
+post; presence of the `all` parameter is sufficient, regardless of its value.
+The browser checks the time on load, at the next publication boundary, and when
+a tab regains focus. This works without rebuilding the static site, but relies
+on JavaScript and the visitor's clock. Without JavaScript, the listing reflects
+the build time until the next deployment.
 
-## Phase 2 (Next)
+This is **listing visibility, not an embargo or access control**. Article slugs
+are always exported and accessible. Sitemap, Pagefind, LLM indexes, other links
+and crawler indexing are unchanged and can expose future posts. For a real
+embargo, do not deploy the content. Existing `noindex: true` frontmatter can
+discourage search indexing, but removing it requires a rebuild/deployment; the
+listing timer does not change static article metadata.
 
-- [ ] Add more guide content
-- [ ] Improve CLI doc parsing
-- [ ] Add code examples to API docs
-- [ ] Deploy to docs.agor.dev
+## Validate and build
 
-## Generate Documentation
-
-Auto-generate CLI and API docs:
-
-```bash
-# From root
-pnpm docs:generate
-
-# Or from docs directory
-pnpm generate        # Generate both CLI and API docs
-pnpm generate:cli    # Generate CLI docs only
-pnpm generate:api    # Generate API docs only
-```
-
-## Build
+From the repository root:
 
 ```bash
-pnpm docs:build      # Auto-generates docs then builds
+pnpm --filter @agor/docs typecheck
+pnpm --filter @agor/docs test:blog
+pnpm --filter @agor/docs validate:brand-assets
+pnpm --filter @agor/docs validate:social-metadata
+pnpm docs:build
 ```
 
-Output: `.next/` directory
+The build compiles MDX, exports the site to `apps/agor-docs/out/`, and generates
+sitemap and Pagefind search assets. It does not regenerate API or CLI documentation.
+The legacy root `docs:generate` alias has no matching docs-package script.
+
+For an analytics export check, set a test `NEXT_PUBLIC_GA_ID` during both the build
+and `pnpm --filter @agor/docs validate:analytics`. Do not send test traffic to the
+production analytics property. Check internal links and fragments in the exported
+HTML, especially when moving headings or changing navigation.
 
 ## Deployment
 
 Docs are automatically deployed to GitHub Pages on every push to `main` that changes:
 
 - `apps/agor-docs/**`
-- `apps/agor-cli/src/commands/**` (CLI docs are auto-generated)
+- `apps/agor-cli/src/commands/**` (also triggers the workflow)
 
 **GitHub Pages Setup (one-time):**
 
