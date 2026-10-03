@@ -2757,7 +2757,7 @@
   color: var(--landing-ink);
   font-family: var(--font-body-stack);
   font-size: clamp(2rem, 3.6vw, 3rem);
-  font-weight: 300;
+  font-weight: 100;
   letter-spacing: -0.02em;
   line-height: 1.08;
 }
@@ -3151,7 +3151,9 @@ a.radarBlip .blipName {
 .homePitch h1 {
   margin: 0;
   color: #f4f7f7;
-  font: 300 clamp(2.9rem, 6.6vw, 5.25rem) / 1.02 var(--font-body-stack);
+  /* 100 is what it always rendered at (300 wasn't loaded until the subhead
+   * needed it). */
+  font: 100 clamp(2.9rem, 6.6vw, 5.25rem) / 1.02 var(--font-body-stack);
   letter-spacing: -0.035em;
 }
 
