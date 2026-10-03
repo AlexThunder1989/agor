@@ -246,18 +246,6 @@ html:not(.dark) body:not(:has([class*="landingShell"])) main :is(h1, h2, h3) {
   color: #0d6f5f;
 }
 
-/* TEMPORARY font trial (components/FontTrial.tsx): swap the marketing stacks.
- * The attribute selector outranks next/font's variable class on <html>. */
-html[data-font-trial="dmsans"] {
-  --font-display: var(--font-trial-dmsans);
-  --font-body: var(--font-trial-dmsans);
-}
-
-html[data-font-trial="aspekta"] {
-  --font-display: var(--font-trial-aspekta);
-  --font-body: var(--font-trial-aspekta);
-}
-
 /* Site rule: no diagonal arrows. Nextra's link component appends a ↗ icon
  * to every external link (post text, TOC feedback/edit links, sidebar);
  * hide it. Matched by Nextra's own classes, so our icons are untouched. */

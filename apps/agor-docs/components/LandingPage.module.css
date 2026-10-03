@@ -3139,7 +3139,7 @@ a.radarBlip .blipName {
   flex: none;
   align-items: center;
   justify-content: center;
-  padding: 22px 44px;
+  padding: 16px 34px;
   border-radius: 999px;
   background: #3fd9c4;
   box-shadow: 0 0 50px rgba(63, 217, 196, 0.35);
@@ -3164,7 +3164,7 @@ a.radarBlip .blipName {
   flex: none;
   align-items: center;
   justify-content: center;
-  padding: 22px 44px;
+  padding: 16px 34px;
   border: 1.5px solid #3a4545;
   border-radius: 999px;
   background: #161c1c;
