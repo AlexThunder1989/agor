@@ -3088,15 +3088,8 @@ a.radarBlip .blipName {
 }
 
 .homeBadge {
-  margin: 0 0 -8px;
-  padding: 7px 14px;
-  border: 1px solid rgba(69, 196, 187, 0.35);
-  border-radius: 999px;
-  background: rgba(5, 20, 20, 0.6);
-  color: #58cfc5;
-  font: 500 0.72rem var(--font-mono-stack);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+  /* The Agor mark (HeroLogo) sits here now; spacing only. */
+  margin-bottom: -4px;
 }
 
 .homePitch h1 {

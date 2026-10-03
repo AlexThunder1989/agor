@@ -13,11 +13,19 @@ export interface HeroCopy {
   subheadline: string;
 }
 
-// Problem-framed collaboration hero — won the 2026 hero A/B tests (formerly
-// the /not-alone-problem variant); see git history for the retired arms.
+// Category-led hero (PMM v4: Multiplayer AI first), with the "Not Alone"
+// problem carried into the subhead. HOME_HERO_PROBLEM is the A/B alternate.
 export const HOME_HERO: HeroCopy = {
-  headline: 'Your AI coding agents\nare working [alone]',
-  subheadline: 'Bring every session onto one [board] your whole ^team^ can see.',
+  headline: '[Multiplayer AI]\nis here',
+  subheadline:
+    'Your agents shouldn’t work alone. Bring every session onto one [board] your whole ^team^ can see.',
+};
+
+// A/B candidate (not wired up yet): keeps the tested "Not Alone" problem
+// headline, widened past "coding", with the category in the subhead.
+export const HOME_HERO_PROBLEM: HeroCopy = {
+  headline: 'Your AI agents\nare working [alone]',
+  subheadline: 'Agor is {Multiplayer AI}: bring your team and agents together on one live board.',
 };
 
 // {word} → bold ink highlight (.headingStrong), [word] → teal/sky gradient

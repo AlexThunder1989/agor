@@ -1,0 +1,104 @@
+/* Hero Agor mark. Motion ported from the app's AgorLogoSpinner.css: dash
+   values sum to 101 (not 100) to dodge a stray rounded-cap stub. At rest
+   (not .spinning) it's the complete static logo. */
+.logo {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin: 0 0 -6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #36b7af;
+  cursor: pointer;
+  filter: drop-shadow(0 0 18px rgba(54, 183, 175, 0.35));
+}
+
+.logo svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.logo:focus-visible {
+  outline: 2px solid #45c4bb;
+  outline-offset: 4px;
+  border-radius: 50%;
+}
+
+.ring,
+.orbit {
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+}
+
+@keyframes turn {
+  to {
+    rotate: 360deg;
+  }
+}
+
+@keyframes arc {
+  0% {
+    stroke-dasharray: 8 93;
+    stroke-dashoffset: 0;
+  }
+
+  50% {
+    stroke-dasharray: 58 43;
+    stroke-dashoffset: -26;
+  }
+
+  100% {
+    stroke-dasharray: 8 93;
+    stroke-dashoffset: -101;
+  }
+}
+
+@keyframes tail {
+  0%,
+  12% {
+    stroke-dashoffset: 0;
+    animation-timing-function: ease-in-out;
+  }
+
+  46%,
+  58% {
+    stroke-dashoffset: 101;
+    animation-timing-function: ease-in-out;
+  }
+
+  92%,
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.spinning .ring {
+  animation:
+    turn 1.8s linear infinite,
+    arc 2.7s ease-in-out infinite;
+}
+
+.spinning .orbit {
+  animation: turn 6.4s linear infinite;
+}
+
+.spinning .tail {
+  stroke-dasharray: 101;
+  animation: tail 3.2s infinite;
+}
+
+.spinning .tailAlt {
+  animation-delay: -1.6s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinning .ring,
+  .spinning .orbit,
+  .spinning .tail {
+    animation: none;
+    stroke-dasharray: none;
+  }
+}

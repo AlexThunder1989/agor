@@ -11,6 +11,7 @@ import { CloudCtaLink } from '../CloudCtaLink';
 import { HighlightedText, HOME_HERO } from '../heroCopy';
 import styles from '../LandingPage.module.css';
 import { DemoButton } from './DemoButton';
+import { HeroLogo } from './HeroLogo';
 import { LandingLink } from './LandingLink';
 import { LANDING_PAGES } from './pages';
 
@@ -70,7 +71,8 @@ export function HomeHero() {
       <div className={styles.homeHeroScrim} aria-hidden="true" />
 
       <section className={styles.homePitch}>
-        <p className={styles.homeBadge}>Multiplayer AI</p>
+        {/* The troupe emerges from behind this (it anchors on .homeBadge). */}
+        <HeroLogo className={styles.homeBadge} />
         <h1>
           <HighlightedText text={HOME_HERO.headline} />
         </h1>
