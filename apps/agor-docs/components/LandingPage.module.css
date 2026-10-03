@@ -2529,6 +2529,14 @@
   font-size: 0.9rem;
 }
 
+/* Phones (cards lose their chrome): the hint at the answer sits right. */
+@media (max-width: 720px) {
+  .problemCard .problemLink {
+    display: block;
+    text-align: right;
+  }
+}
+
 .pageLinks {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
