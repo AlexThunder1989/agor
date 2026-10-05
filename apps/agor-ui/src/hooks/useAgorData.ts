@@ -63,6 +63,7 @@ import {
   otherLoadedScopes,
   partitionLoadMark,
   partitionLoadSince,
+  partitionsLoadedSince,
   releaseResyncClaim,
 } from '../store/boardPartitions';
 import {
@@ -1056,6 +1057,16 @@ export function useAgorData(
           // lean row (no zone flash); its partition load fetches it again.
           boardsMap.set(boardScope, live.boardById.get(boardScope)!);
         }
+        // Boards whose partition load started after this resync (opened while
+        // it ran) stay loaded across its reset below: their reads already
+        // postdate it. Keep their full records over the lean rows.
+        const sparedBoardIds = silent ? partitionsLoadedSince(loadLifetime, partitionMark) : [];
+        for (const boardId of sparedBoardIds) {
+          const record = live.boardById.get(boardId);
+          if (record && boardsMap.has(boardId) && boardId !== displayedBoardFull?.board_id) {
+            boardsMap.set(boardId, record);
+          }
+        }
         keepLiveWrites(boardsMap, live.boardById, touchedSinceLoad('boards'));
 
         // Merge the recent session slice with the board-scoped sessions (dedup by
@@ -1112,14 +1123,9 @@ export function useAgorData(
         // A reconnect unloads every board: their rows may have missed
         // deletions while disconnected, and their next partition load
         // reconciles them. The displayed board is reconciled right here.
-        // A reused partition load already reconciled its board (it started
-        // after this resync): keep the board loaded rather than unload it.
-        if (silent) {
-          const reused =
-            reusedPartitionLoad &&
-            agorStore.getState().boardPartitions.get(boardScope ?? '')?.status === 'loaded';
-          agorStore.getState().resetBoardPartitions(reused ? boardScope : undefined);
-        }
+        // Boards loaded after this resync started (a reused partition load
+        // among them) are already reconciled: they stay loaded.
+        if (silent) agorStore.getState().resetBoardPartitions(sparedBoardIds);
         // The displayed board's board objects and cards reconcile
         // (`replaceScope`, fenced like everything above): rows written live
         // during this load keep their live value, and rows the board no

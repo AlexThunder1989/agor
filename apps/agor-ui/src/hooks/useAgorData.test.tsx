@@ -2281,6 +2281,62 @@ describe('useAgorData — navigating while a reconnect resync runs', () => {
     );
     expect(bReads).toBe(2);
   });
+
+  it('keeps every board loaded during the resync loaded, each read once', async () => {
+    window.history.pushState({}, '', '/b/board-a/');
+    onTestFinished(() => window.history.pushState({}, '', '/'));
+    const boardA = { board_id: 'board-a', slug: 'board-a', name: 'A' };
+    const boardB = { board_id: 'board-b', slug: 'board-b', name: 'B' };
+    const boardC = { board_id: 'board-c', slug: 'board-c', name: 'C' };
+    const seed: Record<string, unknown> = {
+      boards: [boardA, boardB, boardC],
+      'boards:get': boardA,
+    };
+    const { client, emitIo, onFetch, fetchArguments } = makeMockClient(seed as never);
+    const { result, rerender } = renderHook(
+      ({ boardId }) => {
+        const data = useAgorData(client);
+        useBoardPartition(client, boardId, { canUseMemberWorkspaceServices: true });
+        return data;
+      },
+      { initialProps: { boardId: 'board-a' } }
+    );
+    await waitForInitialLoad(result);
+    await flush();
+    const reads = (boardId: string) =>
+      fetchArguments('cards', 'findAll').filter(
+        (args) => (args as { query?: { board_id?: string } }).query?.board_id === boardId
+      ).length;
+    const partition = (boardId: string) => agorStore.getState().boardPartitions.get(boardId);
+
+    // Hold the resync in its board-scoped batch (A is already resolved).
+    const resync = deferred();
+    onFetch('board-comments', 'findAll', (call) => (call === 2 ? resync.promise : undefined));
+    act(() => emitIo('connect'));
+    await flush();
+
+    // Open B, then C, while the resync is held: each loads in full.
+    for (const board of [boardB, boardC]) {
+      seed['boards:get'] = { ...board, objects: { z: { type: 'zone' } } };
+      window.history.pushState({}, '', `/b/${board.slug}/`);
+      rerender({ boardId: board.board_id });
+      await waitFor(() => expect(partition(board.board_id)?.status).toBe('loaded'));
+    }
+
+    await act(async () => {
+      resync.resolve();
+      await resync.promise;
+    });
+    await flush();
+    await waitFor(() => expect(partition('board-a')?.status).toBe('loaded'));
+    await flush();
+    for (const boardId of ['board-b', 'board-c']) {
+      expect(partition(boardId)?.status).toBe('loaded');
+      expect(reads(boardId)).toBe(1);
+      // The resync's lean board list does not replace their full records.
+      expect(agorStore.getState().boardById.get(boardId)?.objects).toBeDefined();
+    }
+  });
 });
 
 describe('useAgorData — navigating during the resync light batch', () => {

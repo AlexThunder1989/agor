@@ -221,6 +221,31 @@ export function partitionLoadSince(
   return inflight.get(inflightKey(lifetime, agorStore.getState().partitionEpoch, boardId));
 }
 
+/**
+ * The boards whose partition load started after `sinceMark` under `lifetime`:
+ * still loading, or loaded by such a load. Their reads postdate a resync that
+ * took the mark, so its reset keeps them rather than read them again.
+ */
+export function partitionsLoadedSince(lifetime: LoadLifetime, sinceMark: number): string[] {
+  const boardIds: string[] = [];
+  for (const [boardId, entry] of agorStore.getState().boardPartitions) {
+    if (
+      entry.authorityScope !== lifetime.authorityScope ||
+      entry.loadEpoch !== lifetime.loadEpoch
+    ) {
+      continue;
+    }
+    const startedBy =
+      entry.status === 'loaded'
+        ? entry.loadedBy
+        : entry.status === 'loading'
+          ? entry.loadId
+          : undefined;
+    if (startedBy !== undefined && startedBy > sinceMark) boardIds.push(boardId);
+  }
+  return boardIds;
+}
+
 /** Forget a failed partition so `useBoardPartition` loads it again. */
 export function retryBoardPartition(boardId: string): void {
   const state = agorStore.getState().boardPartitions.get(boardId);

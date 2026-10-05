@@ -28,6 +28,7 @@ import {
   otherLoadedScopes,
   partitionLoadMark,
   partitionLoadSince,
+  partitionsLoadedSince,
   retryBoardPartition,
 } from './boardPartitions';
 import { captureLoadLifetime } from './loadLifetime';
@@ -297,9 +298,14 @@ describe('loadBoardPartition', () => {
     expect(
       partitionLoadSince(BOARD, { ...lifetime, loadEpoch: lifetime.loadEpoch + 1 }, mark)
     ).toBe(undefined);
-    // A resync keeps that board loaded across its reset, and only that board.
+    // A resync keeps the boards loaded since its mark across its reset, and
+    // only those: board-2 was not loaded by a partition load after the mark.
     markBoardPartitionLoaded('board-2', lifetime);
-    agorStore.getState().resetBoardPartitions(BOARD);
+    expect(partitionsLoadedSince(lifetime, mark)).toEqual([BOARD]);
+    expect(partitionsLoadedSince({ ...lifetime, loadEpoch: lifetime.loadEpoch + 1 }, mark)).toEqual(
+      []
+    );
+    agorStore.getState().resetBoardPartitions(partitionsLoadedSince(lifetime, mark));
     expect(agorStore.getState().boardPartitions.get(BOARD)?.status).toBe('loaded');
     expect(agorStore.getState().boardPartitions.has('board-2')).toBe(false);
   });

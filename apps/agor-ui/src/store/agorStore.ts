@@ -204,10 +204,10 @@ interface AgorActions {
   setUserScope: (partial: Partial<UserScopeMeta>) => void;
   /**
    * Forget every board partition (authority transitions orphan their loads)
-   * and bump `partitionEpoch`; `keepBoardId`'s entry survives when given (a
-   * reconnect resync keeps a board that loaded after it started).
+   * and bump `partitionEpoch`; the `keep` boards' entries survive (a
+   * reconnect resync keeps the boards whose loads started after it did).
    */
-  resetBoardPartitions: (keepBoardId?: string) => void;
+  resetBoardPartitions: (keep?: readonly string[]) => void;
   /** Record that a global snapshot of these collections has applied. */
   markGloballyHydrated: (collections: readonly string[]) => void;
   /** Record that one session's MCP links are loaded. */
@@ -381,10 +381,15 @@ export const agorStore = createStore<AgorState>()(
       );
       if (changed) set(partial as Partial<AgorState>);
     },
-    resetBoardPartitions: (keepBoardId) => {
-      const kept = keepBoardId ? get().boardPartitions.get(keepBoardId) : undefined;
+    resetBoardPartitions: (keep = []) => {
+      const current = get().boardPartitions;
+      const kept = new Map<string, BoardPartitionState>();
+      for (const boardId of keep) {
+        const entry = current.get(boardId);
+        if (entry) kept.set(boardId, entry);
+      }
       set({
-        boardPartitions: kept && keepBoardId ? new Map([[keepBoardId, kept]]) : new Map(),
+        boardPartitions: kept,
         partitionEpoch: get().partitionEpoch + 1,
       });
     },
