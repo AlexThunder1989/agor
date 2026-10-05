@@ -1,4 +1,7 @@
-import { KNOWLEDGE_TRANSFER } from '@agor/core/types';
+import {
+  CODEX_SUBSCRIPTION_CREDENTIALS_UNAVAILABLE_MESSAGE,
+  KNOWLEDGE_TRANSFER,
+} from '@agor/core/types';
 import { BranchCleanupStepsService } from './services/branch-cleanup-steps.js';
 /**
  * Service Registration
@@ -1797,9 +1800,7 @@ function createExecuteHandler(
       try {
         branchCodexAuthBind.handle = await openCredentialFileForBind(branchCodexAuthBind.source);
       } catch {
-        throw new BadRequest(
-          'Codex subscription credentials are missing or unsafe to mount. Reconnect Codex in Agent Setup or use an API key.'
-        );
+        throw new BadRequest(CODEX_SUBSCRIPTION_CREDENTIALS_UNAVAILABLE_MESSAGE);
       }
     }
 

@@ -8,7 +8,6 @@
  * list — WITHOUT disturbing non-widget order, message indices, or identity.
  */
 
-import { AUTHORIZATION_REVOKED_TERMINATION_MESSAGE } from '@agor/core/types';
 import type { Message, Task, WidgetType } from '@agor-live/client';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -16,10 +15,8 @@ import { registerWidgetComponent } from '../MessageBlock/WidgetBlock';
 
 import {
   type Block,
+  canOfferRecoveryTurn,
   groupMessagesIntoBlocks,
-  isAuthorizationRevokedFailure,
-  isVerifiedRuntimeInterruption,
-  runtimeInterruptionDescription,
   shouldRenderLiveTaskProgress,
   TaskBlock,
 } from './TaskBlock';
@@ -215,46 +212,45 @@ describe('groupMessagesIntoBlocks — assistant activity', () => {
   });
 });
 
-describe('verified runtime interruption projection', () => {
+describe('recovery turn eligibility', () => {
   const task = {
     status: 'failed',
     sdk_failure: { termination: 'verified' },
     termination_request: { cause: 'heartbeat_lost' },
   } as unknown as Task;
 
-  it.each([
-    ['heartbeat_lost', 'stopped unexpectedly or stopped responding'],
-    ['startup_timeout', 'did not start in time'],
-    ['sdk_health_failure', 'stopped making progress'],
-  ])('explains a %s interruption by its cause', (cause, expected) => {
-    const description = runtimeInterruptionDescription({
-      ...task,
-      termination_request: { ...task.termination_request!, cause },
-    } as Task);
-    expect(description).toContain(expected);
-    expect(description).toContain('verified containment');
+  it('offers outcome-based recovery only for the latest verified interruption', () => {
+    expect(canOfferRecoveryTurn(task, true)).toBe(true);
+    expect(canOfferRecoveryTurn(task, false)).toBe(false);
   });
 
-  it('offers outcome-based recovery only for the latest verified interruption', () => {
-    expect(isVerifiedRuntimeInterruption(task, true)).toBe(true);
-    expect(isVerifiedRuntimeInterruption(task, false)).toBe(false);
+  it('offers recovery after a settled failure or timeout, never mid-termination', () => {
+    expect(canOfferRecoveryTurn({ status: 'failed' } as Task, true)).toBe(true);
+    expect(canOfferRecoveryTurn({ status: 'timed_out' } as Task, true)).toBe(true);
+    expect(canOfferRecoveryTurn({ status: 'stopped' } as Task, true)).toBe(false);
+    expect(
+      canOfferRecoveryTurn(
+        { ...task, sdk_failure: { ...task.sdk_failure!, termination: 'requested' } } as Task,
+        true
+      )
+    ).toBe(false);
   });
 
   it('keeps non-resumable outcomes out of Resume UX', () => {
     expect(
-      isVerifiedRuntimeInterruption(
+      canOfferRecoveryTurn(
         { ...task, sdk_failure: { ...task.sdk_failure!, termination: 'unverified' } } as Task,
         true
       )
     ).toBe(false);
     expect(
-      isVerifiedRuntimeInterruption(
+      canOfferRecoveryTurn(
         { ...task, termination_request: { ...task.termination_request!, cause: 'user_stop' } },
         true
       )
     ).toBe(false);
     expect(
-      isVerifiedRuntimeInterruption(
+      canOfferRecoveryTurn(
         {
           ...task,
           termination_request: {
@@ -264,64 +260,7 @@ describe('verified runtime interruption projection', () => {
         },
         true
       )
-    ).toBe(false);
-  });
-});
-
-describe('authorization-revoked failure projection', () => {
-  it('shows durable revoked authority without synthesizing a transcript message', () => {
-    expect(
-      isAuthorizationRevokedFailure({
-        status: 'failed',
-        termination_request: { cause: 'authorization_revoked' },
-      } as Task)
     ).toBe(true);
-  });
-
-  it('does not relabel an in-flight or unrelated failure', () => {
-    expect(
-      isAuthorizationRevokedFailure({
-        status: 'stopping',
-        termination_request: { cause: 'authorization_revoked' },
-      } as Task)
-    ).toBe(false);
-    expect(
-      isAuthorizationRevokedFailure({
-        status: 'failed',
-        termination_request: { cause: 'heartbeat_lost' },
-      } as Task)
-    ).toBe(false);
-  });
-
-  it('renders the durable sanitized reason inside the expanded Task', () => {
-    render(
-      <TaskBlock
-        task={
-          {
-            task_id: 'task-revoked',
-            session_id: 'session-1',
-            status: 'failed',
-            created_at: '2026-08-30T19:26:18.933Z',
-            created_by: 'user-1',
-            full_prompt: 'sleep 300',
-            error_message: AUTHORIZATION_REVOKED_TERMINATION_MESSAGE,
-            termination_request: { cause: 'authorization_revoked' },
-            git_state: { ref_at_start: 'main', sha_at_start: 'unknown' },
-            message_range: {
-              start_index: 0,
-              end_index: 0,
-              start_timestamp: '2026-08-30T19:26:18.933Z',
-            },
-          } as Task
-        }
-        taskMessages={[]}
-        taskMessagesLoaded
-        onLoadTaskMessages={vi.fn()}
-      />
-    );
-
-    expect(screen.getByText('Task access revoked')).toBeInTheDocument();
-    expect(screen.getByText(AUTHORIZATION_REVOKED_TERMINATION_MESSAGE)).toBeInTheDocument();
   });
 });
 

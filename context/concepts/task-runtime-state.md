@@ -344,8 +344,21 @@ second busy-state test.
 
 ## Diagnosing a runtime interruption
 
-The UI's "Task interrupted" notice covers every verified non-user,
-non-authorization termination. `heartbeat_lost` has two producers: a stale
+The turn outcome banner (`describeTurnOutcome`) classifies from structured
+fields first (`sdk_failure.termination`, `termination_request.cause` and its
+recorded requester, `executor_connected_at`, the turn's restart notice,
+message `error_kind`, `rate_limit` blocks), then from the failure texts shared
+in `@agor/core/types` (`turn-failure-messages.ts`); its Details disclosure
+shows the raw `error_message` and the stored `sdk_failure.reason` code. The
+banner names a stall only when the termination cause is `sdk_health_failure`,
+because the watchdog observes by default. Resume / Try again appear only on the latest
+FAILED or TIMED_OUT turn whose termination is neither `requested` nor
+`unverified` and that was not a user stop, and only while the session is
+promptable (`isSessionPromptable`) with an empty queue. Try again (replay the
+prompt) is offered only when the run never started; every other outcome,
+including an unconfirmed provider result, offers Resume.
+
+`heartbeat_lost` has two producers: a stale
 heartbeat found by the reconciler, and any local/authoritative executor
 process exit while its Task is active (including the SIGTERM a standalone
 daemon sends on graceful shutdown). Correlate by `task_id`:

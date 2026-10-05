@@ -133,6 +133,9 @@ export interface ConversationViewProps {
 
   onOpenAgenticToolSettings?: (tool: AgenticToolName) => void;
 
+  /** The session can take a new prompt now: idle and nothing queued. */
+  canStartTurn?: boolean;
+
   /** Use the denser, full-width task treatment for phone-sized session routes. */
   compact?: boolean;
 }
@@ -155,6 +158,7 @@ const ConversationViewInner = React.memo<ConversationViewProps>(
     genealogy,
     teammateEmoji,
     onOpenAgenticToolSettings,
+    canStartTurn = false,
     compact = false,
   }) => {
     const { token } = theme.useToken();
@@ -566,6 +570,7 @@ const ConversationViewInner = React.memo<ConversationViewProps>(
           onRetainTaskDetails={handleRetainTaskDetails}
           teammateEmoji={teammateEmoji}
           isLatestTask={taskIndex === tasks.length - 1}
+          canStartTurn={canStartTurn}
           client={client}
           onOpenAgenticToolSettings={onOpenAgenticToolSettings}
           compact={compact}
