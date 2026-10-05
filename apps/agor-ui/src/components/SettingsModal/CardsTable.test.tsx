@@ -116,6 +116,37 @@ describe('CardsTable', () => {
     expect(placementsFindAll).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ['pending', () => new Promise<CardWithType[]>(() => {})],
+    ['failed', () => Promise.reject(new Error('offline'))],
+  ])('stops showing placements on a capability loss while the read is %s', async (_, next) => {
+    const { client, cardsFindAll } = makeClient([card('k-1', 'Fix login')]);
+    const table = (canReadPlacements: boolean) => (
+      <CardsTable
+        client={client}
+        cardTypeById={new Map([['type-1', cardType]])}
+        boardById={new Map([['board-unloaded', leanBoard]])}
+        canReadPlacements={canReadPlacements}
+      />
+    );
+    const view = render(table(true));
+    fireEvent.click(screen.getByText('Ticket'));
+    expect(await screen.findByText('Review')).toBeVisible();
+
+    cardsFindAll.mockImplementation(next);
+    view.rerender(table(false));
+    // Synchronously, before the replacement read settles (or after it fails).
+    expect(screen.queryByText('Review')).not.toBeInTheDocument();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.queryByText('Review')).not.toBeInTheDocument();
+    // Regaining the capability never resurrects the old placements before a read.
+    cardsFindAll.mockImplementation(() => new Promise<CardWithType[]>(() => {}));
+    view.rerender(table(true));
+    expect(screen.queryByText('Review')).not.toBeInTheDocument();
+  });
+
   it('patches the dataset from card events without reading again', async () => {
     const { client, emit, cardsFindAll } = makeClient([card('k-1', 'Fix login')]);
     renderTable(client);

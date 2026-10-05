@@ -1,6 +1,6 @@
 import type { AgorClient, Board, BoardEntityObject, CardWithType } from '@agor-live/client';
 import { PAGINATION } from '@agor-live/client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAgorStore } from '@/store/agorStore';
 
 /** Trailing delay that coalesces a burst of reconcile requests (reconnects, reauth). */
@@ -21,6 +21,12 @@ interface EventSource {
   on?: (event: string, listener: Listener) => unknown;
   removeListener?: (event: string, listener: Listener) => unknown;
 }
+
+/** `data` without anything derived from card placements. */
+const withoutPlacements = (data: SettingsCards): SettingsCards =>
+  data.placements.length === 0 && data.zoneBoards.size === 0
+    ? data
+    : { cards: data.cards, placements: [], zoneBoards: new Map() };
 
 /** The user part of an authority scope (`user:role:generation`). */
 const identityOf = (authority: string) => authority.split(':')[0];
@@ -285,7 +291,8 @@ function createCardsCoordinator(
  * zone boards included; both go through one coordinator: debounced with a
  * bounded wait, at most one read in flight, a read superseded in flight is
  * discarded and read again, and a read that starts consumes a reconcile still
- * waiting in its debounce. A different user starts over with an empty dataset.
+ * waiting in its debounce. A different user starts over with an empty dataset;
+ * a capability change keeps the cards but never the placements.
  */
 export function useSettingsCards(
   client: AgorClient | null,
@@ -301,6 +308,10 @@ export function useSettingsCards(
 
   useEffect(() => {
     if (!client) return;
+    // A new capability starts without the previous dataset's placements: a
+    // pending or failed read must not leave them, and regaining the
+    // capability must not bring them back before a read.
+    setData((previous) => previous && withoutPlacements(previous));
     const coordinator = createCardsCoordinator(client, canReadPlacements, { setData, setError });
     coordinatorRef.current = coordinator;
     coordinator.setAuthority(authorityRef.current);
@@ -314,5 +325,10 @@ export function useSettingsCards(
     coordinatorRef.current?.setAuthority(authority);
   }, [authority]);
 
-  return { data, error };
+  // Hidden from the render that loses the capability, before the effect runs.
+  const visible = useMemo(
+    () => (data && !canReadPlacements ? withoutPlacements(data) : data),
+    [data, canReadPlacements]
+  );
+  return { data: visible, error };
 }
