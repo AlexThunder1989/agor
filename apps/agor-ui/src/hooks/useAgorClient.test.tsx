@@ -2,6 +2,7 @@ import { createClient, createRestClient } from '@agor-live/client';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  AUTH_REVALIDATE_REQUESTED_EVENT,
   resetRefreshFailureState,
   TOKENS_REFRESH_UNRECOVERABLE_EVENT,
 } from '../utils/singleFlightRefresh';
@@ -592,6 +593,8 @@ describe('weak-network recovery', () => {
       localStorage.clear();
       throw new RefreshSupersededError();
     });
+    const revalidate = vi.fn();
+    window.addEventListener(AUTH_REVALIDATE_REQUESTED_EVENT, revalidate);
     act(() => {
       io.connected = false;
       fireIo('disconnect', 'transport close');
@@ -599,9 +602,12 @@ describe('weak-network recovery', () => {
     });
     await act(async () => {});
     await act(() => vi.advanceTimersByTimeAsync(31_000));
+    window.removeEventListener(AUTH_REVALIDATE_REQUESTED_EVENT, revalidate);
     expect(result.current.error).toBeNull();
     expect(result.current.connecting).toBe(false);
     expect(io.connect).toHaveBeenCalledTimes(1);
+    // Nothing else notices a cross-tab sign-out, so useAuth must be asked.
+    expect(revalidate).toHaveBeenCalledTimes(1);
     refreshTokensMock.mockReset();
   });
 });

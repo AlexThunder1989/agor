@@ -13,6 +13,7 @@ import {
   markAuthenticationUnrecoverable,
   RefreshUnrecoverableError,
   refreshTokensSingleFlight,
+  requestAuthRevalidation,
 } from '../utils/singleFlightRefresh';
 import {
   getStoredAccessToken,
@@ -374,6 +375,9 @@ export function useAgorClient(options: UseAgorClientOptions): UseAgorClientResul
                 setConnecting(false);
                 clearDisconnectGrace();
                 setConnected(false);
+                // useAuth has no cross-tab storage listener; ask it to settle
+                // to signed-out rather than leave an idle disconnected client.
+                requestAuthRevalidation();
                 return;
               }
               if (recoveryError instanceof RefreshUnrecoverableError) {

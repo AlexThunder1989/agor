@@ -58,6 +58,19 @@ export function dispatchTokensRefreshed(result: RefreshResult): void {
 export const TOKENS_REFRESH_UNRECOVERABLE_EVENT = 'agor:tokens-refresh-unrecoverable';
 
 /**
+ * Custom DOM event asking useAuth to revalidate stored credentials. Fired by
+ * clients that stood down because the credentials they were using vanished
+ * (for example another tab signed out), so auth state settles instead of
+ * leaving an idle disconnected client behind an "authenticated" UI.
+ */
+export const AUTH_REVALIDATE_REQUESTED_EVENT = 'agor:auth-revalidate-requested';
+
+export function requestAuthRevalidation(): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(AUTH_REVALIDATE_REQUESTED_EVENT));
+}
+
+/**
  * In-flight refreshes keyed by the refresh token they were issued with. A
  * caller holding different (for example newer, rotated by another tab)
  * credentials must never join a refresh for an older token: it would receive

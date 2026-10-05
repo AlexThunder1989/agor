@@ -2,7 +2,10 @@ import type { UserID } from '@agor-live/client';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { consumePromptDraftSeed, stagePromptDraftSeed } from '../utils/promptDrafts';
-import { TOKENS_REFRESHED_EVENT } from '../utils/singleFlightRefresh';
+import {
+  AUTH_REVALIDATE_REQUESTED_EVENT,
+  TOKENS_REFRESHED_EVENT,
+} from '../utils/singleFlightRefresh';
 import { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY } from '../utils/tokenRefresh';
 import { useAuth } from './useAuth';
 
@@ -668,6 +671,26 @@ describe('same-authority network revalidation', () => {
     expect(hook.result.current.loading).toBe(false);
     return { ...hook, userA, probe, pending };
   }
+
+  it('settles to signed-out when a client asks for revalidation after credentials vanished', async () => {
+    window.history.replaceState({}, '', '/');
+    localStorage.setItem(ACCESS_TOKEN_KEY, 'token-a');
+    localStorage.setItem(REFRESH_TOKEN_KEY, 'refresh-a');
+    authenticate.mockResolvedValueOnce({
+      accessToken: 'token-a',
+      user: { user_id: 'user-a', role: 'member', email: 'a@example.test' },
+    });
+    const { result } = renderHook(() => useAuth());
+    await waitFor(() => expect(result.current.authenticated).toBe(true));
+    // Another tab signed out: storage is cleared, but this tab gets no event.
+    localStorage.clear();
+    act(() => {
+      window.dispatchEvent(new CustomEvent(AUTH_REVALIDATE_REQUESTED_EVENT));
+    });
+    await waitFor(() => expect(result.current.authenticated).toBe(false));
+    expect(result.current.user).toBeNull();
+    expect(result.current.loading).toBe(false);
+  });
 
   it('does not let a stale revalidation undo a logout', async () => {
     const { result, probe, pending, userA } = await startRevalidation('token-a');

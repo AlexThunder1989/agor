@@ -18,6 +18,7 @@ import {
 } from '../utils/launchAuth';
 import { discardPromptDraftSeed } from '../utils/promptDrafts';
 import {
+  AUTH_REVALIDATE_REQUESTED_EVENT,
   dispatchTokensRefreshed,
   RefreshUnrecoverableError,
   refreshTokensSingleFlight,
@@ -497,6 +498,19 @@ export function useAuth(): UseAuthReturn {
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [state.authenticated, reAuthenticate]);
+
+  // A socket client that stood down because its credentials disappeared
+  // (e.g. another tab signed out) asks us to revalidate; with no stored
+  // tokens this settles to signed-out. Skipped while unauthenticated, where
+  // the mount/poll paths already own revalidation.
+  useEffect(() => {
+    if (!state.authenticated) return;
+    const handleRevalidate = () => {
+      reAuthenticate();
+    };
+    window.addEventListener(AUTH_REVALIDATE_REQUESTED_EVENT, handleRevalidate);
+    return () => window.removeEventListener(AUTH_REVALIDATE_REQUESTED_EVENT, handleRevalidate);
   }, [state.authenticated, reAuthenticate]);
 
   // Poll for daemon availability when we have tokens but aren't authenticated.
