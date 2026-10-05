@@ -33,7 +33,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { NodeResizer, useViewport } from 'reactflow';
 import { useMutationGate } from '../../../contexts/ConnectionContext';
 import type { BoardWriteResult } from '../../../hooks/useBoardMutationGuard';
-import type { BoardWriteTicket } from '../../../store/boardMutationGuard';
+import { type BoardWriteTicket, hasBoardWriteTicketEnded } from '../../../store/boardMutationGuard';
 import { getContrastingTextColor } from '../../../utils/theme';
 import { getUserInitials } from '../../UserIdentityAvatar';
 import { DeleteZoneModal } from './DeleteZoneModal';
@@ -253,6 +253,12 @@ const ZoneNodeComponent = ({ data, selected }: { data: ZoneNodeData; selected?: 
   const handleSaveLabel = () => {
     // A refused draft leaves only by Discard (or Escape).
     if (labelStale) return;
+    if (mutationDisabled && label !== data.label) {
+      // A read-only board keeps the draft in the editor. If its ticket ended
+      // (the board unloaded), it is refused now, as a save would be.
+      if (hasBoardWriteTicketEnded(editTicket)) setLabelStale(true);
+      return;
+    }
     setIsEditingLabel(false);
     if (mutationDisabled) return;
     if (label !== data.label) void saveLabel(editTicket);

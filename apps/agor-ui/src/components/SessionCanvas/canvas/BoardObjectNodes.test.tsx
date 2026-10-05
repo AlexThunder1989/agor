@@ -272,6 +272,101 @@ describe('ZoneNode settings modal', () => {
     });
   });
 
+  it('keeps a label draft committed while the board is read-only, and refuses it once its partition ended', async () => {
+    const owner = { alive: true };
+    // A partition entry the store no longer holds: the board unloaded.
+    const ended = { boardId: 'board-1', partition: { status: 'loaded' }, authGeneration: 0, owner };
+    const onUpdate = vi.fn();
+    const onDraftLost = vi.fn();
+    const zone = (canEdit: boolean) => (
+      <ZoneNode
+        selected
+        data={{
+          objectId: 'zone-1',
+          label: 'My Zone',
+          width: 400,
+          height: 300,
+          x: 0,
+          y: 0,
+          canEdit,
+          onUpdate,
+          onDraftLost,
+          beginBoardWrite: vi.fn(() => ended) as never,
+        }}
+      />
+    );
+    const view = renderZone(vi.fn(), CONNECTED, {
+      onUpdate,
+      onDraftLost,
+      beginBoardWrite: vi.fn(() => ended),
+      canEdit: true,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename zone' }));
+    fireEvent.change(screen.getByDisplayValue('My Zone'), { target: { value: 'Draft label' } });
+    view.rerender(zone(false));
+    fireEvent.blur(screen.getByDisplayValue('Draft label'));
+
+    expect(await screen.findByText(/Board reloaded — changes not saved/)).toBeTruthy();
+    expect(screen.getByDisplayValue('Draft label')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy draft' })).toBeTruthy();
+    // The reload brings edit back: the draft still never saves.
+    view.rerender(zone(true));
+    fireEvent.keyDown(screen.getByDisplayValue('Draft label'), { key: 'Enter' });
+    expect(onUpdate).not.toHaveBeenCalled();
+    // The reload deleted the zone: the draft goes to the canvas.
+    view.unmount();
+    expect(onDraftLost).toHaveBeenCalledExactlyOnceWith({
+      objectId: 'zone-1',
+      zoneName: 'My Zone',
+      text: 'Label: Draft label',
+    });
+  });
+
+  it('keeps a label draft committed while edit is withheld, then saves it under its ticket', () => {
+    // A ticket whose partition lifetime holds (no partition required).
+    const opened = {
+      boardId: 'board-1',
+      partition: null,
+      authGeneration: 0,
+      owner: { alive: true },
+    };
+    const onUpdate = vi.fn();
+    const zone = (canEdit: boolean) => (
+      <ZoneNode
+        selected
+        data={{
+          objectId: 'zone-1',
+          label: 'My Zone',
+          width: 400,
+          height: 300,
+          x: 0,
+          y: 0,
+          canEdit,
+          onUpdate,
+          beginBoardWrite: vi.fn(() => opened) as never,
+        }}
+      />
+    );
+    const view = renderZone(vi.fn(), CONNECTED, {
+      onUpdate,
+      beginBoardWrite: vi.fn(() => opened),
+      canEdit: true,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename zone' }));
+    fireEvent.change(screen.getByDisplayValue('My Zone'), { target: { value: 'Draft label' } });
+    view.rerender(zone(false));
+    fireEvent.keyDown(screen.getByDisplayValue('Draft label'), { key: 'Enter' });
+    expect(screen.getByDisplayValue('Draft label')).toBeTruthy();
+    expect(screen.queryByText(/Board reloaded — changes not saved/)).not.toBeInTheDocument();
+    expect(onUpdate).not.toHaveBeenCalled();
+
+    view.rerender(zone(true));
+    fireEvent.keyDown(screen.getByDisplayValue('Draft label'), { key: 'Enter' });
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(onUpdate.mock.calls[0][1]).toMatchObject({ label: 'Draft label' });
+    expect(onUpdate.mock.calls[0][2]).toBe(opened);
+  });
+
   it('an open zone dialog ignores a second open click and keeps its open-time ticket', async () => {
     const opened = { boardId: 'board-1', partition: null, authGeneration: 1 };
     const later = { boardId: 'board-1', partition: null, authGeneration: 2 };

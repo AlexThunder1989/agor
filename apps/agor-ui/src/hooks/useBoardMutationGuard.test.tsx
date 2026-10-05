@@ -5,7 +5,11 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectionProvider } from '../contexts/ConnectionContext';
 import { agorStore } from '../store/agorStore';
-import { captureBoardWriteTicket, isBoardWriteTicketCurrent } from '../store/boardMutationGuard';
+import {
+  captureBoardWriteTicket,
+  hasBoardWriteTicketEnded,
+  isBoardWriteTicketCurrent,
+} from '../store/boardMutationGuard';
 import { publishConnectionSnapshot, withdrawConnectionSnapshot } from '../store/connectionSnapshot';
 import { useBoardMutationGuard } from './useBoardMutationGuard';
 
@@ -87,6 +91,21 @@ describe('board write tickets', () => {
     owner.alive = false;
     expect(isBoardWriteTicketCurrent(ticket)).toBe(false);
     expect(capture(true)).toBe(null);
+  });
+
+  it("a ticket ends for good on an unload or its owner's end, not on a disconnect", () => {
+    load();
+    const ticket = capture(true);
+    const unpartitioned = capture(false);
+    publishConnectionSnapshot(publisher, connection({ connected: false }));
+    expect(hasBoardWriteTicketEnded(ticket)).toBe(false);
+    expect(hasBoardWriteTicketEnded(unpartitioned)).toBe(false);
+    unload();
+    expect(hasBoardWriteTicketEnded(ticket)).toBe(true);
+    expect(hasBoardWriteTicketEnded(unpartitioned)).toBe(false);
+    owner.alive = false;
+    expect(hasBoardWriteTicketEnded(unpartitioned)).toBe(true);
+    expect(hasBoardWriteTicketEnded(null)).toBe(true);
   });
 });
 

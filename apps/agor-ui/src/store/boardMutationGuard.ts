@@ -72,3 +72,14 @@ export function isBoardWriteTicketCurrent(
   const current = agorStore.getState().boardPartitions.get(ticket.boardId);
   return current === ticket.partition && current.status === 'loaded';
 }
+
+/**
+ * Whether `ticket` can never be current again: there is none, its owner
+ * unmounted, or its partition lifetime ended (the board unloaded). A ticket
+ * held only by a passing condition (a disconnect, withheld edit) has not.
+ */
+export function hasBoardWriteTicketEnded(ticket: BoardWriteTicket | null | undefined): boolean {
+  if (!ticket?.owner?.alive) return true;
+  if (ticket.partition === null) return false;
+  return agorStore.getState().boardPartitions.get(ticket.boardId) !== ticket.partition;
+}
