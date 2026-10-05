@@ -2057,6 +2057,8 @@ function AppContent() {
       currentUser={currentUser}
       onUserSettingsClick={() => setOpenUserSettings(true)}
       onLogout={logout}
+      externalAppLink={headerInstanceConfig?.externalAppLink}
+      externalAppLabel={headerInstanceConfig?.externalAppLabel}
     />
   );
 
@@ -2066,6 +2068,8 @@ function AppContent() {
       currentUser={currentUser}
       onUserSettingsClick={() => setOpenUserSettings(true)}
       onLogout={logout}
+      externalAppLink={headerInstanceConfig?.externalAppLink}
+      externalAppLabel={headerInstanceConfig?.externalAppLabel}
     />
   );
 
@@ -2174,8 +2178,8 @@ function AppContent() {
       onRetryConnection={retryConnection}
       instanceLabel={headerInstanceConfig?.label}
       instanceDescription={headerInstanceConfig?.description}
-      navbarLogoLink={headerInstanceConfig?.navbarLogoLink}
-      navbarLogoTooltip={headerInstanceConfig?.navbarLogoTooltip}
+      externalAppLink={headerInstanceConfig?.externalAppLink}
+      externalAppLabel={headerInstanceConfig?.externalAppLabel}
       webTerminalEnabled={featuresConfig?.webTerminal === true}
       branchStorageConfig={featuresConfig?.branchStorage}
       uploadPolicy={featuresConfig?.uploadPolicy}
@@ -2382,6 +2386,8 @@ function AppContent() {
                   onToggleReaction={handleToggleReaction}
                   onDeleteComment={handleDeleteComment}
                   onLogout={logout}
+                  externalAppLink={headerInstanceConfig?.externalAppLink}
+                  externalAppLabel={headerInstanceConfig?.externalAppLabel}
                   onOpenWorkspaceSettings={setSettingsTabToOpen}
                   onOpenUserSettings={() => setOpenUserSettings(true)}
                   onOpenAgenticToolSettings={(tool) => {

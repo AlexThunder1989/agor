@@ -42,8 +42,8 @@ export interface AuthConfig {
 export interface InstanceConfig {
   label?: string;
   description?: string;
-  navbarLogoLink?: string;
-  navbarLogoTooltip?: string;
+  externalAppLink?: string;
+  externalAppLabel?: string;
 }
 
 export interface FeaturesConfig {
@@ -370,13 +370,18 @@ export function retryAuthConfig(): void {
   void fetchAuthConfigOnce();
 }
 
-/** One shared health snapshot for the whole UI; consumers never refetch or drift. */
-export function useAuthConfig(): AuthConfigState {
-  const state = useSyncExternalStore(
+/** Subscribe without fetching, for presentational components also used outside the app shell. */
+export function useAuthConfigSnapshot(): AuthConfigState {
+  return useSyncExternalStore(
     subscribe,
     () => snapshot,
     () => snapshot
   );
+}
+
+/** One shared health snapshot for the whole UI; consumers never refetch or drift. */
+export function useAuthConfig(): AuthConfigState {
+  const state = useAuthConfigSnapshot();
   useEffect(() => {
     void fetchAuthConfigOnce();
   }, []);
