@@ -7,7 +7,12 @@ import {
   cancelAllHydrations,
   resetHydrationRevisions,
 } from './agorHydration';
-import { sessionCreated, sessionPatched, sessionRemoved } from './agorRealtimeActions';
+import {
+  branchPatched,
+  sessionCreated,
+  sessionPatched,
+  sessionRemoved,
+} from './agorRealtimeActions';
 import { agorStore } from './agorStore';
 import { otherCommittedMembers } from './boardPartitions';
 import { captureLoadLifetime } from './loadLifetime';
@@ -348,6 +353,36 @@ describe('user scope', () => {
     ]).toEqual(['br-scheduled']);
     replaceBoard('board-1', { branches: [] });
     expect(agorStore.getState().branchById.has('br-scheduled')).toBe(true);
+  });
+
+  it('a live patch keeps a schedule-only teammate in membership; archiving it leaves', async () => {
+    const teammateMembers = () =>
+      agorStore.getState().coverage.get(USER_SCOPE_KEYS.teammates)?.members?.branches;
+    const { client } = makeClient({ teammates: () => [branch('br-scheduled')] });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: true });
+    // The client can't see the enabled schedule the daemon matched on.
+    branchPatched(branch('br-scheduled', { name: 'renamed' }));
+    expect(teammateMembers()?.has('br-scheduled')).toBe(true);
+    replaceBoard('board-1', { branches: [] });
+    expect(agorStore.getState().branchById.has('br-scheduled')).toBe(true);
+    branchPatched(branch('br-scheduled', { archived: true }));
+    expect(teammateMembers()?.has('br-scheduled')).toBe(false);
+  });
+
+  it('a live patch adds a newly marked teammate to membership', async () => {
+    agorStore.getState().applyMaps((maps) => ({
+      ...maps,
+      branchById: new Map([['br-plain', branch('br-plain')]]),
+    }));
+    const { client } = makeClient({});
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: true });
+    branchPatched(branch('br-plain', { custom_context: { teammate: { kind: 'teammate' } } }));
+    expect(
+      agorStore
+        .getState()
+        .coverage.get(USER_SCOPE_KEYS.teammates)
+        ?.members?.branches?.has('br-plain')
+    ).toBe(true);
   });
 
   it('marks teammates truncated when the server reports more than the capped read', async () => {

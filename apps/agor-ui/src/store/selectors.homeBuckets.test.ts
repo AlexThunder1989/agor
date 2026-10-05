@@ -881,6 +881,16 @@ describe('makeTeammatesSelector', () => {
     expect(makeTeammatesSelector(ME, 'own')(s).map((b) => b.branch_id)).toEqual(['mine']);
   });
 
+  it('omits a branch the teammate read returned only for its enabled schedule', () => {
+    // Like the daemon's primary-teammate eligibility, the lists need the marker.
+    const scheduled = { ...teammate('scheduled', 'b-shared'), custom_context: {} } as Branch;
+    const s = {
+      ...state({ branches: [teammate('shared', 'b-shared'), scheduled] }),
+      boardById: new Map([['b-shared', { board_id: 'b-shared', archived: false }]]),
+    } as unknown as AgorState;
+    expect(makeTeammatesSelector(ME, 'shared')(s).map((b) => b.branch_id)).toEqual(['shared']);
+  });
+
   it('treats every unarchived board in the store as visible and runs no access check itself', () => {
     // Contract: callers whose board list is not policy-scoped must filter 'shared' themselves.
     const s = state({

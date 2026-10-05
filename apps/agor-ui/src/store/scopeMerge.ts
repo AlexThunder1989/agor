@@ -20,7 +20,7 @@
  * the read returned, corrected for rows realtime wrote while it was in flight
  * (`settledMembers`), and then follows realtime (`liveMembership`): a row
  * written live joins every current loaded scope that claims it and leaves the
- * ones that no longer do. A scope's own replace finds candidates with a
+ * ones that no longer do (or, for `claimsAddOnly`, are gone). A scope's own replace finds candidates with a
  * predicate on the CURRENT row (`LoadScope`); another scope keeps a row only
  * through its membership, so a loading or failed scope keeps nothing alive,
  * and two scopes whose reads both omit a row converge instead of each
@@ -87,6 +87,13 @@ export interface LoadScope {
     boardObjects?: (boardObject: BoardEntityObject, maps: DataMaps) => boolean;
     cards?: (card: CardWithType, maps: DataMaps) => boolean;
   };
+  /**
+   * The claims see only part of the server's filter, so they only add
+   * members: a member leaves once its row is gone or archived. The teammate
+   * read also returns branches with an enabled schedule
+   * (`BranchRepository.findTeammateBranches`), which no row shows.
+   */
+  claimsAddOnly?: boolean;
 }
 
 export type CoverageCollection = keyof LoadScope['claims'];
@@ -188,7 +195,7 @@ export function userScopePiece(key: UserScopeKey, userId: string): LoadScope {
     case USER_SCOPE_KEYS.branches:
       return { key, claims: { branches: (branch) => branch.created_by === userId } };
     case USER_SCOPE_KEYS.teammates:
-      return { key, claims: { branches: (branch) => isTeammate(branch) } };
+      return { key, claims: { branches: (branch) => isTeammate(branch) }, claimsAddOnly: true };
     case USER_SCOPE_KEYS.references:
       return { key, claims: {} };
   }
@@ -246,9 +253,10 @@ export function withBranchSessions(written: WrittenIds, maps: DataMaps): Written
 
 /**
  * The membership a read commits: the ids it returned (`scopeMembers`) that
- * realtime left alone, kept while still present — the server's filter is the
- * authority for them (U3 also returns scheduled branches no client predicate
- * recognises) — and the rows realtime wrote while it was in flight (`raced`,
+ * realtime left alone (every one, for `claimsAddOnly`), kept while still
+ * present — the server's filter is the authority for them (U3 also returns
+ * scheduled branches no client predicate recognises) — and the rows realtime
+ * wrote while it was in flight (`raced`,
  * from `touchedIdsSince`, with the sessions of raced branches), kept exactly
  * when they are present and the scope claims them now. `maps` is the store
  * after the read applied.
@@ -268,7 +276,9 @@ export function settledMembers(
     const touched = new Set(raced(collection));
     if (collection === 'sessions') for (const id of racedSessions) touched.add(id);
     const kept = new Set<string>();
-    for (const id of ids) if (!touched.has(id) && liveRow(collection, id, maps)) kept.add(id);
+    for (const id of ids) {
+      if ((scope.claimsAddOnly || !touched.has(id)) && liveRow(collection, id, maps)) kept.add(id);
+    }
     for (const id of touched) if (belongs(scope, collection, id, maps)) kept.add(id);
     members[collection] = kept;
   }
@@ -278,7 +288,8 @@ export function settledMembers(
 /**
  * Keep membership in step with a live write: every `written` row joins each
  * current (`isCurrent`), loaded scope that claims it and leaves each one that
- * no longer does (deleted, archived, moved out). A write that moves a branch
+ * no longer does (deleted, archived, moved out; for `claimsAddOnly`, only
+ * deleted or archived). A write that moves a branch
  * passes its sessions too (`withBranchSessions`). A value-only patch
  * changes nothing and returns `coverage` itself; so does a write no loaded
  * scope tracks.
@@ -302,8 +313,11 @@ export function liveMembership(
       if (!current) continue;
       let updated: Set<string> | null = null;
       for (const id of rowIds) {
-        const member = belongs(scope, collection, id, maps);
-        if (member === (updated ?? current).has(id)) continue;
+        const was = (updated ?? current).has(id);
+        const member =
+          belongs(scope, collection, id, maps) ||
+          (was && !!scope.claimsAddOnly && !!liveRow(collection, id, maps));
+        if (member === was) continue;
         updated ??= new Set(current);
         if (member) updated.add(id);
         else updated.delete(id);
