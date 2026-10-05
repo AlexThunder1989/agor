@@ -601,6 +601,9 @@ export function keepLiveWrites<T>(
  * - A session whose branch was touched since the load started and is now
  *   absent from `branchById` is skipped: that branch was archived or deleted
  *   while the load was in flight.
+ * - An archived session (only a deep link reads one) is held in `sessionById`
+ *   for display only, outside every branch bucket; the global session
+ *   hydration carries such rows over.
  *
  * Returns `prev` unchanged when nothing was filled. Never bumps revisions, so a
  * fill cannot make a concurrent global hydration discard its snapshot.
@@ -623,13 +626,14 @@ export function applyEntityFill(
 
   const inserts: Session[] = [];
   for (const session of rows.sessions ?? []) {
-    if (session.archived || maps.sessionById.has(session.session_id)) continue;
-    if (
-      touched('sessions', session.session_id) ||
-      isOnRemovedBranch(maps, session.branch_id, touched)
-    )
+    if (maps.sessionById.has(session.session_id) || touched('sessions', session.session_id)) {
       continue;
-    inserts.push(session);
+    }
+    if (session.archived) {
+      maps = { ...maps, sessionById: new Map(maps.sessionById).set(session.session_id, session) };
+    } else if (!isOnRemovedBranch(maps, session.branch_id, touched)) {
+      inserts.push(session);
+    }
   }
   if (inserts.length === 0) return maps;
   if (inserts.length > INCREMENTAL_SESSION_FILL_LIMIT) {

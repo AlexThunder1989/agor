@@ -1524,7 +1524,8 @@ export function useAgorData(
   // scope, or an ambiguous short id: read it by id (the daemon resolves short
   // ids) and fill it, joining no scope. An active session brings its branch;
   // an archived one is inserted for display only, outside every list. A
-  // target the read doesn't return is recorded in `missingLinkTargets`.
+  // target the fill doesn't apply (not returned, or removed while the read
+  // was in flight) is recorded in `missingLinkTargets`.
   useEffect(() => {
     const target = directSessionId
       ? { kind: 'session' as const, token: directSessionId }
@@ -1558,25 +1559,24 @@ export function useAgorData(
       try {
         if (target.kind === 'branch') {
           const rows = await fillBranch(target.token);
-          if (rows && !rows.branches?.some((branch) => !branch.archived)) missed();
+          const { branchById } = agorStore.getState();
+          if (rows && !rows.branches?.some((branch) => branchById.has(branch.branch_id))) missed();
           return;
         }
-        const directSession = (await client.service('sessions').get(target.token)) as Session;
-        if (cancelled || !authorityIsCurrent()) return;
-        if (!directSession) return missed();
-        if (directSession.archived) {
-          // A live write to the sessions map — bump so a sessions hydration in
-          // flight discards its (session-missing) snapshot rather than
-          // clobbering this deep-link heal.
-          bumpRevision('sessions');
-          agorStore.getState().setMap('sessionById', (prev) => {
-            if (prev.has(directSession.session_id)) return prev;
-            return new Map(prev).set(directSession.session_id, directSession);
-          });
-          return;
+        // The get runs inside the fill's fence, so a removal that lands while
+        // it is in flight keeps its stale row out.
+        const rows = await fillOnDemand(async () => ({
+          sessions: [(await client.service('sessions').get(target.token)) as Session].filter(
+            Boolean
+          ),
+        }));
+        if (!rows) return;
+        const directSession = rows.sessions?.[0];
+        if (!directSession || !agorStore.getState().sessionById.has(directSession.session_id)) {
+          return missed();
         }
-        await fillOnDemand(async () => ({ sessions: [directSession] }));
         if (
+          !directSession.archived &&
           directSession.branch_id &&
           !agorStore.getState().branchById.has(directSession.branch_id)
         ) {

@@ -444,6 +444,32 @@ describe('useAgorData — socket-event bailouts', () => {
     ).toBe(false);
   });
 
+  for (const archived of [false, true]) {
+    it(`never resurrects a deep-link target removed while its get was in flight (archived=${archived})`, async () => {
+      const stale = makeSession({ session_id: 's-target', archived });
+      let release!: () => void;
+      const { client, emit, onFetch } = makeMockClient({
+        sessions: [],
+        'sessions:get': stale as never,
+      });
+      // The first-paint get misses; the post-load fallback's get is held open.
+      onFetch('sessions', 'get', (call) =>
+        call === 1
+          ? Promise.reject(new Error('NotFound'))
+          : new Promise<void>((resolve) => {
+              release = resolve;
+            })
+      );
+      const { result } = renderHook(() => useAgorData(client, { directSessionId: 's-target' }));
+      await waitForInitialLoad(result);
+      await waitFor(() => expect(release).toBeDefined());
+      act(() => emit('sessions', 'removed', stale));
+      await act(async () => release());
+      expect(agorStore.getState().sessionById.has('s-target')).toBe(false);
+      expect(agorStore.getState().missingLinkTargets.has('s-target')).toBe(true);
+    });
+  }
+
   it('records a link target only once its targeted get missed', async () => {
     let reject!: (err: Error) => void;
     const { client, onFetch } = makeMockClient({ sessions: [] });
