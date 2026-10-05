@@ -80,9 +80,25 @@ export function clearTokens(): void {
 }
 
 /**
+ * Rejection raised when a refresh POST completed after the refresh token it
+ * was issued with had been replaced or cleared (logout, new sign-in, another
+ * rotation). The result belongs to a superseded identity and is discarded
+ * rather than stored or broadcast.
+ */
+export class RefreshSupersededError extends Error {
+  constructor() {
+    super('Refresh result discarded: the credentials it was issued for were replaced');
+    this.name = 'RefreshSupersededError';
+  }
+}
+
+/**
  * Refresh and store tokens in one operation
  *
- * Convenience function that combines refreshAccessToken and storeTokens.
+ * Convenience function that combines refreshAccessToken and storeTokens. The
+ * result is stored only while `refreshToken` is still the stored refresh
+ * token; otherwise the in-flight POST outlived its credentials and a
+ * {@link RefreshSupersededError} is thrown without touching storage.
  *
  * @param client - Agor client instance
  * @param refreshToken - Current refresh token
@@ -93,6 +109,7 @@ export async function refreshAndStoreTokens(
   refreshToken: string
 ): Promise<RefreshResult> {
   const result = await refreshAccessToken(client, refreshToken);
+  if (getStoredRefreshToken() !== refreshToken) throw new RefreshSupersededError();
   storeTokens(result.accessToken, result.refreshToken);
   return result;
 }

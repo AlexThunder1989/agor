@@ -30,6 +30,7 @@ import {
   getStoredAccessToken,
   getStoredRefreshToken,
   type RefreshResult,
+  RefreshSupersededError,
   storeTokens,
 } from '../utils/tokenRefresh';
 import type { AuthorityOperation } from './useAuthorityOperationGuard';
@@ -267,6 +268,8 @@ export function useAuth(): UseAuthReturn {
             return true;
           } catch (refreshError) {
             if (isStale()) return true;
+            // Another authority replaced the credentials mid-flight; it owns state.
+            if (refreshError instanceof RefreshSupersededError) return true;
             // Refresh token also expired or invalid
             if (
               !isDefiniteAuthFailure(refreshError) &&
@@ -470,7 +473,8 @@ export function useAuth(): UseAuthReturn {
         // Unrecoverable failures are handled by the unrecoverable-event
         // listener (clearTokens + unauthenticated). Bail out so we don't
         // kick off a reAuthenticate that will immediately fail again.
-        if (error instanceof RefreshUnrecoverableError) return;
+        if (error instanceof RefreshUnrecoverableError || error instanceof RefreshSupersededError)
+          return;
         // Transient/connection errors: let the poll effect pick us up.
         // Other non-connection errors: force a full reAuthenticate, which
         // has its own retry + token-clear policy.
@@ -531,7 +535,8 @@ export function useAuth(): UseAuthReturn {
       } catch (error) {
         // Unrecoverable: the unrecoverable-event listener already cleared
         // tokens and flipped to unauthenticated. Avoid double-handling.
-        if (error instanceof RefreshUnrecoverableError) return;
+        if (error instanceof RefreshUnrecoverableError || error instanceof RefreshSupersededError)
+          return;
 
         console.error('Failed to auto-refresh token:', error);
         if (isTransientConnectionError(error)) {

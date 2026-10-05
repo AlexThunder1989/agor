@@ -726,4 +726,31 @@ describe('same-authority network revalidation', () => {
     expect(result.current.user).toEqual(userB);
     expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBe('token-b');
   });
+  it('does not store tokens from a refresh POST that outlives a logout', async () => {
+    window.history.replaceState({}, '', '/');
+    authenticate.mockReset();
+    refreshCreate.mockReset();
+    localStorage.clear();
+    localStorage.setItem(REFRESH_TOKEN_KEY, 'refresh-a');
+    const userA = { user_id: 'user-a', role: 'member', email: 'a@example.test' };
+    const post = deferred<{ accessToken: string; refreshToken: string; user: typeof userA }>();
+    refreshCreate.mockReturnValueOnce(post.promise);
+    const refreshed = vi.fn();
+    window.addEventListener(TOKENS_REFRESHED_EVENT, refreshed);
+    const { result } = renderHook(() => useAuth());
+    await waitFor(() => expect(refreshCreate).toHaveBeenCalled());
+    await act(async () => {
+      await result.current.logout();
+    });
+    await act(async () => {
+      post.resolve({ accessToken: 'late-access', refreshToken: 'late-refresh', user: userA });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    window.removeEventListener(TOKENS_REFRESHED_EVENT, refreshed);
+    expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBeNull();
+    expect(localStorage.getItem(REFRESH_TOKEN_KEY)).toBeNull();
+    expect(refreshed).not.toHaveBeenCalled();
+    expect(result.current.authenticated).toBe(false);
+    expect(result.current.user).toBeNull();
+  });
 });
