@@ -7,6 +7,7 @@ import type {
   Session,
 } from '@agor-live/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { boardCoverage, markBoardLoaded } from '../test/userScopeCoverage';
 import {
   beginPartitionLoad,
   bumpFirstPaintMergeRevisions,
@@ -21,10 +22,8 @@ import { EMPTY_MAPS } from './agorMaps';
 import { branchRemoved, cardCreated, cardRemoved, sessionPatched } from './agorRealtimeActions';
 import { agorStore } from './agorStore';
 import {
-  isCoverageCurrent,
   loadBoardPartition,
   makeBoardReadySelector,
-  markBoardPartitionLoaded,
   otherCommittedMembers,
   partitionLoadMark,
   partitionLoadSince,
@@ -32,7 +31,7 @@ import {
   retryBoardPartition,
   selectBoardPartition,
 } from './boardPartitions';
-import { captureLoadLifetime } from './loadLifetime';
+import { captureLoadLifetime, isLoadLifetimeCurrent } from './loadLifetime';
 import {
   discardRealtimeNow,
   enqueueSessionPatch,
@@ -305,8 +304,11 @@ describe('loadBoardPartition', () => {
       partitionLoadSince(BOARD, { ...lifetime, loadEpoch: lifetime.loadEpoch + 1 }, mark)
     ).toBe(undefined);
     // A resync keeps the boards loaded since its mark across its reset, and
-    // only those: board-2 was not loaded by a partition load after the mark.
-    markBoardPartitionLoaded('board-2', lifetime);
+    // only those: board-2's load started before the mark.
+    agorStore.getState().setCoverage(boardScopeKey('board-2'), {
+      ...boardCoverage('loaded', lifetime),
+      generation: mark,
+    });
     expect(partitionsLoadedSince(lifetime, mark)).toEqual([BOARD]);
     expect(partitionsLoadedSince({ ...lifetime, loadEpoch: lifetime.loadEpoch + 1 }, mark)).toEqual(
       []
@@ -457,7 +459,7 @@ describe('loadBoardPartition', () => {
     expect(entry?.status).toBe('loading');
     cancelAllHydrations();
     // Another lifetime's entry is not current even before the load settles.
-    expect(isCoverageCurrent(entry)).toBe(false);
+    expect(isLoadLifetimeCurrent(entry!)).toBe(false);
     release();
     await load;
     expect(agorStore.getState().coverage.has(boardScopeKey(BOARD))).toBe(false);
@@ -502,12 +504,12 @@ describe('loadBoardPartition', () => {
     await load;
     const entry = selectBoardPartition(agorStore.getState(), BOARD);
     expect(entry?.status).toBe('loading');
-    expect(isCoverageCurrent(entry)).toBe(true);
+    expect(isLoadLifetimeCurrent(entry!)).toBe(true);
     second.release();
     await reload;
     expect(agorStore.getState().sessionById.has('s-2')).toBe(true);
     expect(ready()).toBe(true);
-    expect(isCoverageCurrent(selectBoardPartition(agorStore.getState(), BOARD))).toBe(true);
+    expect(isLoadLifetimeCurrent(selectBoardPartition(agorStore.getState(), BOARD)!)).toBe(true);
   });
 
   it('never applies after the restart budget: records a retryable error instead', async () => {
@@ -576,9 +578,10 @@ describe('loadBoardPartition', () => {
     expect([...state.boardObjectById.keys()]).toEqual(['o-kept']);
     expect([...state.cardById.keys()].sort()).toEqual(['k-kept', 'k-live']);
     expect(ready()).toBe(true);
-    // Its coverage commits the ids the read returned, not the rows present.
+    // Its membership: the ids the read returned, and the row realtime wrote
+    // during the read that the board claims now; not the rows deleted meanwhile.
     const members = selectBoardPartition(state, BOARD)?.members;
-    expect([...(members?.cards ?? [])]).toEqual(['k-kept']);
+    expect([...(members?.cards ?? [])].sort()).toEqual(['k-kept', 'k-live']);
     expect([...(members?.boardObjects ?? [])]).toEqual(['o-kept']);
   });
 
@@ -586,8 +589,8 @@ describe('loadBoardPartition', () => {
     const lifetime = captureLoadLifetime()!;
     const entry = (status: 'loading' | 'loaded' | 'error', id: string) => ({
       status,
-      authorityScope: lifetime.authorityScope,
-      loadEpoch: lifetime.loadEpoch,
+      ...lifetime,
+      generation: 0,
       members: { sessions: new Set([id]) },
     });
     const { setCoverage } = agorStore.getState();
@@ -624,9 +627,14 @@ describe('board readiness', () => {
   afterEach(() => setRealtimeAuthorityScope(null));
 
   it('is ready once the first-paint apply marks the board loaded', () => {
-    markBoardPartitionLoaded(BOARD, captureLoadLifetime()!);
+    markBoardLoaded(BOARD);
     expect(makeBoardReadySelector(BOARD)(agorStore.getState())).toBe(true);
     expect(makeBoardReadySelector('board-2')(agorStore.getState())).toBe(false);
+  });
+
+  it('is not ready from an incomplete read', () => {
+    agorStore.getState().setCoverage(boardScopeKey(BOARD), { ...boardCoverage(), complete: false });
+    expect(makeBoardReadySelector(BOARD)(agorStore.getState())).toBe(false);
   });
 
   it('never treats a board as ready from global snapshots: only its partition', async () => {
@@ -640,12 +648,12 @@ describe('board readiness', () => {
     }
     expect(agorStore.getState().globallyHydrated.size).toBe(2);
     expect(makeBoardReadySelector('board-2')(agorStore.getState())).toBe(false);
-    markBoardPartitionLoaded('board-2', captureLoadLifetime()!);
+    markBoardLoaded('board-2');
     expect(makeBoardReadySelector('board-2')(agorStore.getState())).toBe(true);
   });
 
   it('resets with the maps on an identity change', () => {
-    markBoardPartitionLoaded(BOARD, captureLoadLifetime()!);
+    markBoardLoaded(BOARD);
     agorStore.getState().resetMaps();
     expect(makeBoardReadySelector(BOARD)(agorStore.getState())).toBe(false);
   });

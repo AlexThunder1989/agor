@@ -25,6 +25,11 @@
  *    the contract the tests pin holds exactly.
  *  - the branch-eviction CASCADE → the store's immer action
  *    (`evictArchivedBranch` / `applyBranchHardDeleteCascade`).
+ *
+ * Branch, session, board-object and card writes also keep load-scope
+ * membership live (`liveMembership`): the written row joins every current
+ * loaded scope that claims it and leaves the ones that no longer do, in the
+ * same store update as the row.
  */
 import type {
   Artifact,
@@ -49,6 +54,8 @@ import {
   upsertBoardObjectInMaps,
 } from './agorMaps';
 import { type AgorState, agorStore } from './agorStore';
+import { isLoadLifetimeCurrent } from './loadLifetime';
+import { type CoverageUpdate, liveMembership, type WrittenIds } from './scopeMerge';
 import { pruneSessionMcpLinks } from './sessionMcpLinks';
 
 // Thin bindings to the store primitives. The vanilla store and its actions are
@@ -57,11 +64,34 @@ import { pruneSessionMcpLinks } from './sessionMcpLinks';
 // value inference (and the `applyMaps` reducer / branch cascade
 // shapes) carry through to every callback below.
 const setMap: AgorState['setMap'] = (key, value) => agorStore.getState().setMap(key, value);
-const applyMaps: AgorState['applyMaps'] = (updater) => agorStore.getState().applyMaps(updater);
-const evictArchivedBranch: AgorState['evictArchivedBranch'] = (branchId) =>
-  agorStore.getState().evictArchivedBranch(branchId);
-const applyBranchHardDeleteCascade: AgorState['applyBranchHardDeleteCascade'] = (branchId) =>
-  agorStore.getState().applyBranchHardDeleteCascade(branchId);
+const applyMaps: AgorState['applyMaps'] = (updater, coverage) =>
+  agorStore.getState().applyMaps(updater, coverage);
+const evictArchivedBranch: AgorState['evictArchivedBranch'] = (branchId, coverage) =>
+  agorStore.getState().evictArchivedBranch(branchId, coverage);
+const applyBranchHardDeleteCascade: AgorState['applyBranchHardDeleteCascade'] = (
+  branchId,
+  coverage
+) => agorStore.getState().applyBranchHardDeleteCascade(branchId, coverage);
+
+/** The membership update for a live write of `written` (current scopes only). */
+export const liveCoverage =
+  (written: WrittenIds): CoverageUpdate =>
+  (maps, coverage) =>
+    liveMembership(coverage, maps, written, (entry) => isLoadLifetimeCurrent(entry));
+
+/** The ids a branch eviction cascade removes with it. */
+function evictedWith(branchId: string, withBoardObjects: boolean): WrittenIds {
+  const state = agorStore.getState();
+  const onBranch = <T extends { branch_id?: string | null }>(rows: Iterable<T>) =>
+    [...rows].filter((row) => row.branch_id === branchId);
+  return {
+    branches: [branchId],
+    sessions: onBranch(state.sessionById.values()).map((session) => session.session_id),
+    ...(withBoardObjects
+      ? { boardObjects: onBranch(state.boardObjectById.values()).map((o) => o.object_id) }
+      : {}),
+  };
+}
 
 // ── Sessions ────────────────────────────────────────────────────────────────
 export function sessionCreated(session: Session) {
@@ -70,24 +100,27 @@ export function sessionCreated(session: Session) {
   bumpRevision('sessions', session.session_id);
   if (session.archived) return;
 
-  // Update sessionById - only create new Map if session doesn't exist
-  setMap('sessionById', (prev) => {
-    if (prev.has(session.session_id)) return prev; // Already exists, shouldn't happen
-    const next = new Map(prev);
-    next.set(session.session_id, session);
-    return next;
-  });
-
-  // Update sessionsByBranch - only create new Map when adding new session
-  setMap('sessionsByBranch', (prev) => {
-    const branchSessions = prev.get(session.branch_id) || [];
-    // Check if session already exists in this branch (duplicate event)
-    if (branchSessions.some((s) => s.session_id === session.session_id)) return prev;
-
-    const next = new Map(prev);
-    next.set(session.branch_id, [...branchSessions, session]);
-    return next;
-  });
+  applyMaps(
+    (prev) => {
+      // Only create new Maps for a session that doesn't exist yet (duplicate event).
+      let { sessionById, sessionsByBranch } = prev;
+      if (!sessionById.has(session.session_id)) {
+        sessionById = new Map(sessionById).set(session.session_id, session);
+      }
+      const branchSessions = sessionsByBranch.get(session.branch_id) || [];
+      if (!branchSessions.some((s) => s.session_id === session.session_id)) {
+        sessionsByBranch = new Map(sessionsByBranch).set(session.branch_id, [
+          ...branchSessions,
+          session,
+        ]);
+      }
+      if (sessionById === prev.sessionById && sessionsByBranch === prev.sessionsByBranch) {
+        return prev;
+      }
+      return { ...prev, sessionById, sessionsByBranch };
+    },
+    liveCoverage({ sessions: [session.session_id] })
+  );
 }
 
 export function sessionPatched(session: Session) {
@@ -97,39 +130,40 @@ export function sessionPatched(session: Session) {
   // both `sessionById` and `sessionsByBranch` in a single store notify; the
   // reducer returns `prev` untouched on a no-op patch so references stay stable.
   bumpRevision('sessions', session.session_id);
-  applyMaps((prev) => applySessionPatchToMaps(prev, session));
+  applyMaps(
+    (prev) => applySessionPatchToMaps(prev, session),
+    liveCoverage({ sessions: [session.session_id] })
+  );
 }
 
 export function sessionRemoved(session: Session) {
   bumpRevision('sessions', session.session_id);
   bumpRevision('sessionMcp');
   pruneSessionMcpLinks([session.session_id]);
-  // Update sessionById — bail out when the id isn't tracked so the
-  // wrapper short-circuit prevents the spurious `maps` update.
-  setMap('sessionById', (prev) => {
-    if (!prev.has(session.session_id)) return prev;
-    const next = new Map(prev);
-    next.delete(session.session_id);
-    return next;
-  });
-
-  // Update sessionsByBranch — same bail when the session isn't in the
-  // branch's bucket.
-  setMap('sessionsByBranch', (prev) => {
-    const branchSessions = prev.get(session.branch_id);
-    if (!branchSessions?.some((s) => s.session_id === session.session_id)) {
-      return prev;
-    }
-    const next = new Map(prev);
-    const filtered = branchSessions.filter((s) => s.session_id !== session.session_id);
-    if (filtered.length > 0) {
-      next.set(session.branch_id, filtered);
-    } else {
-      // Clean up empty arrays
-      next.delete(session.branch_id);
-    }
-    return next;
-  });
+  applyMaps(
+    (prev) => {
+      // Bail out per map when the id isn't tracked, so an untracked removal
+      // leaves every reference (and the store) untouched.
+      let { sessionById, sessionsByBranch } = prev;
+      if (sessionById.has(session.session_id)) {
+        sessionById = new Map(sessionById);
+        sessionById.delete(session.session_id);
+      }
+      const branchSessions = sessionsByBranch.get(session.branch_id);
+      if (branchSessions?.some((s) => s.session_id === session.session_id)) {
+        sessionsByBranch = new Map(sessionsByBranch);
+        const filtered = branchSessions.filter((s) => s.session_id !== session.session_id);
+        // Clean up empty arrays
+        if (filtered.length > 0) sessionsByBranch.set(session.branch_id, filtered);
+        else sessionsByBranch.delete(session.branch_id);
+      }
+      if (sessionById === prev.sessionById && sessionsByBranch === prev.sessionsByBranch) {
+        return prev;
+      }
+      return { ...prev, sessionById, sessionsByBranch };
+    },
+    liveCoverage({ sessions: [session.session_id] })
+  );
 }
 
 // ── Boards ──────────────────────────────────────────────────────────────────
@@ -163,15 +197,24 @@ export function boardRemoved(board: Board) {
 // ── Board objects ─────────────────────────────────────────────────────────--
 export function boardObjectCreated(boardObject: BoardEntityObject) {
   bumpRevision('boardObjects', boardObject.object_id);
-  applyMaps((prev) => upsertBoardObjectInMaps(prev, boardObject, 'create'));
+  applyMaps(
+    (prev) => upsertBoardObjectInMaps(prev, boardObject, 'create'),
+    liveCoverage({ boardObjects: [boardObject.object_id] })
+  );
 }
 export function boardObjectPatched(boardObject: BoardEntityObject) {
   bumpRevision('boardObjects', boardObject.object_id);
-  applyMaps((prev) => upsertBoardObjectInMaps(prev, boardObject, 'patch'));
+  applyMaps(
+    (prev) => upsertBoardObjectInMaps(prev, boardObject, 'patch'),
+    liveCoverage({ boardObjects: [boardObject.object_id] })
+  );
 }
 export function boardObjectRemoved(boardObject: BoardEntityObject) {
   bumpRevision('boardObjects', boardObject.object_id);
-  applyMaps((prev) => removeBoardObjectFromMaps(prev, boardObject));
+  applyMaps(
+    (prev) => removeBoardObjectFromMaps(prev, boardObject),
+    liveCoverage({ boardObjects: [boardObject.object_id] })
+  );
 }
 
 // ── Repos ─────────────────────────────────────────────────────────────────--
@@ -207,12 +250,13 @@ export function branchCreated(branch: Branch) {
   bumpRevision('branches', branch.branch_id);
   if (branch.archived) return;
 
-  setMap('branchById', (prev) => {
-    if (prev.has(branch.branch_id)) return prev; // Already exists, shouldn't happen
-    const next = new Map(prev);
-    next.set(branch.branch_id, branch);
-    return next;
-  });
+  applyMaps(
+    (prev) => {
+      if (prev.branchById.has(branch.branch_id)) return prev; // Already exists, shouldn't happen
+      return { ...prev, branchById: new Map(prev.branchById).set(branch.branch_id, branch) };
+    },
+    liveCoverage({ branches: [branch.branch_id] })
+  );
 }
 export function branchPatched(branch: Branch) {
   // The branch id stamp also fences the eviction cascade below: a partition
@@ -221,11 +265,17 @@ export function branchPatched(branch: Branch) {
   if (branch.archived) {
     // Archive preserves the board-object placement for a future unarchive.
     bumpRevision('sessions');
-    evictArchivedBranch(branch.branch_id);
+    evictArchivedBranch(branch.branch_id, liveCoverage(evictedWith(branch.branch_id, false)));
     return;
   }
 
-  setMap('branchById', (prev) => replaceIfChanged(prev, branch.branch_id, branch));
+  applyMaps(
+    (prev) => {
+      const branchById = replaceIfChanged(prev.branchById, branch.branch_id, branch);
+      return branchById === prev.branchById ? prev : { ...prev, branchById };
+    },
+    liveCoverage({ branches: [branch.branch_id] })
+  );
 }
 export function branchRemoved(branch: Branch) {
   // The branch id stamp fences the whole FK cascade below for partition loads.
@@ -244,11 +294,9 @@ export function branchRemoved(branch: Branch) {
   bumpRevision('sessionMcp');
   bumpRevision('gatewayChannels');
   bumpRevision('artifacts');
-  const removedSessionIds = [...agorStore.getState().sessionById.values()]
-    .filter((session) => session.branch_id === branch.branch_id)
-    .map((session) => session.session_id);
-  applyBranchHardDeleteCascade(branch.branch_id);
-  pruneSessionMcpLinks(removedSessionIds);
+  const evicted = evictedWith(branch.branch_id, true);
+  applyBranchHardDeleteCascade(branch.branch_id, liveCoverage(evicted));
+  pruneSessionMcpLinks([...(evicted.sessions ?? [])]);
   // Collapse exceptions survive archive/move but not a hard delete.
   removeCollapsedBranchNode(branch.branch_id);
 }
@@ -339,22 +387,33 @@ export function gatewayChannelRemoved(channel: GatewayChannel) {
 }
 
 // ── Cards ─────────────────────────────────────────────────────────────────--
+/** Write the card map through `applyMaps`, so card membership stays live. */
+function writeCard(
+  card: CardWithType,
+  update: (prev: Map<string, CardWithType>) => Map<string, CardWithType>
+) {
+  applyMaps(
+    (prev) => {
+      const cardById = update(prev.cardById);
+      return cardById === prev.cardById ? prev : { ...prev, cardById };
+    },
+    liveCoverage({ cards: [card.card_id] })
+  );
+}
 export function cardCreated(card: CardWithType) {
   bumpRevision('cards', card.card_id);
-  setMap('cardById', (prev) => {
+  writeCard(card, (prev) => {
     if (prev.has(card.card_id)) return prev; // Duplicate event — bail.
-    const next = new Map(prev);
-    next.set(card.card_id, card);
-    return next;
+    return new Map(prev).set(card.card_id, card);
   });
 }
 export function cardPatched(card: CardWithType) {
   bumpRevision('cards', card.card_id);
-  setMap('cardById', (prev) => replaceIfChanged(prev, card.card_id, card));
+  writeCard(card, (prev) => replaceIfChanged(prev, card.card_id, card));
 }
 export function cardRemoved(card: CardWithType) {
   bumpRevision('cards', card.card_id);
-  setMap('cardById', (prev) => {
+  writeCard(card, (prev) => {
     if (!prev.has(card.card_id)) return prev;
     const next = new Map(prev);
     next.delete(card.card_id);

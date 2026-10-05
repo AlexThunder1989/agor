@@ -8,6 +8,7 @@ import { useBoardMutationGuard } from '../../../hooks/useBoardMutationGuard';
 import { agorStore } from '../../../store/agorStore';
 import type { BoardWriteTicket } from '../../../store/boardMutationGuard';
 import { boardScopeKey } from '../../../store/scopeMerge';
+import { boardCoverage } from '../../../test/userScopeCoverage';
 import { useBoardObjects } from './useBoardObjects';
 
 // Spy the themed error toast so the failure path of reorderObject is observable.
@@ -33,11 +34,7 @@ const connectionState = {
 };
 
 function loadBoard() {
-  agorStore.getState().setCoverage(boardScopeKey('board-1'), {
-    status: 'loaded',
-    authorityScope: 'fixture',
-    loadEpoch: 0,
-  });
+  agorStore.getState().setCoverage(boardScopeKey('board-1'), boardCoverage());
 }
 
 beforeEach(() => {

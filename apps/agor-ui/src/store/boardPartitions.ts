@@ -28,28 +28,32 @@ import { PAGINATION } from '@agor-live/client';
 import {
   beginPartitionLoad,
   endPartitionLoad,
-  getHydrationCancellationEpoch,
   type HydratedCollection,
   MAX_WHOLESALE_RESTARTS,
+  touchedIdsSince,
   touchedSince,
   WholesaleReplacementError,
   wholesaleReplacedSince,
 } from './agorHydration';
 import { type AgorState, agorStore } from './agorStore';
 import { captureLoadLifetime, isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
-import { getRealtimeAuthorityScope } from './realtimeBatch';
 import {
   applyPartitionSnapshot,
   BOARD_SCOPE_PREFIX,
   type BoardPartitionSnapshot,
+  boardPartitionScope,
   boardScopeKey,
-  type CoverageMembers,
+  type CoverageUpdate,
   globalSetsMembers,
   type MemberLookup,
   type ScopeCoverage,
-  scopeMembers,
+  type ScopeRows,
+  settledMembers,
+  USER_SCOPE_KEYS,
+  withCoverage,
 } from './scopeMerge';
 import { sessionListQuery } from './sessionListQuery';
+import { referenceMembers } from './userScope';
 
 /** `boardId`'s partition coverage entry, if any. */
 export function selectBoardPartition(
@@ -63,44 +67,36 @@ const setBoardPartition = (boardId: string, entry: ScopeCoverage | null) =>
   agorStore.getState().setCoverage(boardScopeKey(boardId), entry);
 
 /**
- * Whether `boardId` is complete: its partition is loaded. Nothing else makes a
- * board complete; board objects, cards and full board records load only with
- * it. Curried for per-board memoization.
+ * Whether `boardId` is complete: its partition is loaded from a complete
+ * read. Nothing else makes a board complete; board objects, cards and full
+ * board records load only with it. Curried for per-board memoization.
  */
 export function makeBoardReadySelector(
   boardId: string | null | undefined
 ): (s: AgorState) => boolean {
   return (s) => {
-    return !!boardId && selectBoardPartition(s, boardId)?.status === 'loaded';
+    const entry = boardId ? selectBoardPartition(s, boardId) : undefined;
+    return entry?.status === 'loaded' && entry.complete === true;
   };
 }
 
 /**
- * A coverage entry recorded under another authority or lifetime describes
- * loads that can no longer settle (or data that may no longer apply): a
- * partition counts as unloaded, and no entry's members keep rows alive.
- * Authority transitions also forget every partition entry.
- */
-export function isCoverageCurrent(state: ScopeCoverage | undefined): boolean {
-  return (
-    !!state &&
-    state.authorityScope === getRealtimeAuthorityScope() &&
-    state.loadEpoch === getHydrationCancellationEpoch()
-  );
-}
-
-/**
- * The committed memberships a replace of `exceptKey` must respect: every
- * other scope loaded under the current lifetime (a row one of them returned
- * is never removed), and the global sets while they exist. Loading, failed
- * and stale scopes hold nothing. Overlapping scopes are normal: my session on
- * a loaded board belongs to the user scope and to that partition.
+ * The memberships a replace of `exceptKey` must respect: every other scope
+ * loaded under the current lifetime (a row that belongs to one of them is
+ * never removed), and the global sets while they exist. Loading, failed and
+ * stale scopes (another authority or lifetime) hold nothing. Overlapping
+ * scopes are normal: my session on a loaded board belongs to the user scope
+ * and to that partition.
  */
 export function otherCommittedMembers(state: AgorState, exceptKey?: string): MemberLookup[] {
   const members: MemberLookup[] = [];
   for (const [key, entry] of state.coverage) {
-    if (key === exceptKey || entry.status !== 'loaded' || !entry.members) continue;
-    if (isCoverageCurrent(entry)) members.push(entry.members);
+    if (key === exceptKey || entry.status !== 'loaded' || !isLoadLifetimeCurrent(entry)) continue;
+    if (key === USER_SCOPE_KEYS.references && entry.userId) {
+      members.push({ branches: referenceMembers(state, entry.userId) });
+    } else if (entry.members) {
+      members.push(entry.members);
+    }
   }
   members.push(globalSetsMembers(state.globallyHydrated));
   return members;
@@ -113,28 +109,43 @@ export function makeBoardPartitionSelector(
 }
 
 /**
- * Record that the gated first-paint apply loaded `boardId`'s partition (the
- * board-scoped first paint runs the same queries as a partition load), under
- * that load's lifetime, with the ids its reads returned for the board; a
- * lifetime that is no longer current records nothing.
+ * The coverage update that settles `boardId`'s partition from a read, in the
+ * update that applies it: loaded under the read's lifetime and generation,
+ * complete as the read says, with its membership (`settledMembers`: rows
+ * realtime wrote since `startRevisions` are judged by their current value).
+ * The board-scoped first paint runs the same queries as a partition load, so
+ * it settles the board the same way.
  */
-export function markBoardPartitionLoaded(
-  boardId: string | null | undefined,
+export function settleBoardPartition(
+  boardId: string,
   lifetime: LoadLifetime,
-  members: CoverageMembers = {}
-): void {
-  if (!boardId || !isLoadLifetimeCurrent(lifetime)) return;
-  setBoardPartition(boardId, {
-    status: 'loaded',
-    authorityScope: lifetime.authorityScope,
-    loadEpoch: lifetime.loadEpoch,
-    members,
-  });
+  generation: number,
+  rows: ScopeRows & { complete: boolean },
+  startRevisions: Record<HydratedCollection, number>
+): CoverageUpdate {
+  const scope = boardPartitionScope(boardId);
+  return (maps, coverage) =>
+    withCoverage(coverage, scope.key, {
+      status: 'loaded',
+      authorityScope: lifetime.authorityScope,
+      loadEpoch: lifetime.loadEpoch,
+      generation,
+      members: settledMembers(scope, rows, maps, (collection) =>
+        touchedIdsSince(collection, startRevisions[collection])
+      ),
+      complete: rows.complete,
+    });
 }
 
 let loadSequence = 0;
 
-// The boards the UI currently displays (registered by `useBoardPartition`), in
+/** A new partition generation; generations only increase (see `partitionLoadMark`). */
+export function nextPartitionGeneration(): number {
+  return ++loadSequence;
+}
+
+// The boards the UI currently displays (registered by the board shells'
+// `useBoardPartition`; a `background` consumer never registers), in
 // registration order. The UI resolves its board from far more than the URL
 // (artifact routes, the mobile shell's fallbacks), so a reconnect resync
 // reconciles THIS board rather than re-deriving one from the URL.
@@ -166,24 +177,22 @@ export function getDisplayedBoardId(): string | undefined {
  */
 export function claimDisplayedBoardForResync(
   lifetime: LoadLifetime
-): { boardId: string; loadId: number } | null {
+): { boardId: string; generation: number } | null {
   const boardId = getDisplayedBoardId();
   if (!boardId || agorStore.getState().coverage.has(boardScopeKey(boardId))) return null;
-  const loadId = ++loadSequence;
-  setBoardPartition(boardId, {
-    status: 'loading',
-    authorityScope: lifetime.authorityScope,
-    loadEpoch: lifetime.loadEpoch,
-    loadId,
-  });
-  return { boardId, loadId };
+  const generation = nextPartitionGeneration();
+  setBoardPartition(boardId, { status: 'loading', ...lifetime, generation });
+  return { boardId, generation };
 }
 
-export function releaseResyncClaim(claim: { boardId: string; loadId: number } | null): void {
-  if (!claim) return;
-  if (selectBoardPartition(agorStore.getState(), claim.boardId)?.loadId === claim.loadId) {
-    setBoardPartition(claim.boardId, null);
-  }
+/** Whether `boardId`'s entry is still loading and owned by `generation`. */
+function ownsLoading(boardId: string, generation: number): boolean {
+  const entry = selectBoardPartition(agorStore.getState(), boardId);
+  return entry?.status === 'loading' && entry.generation === generation;
+}
+
+export function releaseResyncClaim(claim: { boardId: string; generation: number } | null): void {
+  if (claim && ownsLoading(claim.boardId, claim.generation)) setBoardPartition(claim.boardId, null);
 }
 
 const inflight = new Map<string, Promise<void>>();
@@ -196,6 +205,16 @@ function inflightKey(lifetime: LoadLifetime, partitionEpoch: number, boardId: st
 /** The sequence mark of partition loads started so far (see `partitionLoadSince`). */
 export function partitionLoadMark(): number {
   return loadSequence;
+}
+
+/** A loading or loaded entry of a load that started under `lifetime` after `sinceMark`. */
+function startedSince(entry: ScopeCoverage, lifetime: LoadLifetime, sinceMark: number): boolean {
+  return (
+    entry.status !== 'error' &&
+    entry.authorityScope === lifetime.authorityScope &&
+    entry.loadEpoch === lifetime.loadEpoch &&
+    entry.generation > sinceMark
+  );
 }
 
 /**
@@ -211,21 +230,8 @@ export function partitionLoadSince(
   sinceMark: number
 ): Promise<void> | undefined {
   const entry = selectBoardPartition(agorStore.getState(), boardId);
-  if (
-    !entry ||
-    entry.authorityScope !== lifetime.authorityScope ||
-    entry.loadEpoch !== lifetime.loadEpoch
-  ) {
-    return undefined;
-  }
-  if (entry.status === 'loaded') {
-    return entry.loadedBy !== undefined && entry.loadedBy > sinceMark
-      ? Promise.resolve()
-      : undefined;
-  }
-  if (entry.status !== 'loading' || entry.loadId === undefined || entry.loadId <= sinceMark) {
-    return undefined;
-  }
+  if (!entry || !startedSince(entry, lifetime, sinceMark)) return undefined;
+  if (entry.status === 'loaded') return Promise.resolve();
   return inflight.get(inflightKey(lifetime, agorStore.getState().partitionEpoch, boardId));
 }
 
@@ -238,20 +244,9 @@ export function partitionsLoadedSince(lifetime: LoadLifetime, sinceMark: number)
   const boardIds: string[] = [];
   for (const [key, entry] of agorStore.getState().coverage) {
     if (!key.startsWith(BOARD_SCOPE_PREFIX)) continue;
-    const boardId = key.slice(BOARD_SCOPE_PREFIX.length);
-    if (
-      entry.authorityScope !== lifetime.authorityScope ||
-      entry.loadEpoch !== lifetime.loadEpoch
-    ) {
-      continue;
+    if (startedSince(entry, lifetime, sinceMark)) {
+      boardIds.push(key.slice(BOARD_SCOPE_PREFIX.length));
     }
-    const startedBy =
-      entry.status === 'loaded'
-        ? entry.loadedBy
-        : entry.status === 'loading'
-          ? entry.loadId
-          : undefined;
-    if (startedBy !== undefined && startedBy > sinceMark) boardIds.push(boardId);
   }
   return boardIds;
 }
@@ -302,6 +297,8 @@ async function fetchBoardPartition(
     boardObjects: boardObjects as BoardPartitionSnapshot['boardObjects'],
     cards,
     board,
+    // Every read is an unbounded `findAll`.
+    complete: true,
   };
 }
 
@@ -310,10 +307,11 @@ async function fetchBoardPartition(
  * (`applyPartitionSnapshot`). Deduplicated per
  * (authority, lifetime, board); resolves once applied, dropped, or failed.
  *
- * The `loading` entry is owned by this load (`loadId`). A load that is
- * cancelled (lifetime ended) or superseded releases its entry instead of
+ * The `loading` entry is owned by this load (its `generation`). A load that
+ * is cancelled (lifetime ended) or superseded releases its entry instead of
  * leaving the board stuck in `loading`. A load whose every attempt spans a
- * wholesale replacement never applies: it records a retryable error.
+ * wholesale replacement never applies: it records a retryable error. The
+ * snapshot and the `loaded` entry publish in one store update.
  */
 export function loadBoardPartition(
   client: AgorClient,
@@ -331,12 +329,11 @@ export function loadBoardPartition(
   const existing = inflight.get(key);
   if (existing) return existing;
 
-  const loadId = ++loadSequence;
+  const generation = nextPartitionGeneration();
   const store = () => agorStore.getState();
-  const owns = () => selectBoardPartition(store(), boardId)?.loadId === loadId;
-  const isCurrent = () => isLoadLifetimeCurrent(lifetime) && owns();
+  const isCurrent = () => isLoadLifetimeCurrent(lifetime) && ownsLoading(boardId, generation);
   const run = async () => {
-    setBoardPartition(boardId, { status: 'loading', authorityScope, loadEpoch, loadId });
+    setBoardPartition(boardId, { status: 'loading', authorityScope, loadEpoch, generation });
     for (let attempt = 0; ; attempt++) {
       const fence = beginPartitionLoad();
       try {
@@ -355,17 +352,10 @@ export function loadBoardPartition(
         const touched = (collection: HydratedCollection, id: string) =>
           touchedSince(collection, id, fence.startRevisions[collection]);
         const others = otherCommittedMembers(store(), boardScopeKey(boardId));
-        store().applyMaps((prev) => applyPartitionSnapshot(prev, snapshot, touched, others));
-        // `applyMaps` notifies subscribers synchronously; one may have ended
-        // this lifetime (logout, remount) or started a load that owns the entry.
-        if (!isCurrent()) return;
-        setBoardPartition(boardId, {
-          status: 'loaded',
-          authorityScope,
-          loadEpoch,
-          loadedBy: loadId,
-          members: scopeMembers(snapshot),
-        });
+        store().applyMaps(
+          (prev) => applyPartitionSnapshot(prev, snapshot, touched, others),
+          settleBoardPartition(boardId, lifetime, generation, snapshot, fence.startRevisions)
+        );
         return;
       } catch (err) {
         if (!isCurrent()) return;
@@ -374,6 +364,7 @@ export function loadBoardPartition(
           status: 'error',
           authorityScope,
           loadEpoch,
+          generation,
           error: err instanceof Error ? err.message : String(err),
         });
         return;
@@ -386,7 +377,7 @@ export function loadBoardPartition(
     inflight.delete(key);
     // Cancelled or dropped while still loading: release the entry so the
     // board counts as unloaded and the next mount/authority loads it again.
-    if (owns()) setBoardPartition(boardId, null);
+    if (ownsLoading(boardId, generation)) setBoardPartition(boardId, null);
   });
   inflight.set(key, promise);
   return promise;

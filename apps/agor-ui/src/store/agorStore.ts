@@ -30,7 +30,15 @@ import { immer } from 'zustand/middleware/immer';
 import { createStore } from 'zustand/vanilla';
 import type { InitialLoadItemKey, InitialLoadingStage } from '../hooks/useAgorData';
 import { type DataMaps, EMPTY_MAPS, isSessionRowRemovedWith, MAP_KEYS, pickMaps } from './agorMaps';
-import { BOARD_SCOPE_PREFIX, boardScopeKey, type ScopeCoverage } from './scopeMerge';
+import {
+  BOARD_SCOPE_PREFIX,
+  boardScopeKey,
+  type Coverage,
+  type CoverageUpdate,
+  type ScopeCoverage,
+  type ScopeKey,
+  withCoverage,
+} from './scopeMerge';
 
 // Immer needs this to draft Map/Set state. Called once at module load; the
 // store's state is entirely Maps and one Set.
@@ -91,7 +99,7 @@ interface AgorMeta {
    * Every load scope's coverage, by scope key: board partitions
    * (`boardScopeKey`) and the user scope's pieces (`USER_SCOPE_KEYS`).
    */
-  coverage: Map<string, ScopeCoverage>;
+  coverage: Coverage;
   /**
    * Bumped (monotonically) by every reset of the board partitions. A partition
    * load in flight across a reset is orphaned: it can no longer settle its
@@ -165,11 +173,13 @@ interface AgorActions {
    * …)`). Runs the reducer against a fresh projection of the current slices,
    * then commits ONLY the slices whose reference actually changed — so the
    * reducer's existing per-slice reference preservation carries through, and an
-   * all-no-op reducer leaves the outer state object untouched.
+   * all-no-op reducer leaves the outer state object untouched. `coverage`
+   * publishes the coverage change that goes with it (a load's commit, live
+   * membership) in the same update.
    */
-  applyMaps: (updater: (prev: DataMaps) => DataMaps) => void;
+  applyMaps: (updater: (prev: DataMaps) => DataMaps, coverage?: CoverageUpdate) => void;
   /** Set (or clear, with `null`) one scope's coverage; a no-op when nothing changes. */
-  setCoverage: (key: string, entry: ScopeCoverage | null) => void;
+  setCoverage: (key: ScopeKey, entry: ScopeCoverage | null) => void;
   /** Merge user-scope meta; a no-op when nothing changes. */
   setUserScope: (partial: Partial<UserScopeMeta>) => void;
   /**
@@ -190,24 +200,21 @@ interface AgorActions {
   /** Mirror the realtime authority scope (see `dataAuthority`). */
   setDataAuthority: (authority: string | null) => void;
   /** Mirror archive visibility while retaining the persisted board placement. */
-  evictArchivedBranch: (branchId: string) => void;
+  evictArchivedBranch: (branchId: string, coverage?: CoverageUpdate) => void;
   /** Atomically mirror every normalized FK cascade/SET NULL from a hard delete. */
-  applyBranchHardDeleteCascade: (branchId: string) => void;
+  applyBranchHardDeleteCascade: (branchId: string, coverage?: CoverageUpdate) => void;
 }
 
 export type AgorState = DataMaps & AgorMetaWithUserScope & AgorActions;
 
-function sameCoverage(a: ScopeCoverage, b: ScopeCoverage): boolean {
-  return (
-    a.status === b.status &&
-    a.authorityScope === b.authorityScope &&
-    a.loadEpoch === b.loadEpoch &&
-    a.loadId === b.loadId &&
-    a.loadedBy === b.loadedBy &&
-    a.error === b.error &&
-    a.members === b.members &&
-    a.complete === b.complete
-  );
+/** Publish a cascade's coverage change in the cascade's own update. */
+function updateCoverage(
+  draft: Draft<AgorState>,
+  prev: Coverage,
+  coverage: CoverageUpdate | undefined
+): void {
+  const next = coverage?.(draft as unknown as DataMaps, prev) ?? prev;
+  if (next !== prev) draft.coverage = next as Draft<Coverage>;
 }
 
 function evictBranchAndSessions(draft: Draft<AgorState>, branchId: string): Set<string> {
@@ -339,13 +346,8 @@ export const agorStore = createStore<AgorState>()(
     },
 
     setCoverage: (key, entry) => {
-      const current = get().coverage;
-      const existing = current.get(key);
-      if (entry === null ? !existing : existing && sameCoverage(existing, entry)) return;
-      const next = new Map(current);
-      if (entry === null) next.delete(key);
-      else next.set(key, entry);
-      set({ coverage: next });
+      const coverage = withCoverage(get().coverage, key, entry);
+      if (coverage !== get().coverage) set({ coverage });
     },
     setUserScope: (partial) => {
       const state = get();
@@ -355,8 +357,8 @@ export const agorStore = createStore<AgorState>()(
       if (changed) set(partial as Partial<AgorState>);
     },
     resetBoardPartitions: (keep = []) => {
-      const kept = new Set(keep.map(boardScopeKey));
-      const next = new Map<string, ScopeCoverage>();
+      const kept = new Set<ScopeKey>(keep.map(boardScopeKey));
+      const next = new Map<ScopeKey, ScopeCoverage>();
       for (const [key, entry] of get().coverage) {
         if (!key.startsWith(BOARD_SCOPE_PREFIX) || kept.has(key)) next.set(key, entry);
       }
@@ -423,29 +425,32 @@ export const agorStore = createStore<AgorState>()(
       set(changed as Partial<AgorState>);
     },
 
-    applyMaps: (updater) => {
+    applyMaps: (updater, coverage) => {
       const prev = pickMaps(get());
       const next = updater(prev);
-      // Whole-object short-circuit: the ported reducers return their `prev`
-      // argument unchanged on a no-op.
-      if (next === prev) return;
-      const changed: Partial<DataMaps> = {};
-      for (const k of MAP_KEYS) {
-        if (!Object.is(next[k], prev[k])) {
-          // biome-ignore lint/suspicious/noExplicitAny: heterogeneous map union; per-key types are sound.
-          changed[k] = next[k] as any;
+      const changed: Partial<AgorState> = {};
+      // The ported reducers return their `prev` argument unchanged on a no-op.
+      if (next !== prev) {
+        for (const k of MAP_KEYS) {
+          if (!Object.is(next[k], prev[k])) {
+            // biome-ignore lint/suspicious/noExplicitAny: heterogeneous map union; per-key types are sound.
+            changed[k] = next[k] as any;
+          }
         }
       }
+      const nextCoverage = coverage?.(next, get().coverage);
+      if (nextCoverage && nextCoverage !== get().coverage) changed.coverage = nextCoverage;
       if (Object.keys(changed).length === 0) return;
-      set(changed as Partial<AgorState>);
+      set(changed);
     },
 
-    evictArchivedBranch: (branchId) =>
+    evictArchivedBranch: (branchId, coverage) =>
       set((draft) => {
         evictBranchAndSessions(draft, branchId);
+        updateCoverage(draft, get().coverage, coverage);
       }),
 
-    applyBranchHardDeleteCascade: (branchId) =>
+    applyBranchHardDeleteCascade: (branchId, coverage) =>
       set((draft) => {
         const removedSessionIds = evictBranchAndSessions(draft, branchId);
 
@@ -529,6 +534,7 @@ export const agorStore = createStore<AgorState>()(
             artifact.source_session_id = null;
           }
         }
+        updateCoverage(draft, get().coverage, coverage);
       }),
   }))
 );

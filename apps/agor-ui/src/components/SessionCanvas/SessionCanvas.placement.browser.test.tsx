@@ -9,6 +9,7 @@ import { EMPTY_MAPS } from '../../store/agorMaps';
 import { boardObjectPatched } from '../../store/agorRealtimeActions';
 import { agorStore } from '../../store/agorStore';
 import { boardScopeKey } from '../../store/scopeMerge';
+import { boardCoverage } from '../../test/userScopeCoverage';
 import SessionCanvas from './SessionCanvas';
 
 afterEach(cleanup);
@@ -49,12 +50,7 @@ it('persists two real pointer drags when the first PATCH completes during the se
     repoById: new Map([[repo.repo_id, repo]]),
     boardObjectsByBoardId: new Map([[board.board_id, [initial]]]),
     // Structural edits need the board's partition loaded.
-    coverage: new Map([
-      [
-        boardScopeKey(board.board_id),
-        { status: 'loaded' as const, authorityScope: 'fixture', loadEpoch: 0 },
-      ],
-    ]),
+    coverage: new Map([[boardScopeKey(board.board_id), boardCoverage()]]),
   });
   let release!: () => void;
   const pending = new Promise<void>((resolve) => {
@@ -178,12 +174,7 @@ it('shows skipped-default warnings from an always_new drop response', async () =
     repoById: new Map([[repo.repo_id, repo]]),
     boardObjectsByBoardId: new Map([[board.board_id, [initial]]]),
     // Structural edits need the board's partition loaded.
-    coverage: new Map([
-      [
-        boardScopeKey(board.board_id),
-        { status: 'loaded' as const, authorityScope: 'fixture', loadEpoch: 0 },
-      ],
-    ]),
+    coverage: new Map([[boardScopeKey(board.board_id), boardCoverage()]]),
   });
   // This is a real-browser consumer regression, not daemon E2E: only the
   // transport response is stubbed. No prompt/provider is invoked.

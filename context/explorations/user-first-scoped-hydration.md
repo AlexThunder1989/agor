@@ -237,6 +237,12 @@ scope's pieces (`user:sessions`, `user:branches`, `user:teammates`, `user:refere
 lifetime and, once loaded, its **committed membership** (ids its read returned) and `complete` (false for a capped
 read). The §3.6 flags and partition status are selectors over it. `replaceScope` keeps a row for another scope only
 through that scope's committed membership (current lifetime, `loaded`), and removes nothing for a capped read.
+Adjustments before batches C/D: keys are typed (`ScopeKey`) and each user piece has its own narrow claim
+(`userScopePiece`). An entry keeps one `generation` from `loading` to `loaded`; board write tickets compare it, so
+membership updates never expire a ticket while an unload/reload does. Membership is the read's ids corrected for rows
+that raced it (`settledMembers`, from `touchedIdsSince`), then kept live by realtime (`liveMembership`, in the same
+store update as the row). `user:references` stores no members: they are `referencedBranchIds()` ∩ present branches,
+derived when a replace asks. A board is ready only when its partition is loaded from a `complete` read.
 
 ### 4.2 Trigger
 

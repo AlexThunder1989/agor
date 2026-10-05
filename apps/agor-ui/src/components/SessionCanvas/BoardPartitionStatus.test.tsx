@@ -3,13 +3,12 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { agorStore } from '../../store/agorStore';
 import { boardScopeKey } from '../../store/scopeMerge';
+import { boardCoverage } from '../../test/userScopeCoverage';
 import { BoardPartitionStatus } from './BoardPartitionStatus';
 
 const BOARD = 'board-1';
 const setPartition = (status: 'loading' | 'loaded' | 'error') =>
-  agorStore
-    .getState()
-    .setCoverage(boardScopeKey(BOARD), { status, authorityScope: 'a', loadEpoch: 0 });
+  agorStore.getState().setCoverage(boardScopeKey(BOARD), boardCoverage(status));
 
 describe('BoardPartitionStatus', () => {
   beforeEach(() => agorStore.getState().reset());

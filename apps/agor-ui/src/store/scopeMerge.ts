@@ -12,16 +12,19 @@
  * - `replaceScope` reconciles: it also overwrites present rows with the
  *   snapshot, and removes rows the scope claims that the snapshot no longer
  *   returns (deleted, moved out, or no longer visible) — only when the read
- *   was complete, and only when no other scope's committed read returned them.
+ *   was complete, and only when no other scope's committed membership holds them.
  *
  * Each scope's state is one `ScopeCoverage` entry in the store's `coverage`
- * map: its status and lifetime, and, once loaded, its committed membership
- * (the ids its read actually returned) and whether that read was complete.
- * A scope's own replace finds candidates with a predicate on the CURRENT row
- * (`LoadScope`), so rows realtime moved in since are reconciled too; another
- * scope keeps a row only through its committed membership, so a loading or
- * failed scope keeps nothing alive, and two scopes whose reads both omit a row
- * converge instead of each deferring to the other's predicate.
+ * map: its status, lifetime and generation, and, once loaded, its committed
+ * membership and whether its read was complete. Membership starts as the ids
+ * the read returned, corrected for rows realtime wrote while it was in flight
+ * (`settledMembers`), and then follows realtime (`liveMembership`): a row
+ * written live joins every current loaded scope that claims it and leaves the
+ * ones that no longer do. A scope's own replace finds candidates with a
+ * predicate on the CURRENT row (`LoadScope`); another scope keeps a row only
+ * through its membership, so a loading or failed scope keeps nothing alive,
+ * and two scopes whose reads both omit a row converge instead of each
+ * deferring to the other's predicate.
  */
 import type { Board, BoardEntityObject, Branch, CardWithType, Session } from '@agor-live/client';
 import { isTeammate } from '@agor-live/client';
@@ -37,6 +40,7 @@ import {
   removeBoardObjectFromMaps,
   upsertBoardObjectInMaps,
 } from './agorMaps';
+import type { LoadLifetime } from './loadLifetime';
 
 /** Rows of one scope's snapshot; an omitted collection is not part of the load. */
 export interface ScopeRows {
@@ -54,52 +58,9 @@ export interface ScopeRows {
   complete?: boolean;
 }
 
-/** Which current store rows a scope claims. A missing predicate claims none. */
-export interface LoadScope {
-  key: string;
-  claims: {
-    branches?: (branch: Branch, maps: DataMaps) => boolean;
-    sessions?: (session: Session, maps: DataMaps) => boolean;
-    boardObjects?: (boardObject: BoardEntityObject, maps: DataMaps) => boolean;
-    cards?: (card: CardWithType, maps: DataMaps) => boolean;
-  };
-}
-
-export type CoverageCollection = keyof LoadScope['claims'];
-
-/** Row ids per collection that a committed read returned. */
-export type CoverageMembers = Readonly<Partial<Record<CoverageCollection, ReadonlySet<string>>>>;
-/** What a replace asks of another scope's members: only `has` (the global sets hold every id). */
-export type MemberLookup = Readonly<
-  Partial<Record<CoverageCollection, Pick<ReadonlySet<string>, 'has'>>>
->;
-
-/**
- * One scope's coverage: where its load is, under which lifetime, and what its
- * committed read held. Presence of rows never implies completeness (I1); a
- * `loaded` entry does. An entry from another lifetime (`authorityScope`,
- * `loadEpoch`) is stale: it may still drive readiness flags, but its members
- * keep no row alive.
- */
-export interface ScopeCoverage {
-  status: 'loading' | 'loaded' | 'error';
-  /** Authority scope of the load; a load never applies across scopes. */
-  authorityScope: string;
-  /** Hydration cancellation epoch of that load. */
-  loadEpoch: number;
-  /** The load that owns a `loading` entry; only its owner may settle or release it. */
-  loadId?: number;
-  /** The load that settled a `loaded` entry (absent when first paint or a resync did). */
-  loadedBy?: number;
-  error?: string;
-  /** The ids the committed read returned (not archived), per collection read. */
-  members?: CoverageMembers;
-  /** `false`: the committed read was capped, so `members` is part of the scope. */
-  complete?: boolean;
-}
-
 export const BOARD_SCOPE_PREFIX = 'board:';
-export const boardScopeKey = (boardId: string) => `${BOARD_SCOPE_PREFIX}${boardId}`;
+export const boardScopeKey = (boardId: string): `board:${string}` =>
+  `${BOARD_SCOPE_PREFIX}${boardId}`;
 
 /** Coverage keys of the user scope's pieces (`userScope.ts`). */
 export const USER_SCOPE_KEYS = {
@@ -113,7 +74,91 @@ export const USER_SCOPE_KEYS = {
   references: 'user:references',
 } as const;
 
-/** The committed membership of a read: the ids of its rows that are not archived. */
+export type UserScopeKey = (typeof USER_SCOPE_KEYS)[keyof typeof USER_SCOPE_KEYS];
+/** A coverage key: one board's partition or one piece of the user scope. */
+export type ScopeKey = `board:${string}` | UserScopeKey;
+
+/** Which current store rows a scope claims. A missing predicate claims none. */
+export interface LoadScope {
+  key: ScopeKey;
+  claims: {
+    branches?: (branch: Branch, maps: DataMaps) => boolean;
+    sessions?: (session: Session, maps: DataMaps) => boolean;
+    boardObjects?: (boardObject: BoardEntityObject, maps: DataMaps) => boolean;
+    cards?: (card: CardWithType, maps: DataMaps) => boolean;
+  };
+}
+
+export type CoverageCollection = keyof LoadScope['claims'];
+
+/** Row ids per collection that belong to a loaded scope. */
+export type CoverageMembers = Readonly<Partial<Record<CoverageCollection, ReadonlySet<string>>>>;
+/** What a replace asks of another scope's members: only `has` (the global sets hold every id). */
+export type MemberLookup = Readonly<
+  Partial<Record<CoverageCollection, Pick<ReadonlySet<string>, 'has'>>>
+>;
+
+/**
+ * One scope's coverage: where its load is, under which lifetime and
+ * generation, and its membership. Presence of rows never implies completeness
+ * (I1); a `loaded` entry does. An entry from another lifetime is stale: it may
+ * still drive readiness flags, but its members keep no row alive.
+ */
+export interface ScopeCoverage extends LoadLifetime {
+  status: 'loading' | 'loaded' | 'error';
+  /**
+   * The load that owns the entry, kept from `loading` to `loaded` (or
+   * `error`): only that load may settle or release it, and only a new load
+   * (an unload and reload) changes it. Membership updates keep it.
+   */
+  generation: number;
+  /** The caller a user-scope piece belongs to (its claims compare `created_by`). */
+  userId?: string;
+  error?: string;
+  /** Rows that belong to the loaded scope, per collection read (references derive theirs). */
+  members?: CoverageMembers;
+  /** `false`: the committed read was capped, so `members` is part of the scope. */
+  complete?: boolean;
+}
+
+/** The store's coverage map, by scope key. */
+export type Coverage = ReadonlyMap<ScopeKey, ScopeCoverage>;
+/** A coverage change published in the same store update as a maps change. */
+export type CoverageUpdate = (maps: DataMaps, coverage: Coverage) => Coverage;
+
+function sameCoverage(a: ScopeCoverage, b: ScopeCoverage): boolean {
+  return (
+    a.status === b.status &&
+    a.authorityScope === b.authorityScope &&
+    a.loadEpoch === b.loadEpoch &&
+    a.generation === b.generation &&
+    a.userId === b.userId &&
+    a.error === b.error &&
+    a.members === b.members &&
+    a.complete === b.complete
+  );
+}
+
+/** `coverage` with `key` set (or cleared, with `null`); itself when nothing changes. */
+export function withCoverage(
+  coverage: Coverage,
+  key: ScopeKey,
+  entry: ScopeCoverage | null
+): Coverage {
+  const existing = coverage.get(key);
+  if (entry === null ? !existing : existing && sameCoverage(existing, entry)) return coverage;
+  const next = new Map(coverage);
+  if (entry === null) next.delete(key);
+  else next.set(key, entry);
+  return next;
+}
+
+/**
+ * The ids of a read's rows that belong to its scope: branches and sessions
+ * that are not archived (archived rows are never listed), and every board
+ * object and card — archived cards included: a card archives in place and
+ * stays on its board.
+ */
 export function scopeMembers(rows: ScopeRows): CoverageMembers {
   const live = <T extends { archived?: boolean }>(list: readonly T[], id: (row: T) => string) =>
     new Set(list.filter((row) => !row.archived).map(id));
@@ -141,19 +186,137 @@ export function boardPartitionScope(boardId: string): LoadScope {
 }
 
 /**
- * The caller's user scope (`userScope.ts`): my active sessions, and my
- * branches, teammate branches and the branches my sessions or comment
- * threads reference (`referenced`, computed at most once per reducer call).
+ * One piece of the caller's user scope (`userScope.ts`), with its own narrow
+ * claim: replacing my branches never reconciles teammates. The referenced
+ * branches claim nothing here: their membership is derived from the current
+ * references (`referenceMembers` in `userScope.ts`), however their rows loaded.
  */
-export function userScopeClaims(userId: string, referenced: () => ReadonlySet<string>): LoadScope {
-  return {
-    key: 'user',
-    claims: {
-      sessions: (session) => !session.archived && session.created_by === userId,
-      branches: (branch) =>
-        branch.created_by === userId || isTeammate(branch) || referenced().has(branch.branch_id),
-    },
-  };
+export function userScopePiece(key: UserScopeKey, userId: string): LoadScope {
+  switch (key) {
+    case USER_SCOPE_KEYS.sessions:
+      return {
+        key,
+        claims: { sessions: (session) => !session.archived && session.created_by === userId },
+      };
+    case USER_SCOPE_KEYS.branches:
+      return { key, claims: { branches: (branch) => branch.created_by === userId } };
+    case USER_SCOPE_KEYS.teammates:
+      return { key, claims: { branches: (branch) => isTeammate(branch) } };
+    case USER_SCOPE_KEYS.references:
+      return { key, claims: {} };
+  }
+}
+
+/** The scope a coverage entry describes; `null` for a user piece without its caller. */
+function scopeOf(key: ScopeKey, entry: ScopeCoverage): LoadScope | null {
+  if (key.startsWith(BOARD_SCOPE_PREFIX)) {
+    return boardPartitionScope(key.slice(BOARD_SCOPE_PREFIX.length));
+  }
+  return entry.userId ? userScopePiece(key as UserScopeKey, entry.userId) : null;
+}
+
+const ROWS: Record<CoverageCollection, (maps: DataMaps) => ReadonlyMap<string, object>> = {
+  branches: (maps) => maps.branchById,
+  sessions: (maps) => maps.sessionById,
+  boardObjects: (maps) => maps.boardObjectById,
+  cards: (maps) => maps.cardById,
+};
+
+/**
+ * Whether row `id` of `collection` is present and `scope` claims it; an
+ * archived branch or session never belongs, an archived card does (see
+ * `scopeMembers`).
+ */
+function belongs(
+  scope: LoadScope,
+  collection: CoverageCollection,
+  id: string,
+  maps: DataMaps
+): boolean {
+  const row = ROWS[collection](maps).get(id) as { archived?: boolean } | undefined;
+  const claim = scope.claims[collection] as ((row: object, maps: DataMaps) => boolean) | undefined;
+  return !!row && (collection === 'cards' || !row.archived) && !!claim?.(row, maps);
+}
+
+/** Ids per collection that live events wrote (or that a read raced). */
+export type WrittenIds = Partial<Record<CoverageCollection, Iterable<string>>>;
+
+/**
+ * The membership a read commits: the ids it returned (`scopeMembers`),
+ * corrected for the rows realtime wrote while it was in flight (`raced`, from
+ * `touchedIdsSince`): such a row belongs exactly when it is present and the
+ * scope claims it now. `maps` is the store after the read applied.
+ */
+export function settledMembers(
+  scope: LoadScope,
+  rows: ScopeRows,
+  maps: DataMaps,
+  raced: (collection: CoverageCollection) => Iterable<string>
+): CoverageMembers {
+  const members: Partial<Record<CoverageCollection, Set<string>>> = {};
+  for (const [collection, ids] of Object.entries(scopeMembers(rows)) as [
+    CoverageCollection,
+    ReadonlySet<string>,
+  ][]) {
+    const settled = new Set(ids);
+    for (const id of raced(collection)) {
+      if (belongs(scope, collection, id, maps)) settled.add(id);
+      else settled.delete(id);
+    }
+    members[collection] = settled;
+  }
+  return members;
+}
+
+/**
+ * Keep membership in step with a live write: every `written` row joins each
+ * current (`isCurrent`), loaded scope that claims it and leaves each one that
+ * no longer does (deleted, archived, moved out). A branch write re-checks its
+ * sessions too (a session's board is its branch's). A value-only patch
+ * changes nothing and returns `coverage` itself; so does a write no loaded
+ * scope tracks.
+ */
+export function liveMembership(
+  coverage: Coverage,
+  maps: DataMaps,
+  written: WrittenIds,
+  isCurrent: (entry: ScopeCoverage) => boolean
+): Coverage {
+  const ids = Object.entries(written) as [CoverageCollection, Iterable<string>][];
+  if (ids.length === 0) return coverage;
+  if (written.branches) {
+    const sessions = new Set(written.sessions ?? []);
+    for (const branchId of written.branches) {
+      for (const session of maps.sessionsByBranch.get(branchId) ?? []) {
+        sessions.add(session.session_id);
+      }
+    }
+    if (sessions.size > 0) ids.push(['sessions', sessions]);
+  }
+  let next: Map<ScopeKey, ScopeCoverage> | null = null;
+  for (const [key, entry] of coverage) {
+    if (entry.status !== 'loaded' || !entry.members || !isCurrent(entry)) continue;
+    const scope = scopeOf(key, entry);
+    if (!scope) continue;
+    let members: Partial<Record<CoverageCollection, ReadonlySet<string>>> | null = null;
+    for (const [collection, rowIds] of ids) {
+      const current: ReadonlySet<string> | undefined = (members ?? entry.members)[collection];
+      if (!current) continue;
+      let updated: Set<string> | null = null;
+      for (const id of rowIds) {
+        const member = belongs(scope, collection, id, maps);
+        if (member === (updated ?? current).has(id)) continue;
+        updated ??= new Set(current);
+        if (member) updated.add(id);
+        else updated.delete(id);
+      }
+      if (updated) members = { ...(members ?? entry.members), [collection]: updated };
+    }
+    if (!members) continue;
+    next ??= new Map(coverage);
+    next.set(key, { ...entry, members });
+  }
+  return next ?? coverage;
 }
 
 const EVERY_ID: Pick<ReadonlySet<string>, 'has'> = { has: () => true };
@@ -372,6 +535,8 @@ export interface BoardPartitionSnapshot extends ScopeRows {
   boardObjects: readonly BoardEntityObject[] | null;
   cards: readonly CardWithType[];
   board: Board | null;
+  /** Explicit: the reducer and the coverage commit read the same answer. */
+  complete: boolean;
 }
 
 /**
@@ -394,7 +559,12 @@ export function applyPartitionSnapshot(
   return replaceScope(
     filled,
     boardPartitionScope(snapshot.boardId),
-    { boardObjects: snapshot.boardObjects, cards: snapshot.cards, board: snapshot.board },
+    {
+      boardObjects: snapshot.boardObjects,
+      cards: snapshot.cards,
+      board: snapshot.board,
+      complete: snapshot.complete,
+    },
     touched,
     others
   );

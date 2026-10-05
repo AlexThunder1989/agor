@@ -1,9 +1,11 @@
+import type { CardWithType } from '@agor-live/client';
 import { act, render, renderHook, screen } from '@testing-library/react';
 import { App } from 'antd';
 import { type ReactNode, useLayoutEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectionProvider } from '../contexts/ConnectionContext';
+import { cardCreated } from '../store/agorRealtimeActions';
 import { agorStore } from '../store/agorStore';
 import {
   captureBoardWriteTicket,
@@ -11,7 +13,10 @@ import {
   isBoardWriteTicketCurrent,
 } from '../store/boardMutationGuard';
 import { publishConnectionSnapshot, withdrawConnectionSnapshot } from '../store/connectionSnapshot';
+import { captureLoadLifetime } from '../store/loadLifetime';
+import { setRealtimeAuthorityScope } from '../store/realtimeBatch';
 import { boardScopeKey } from '../store/scopeMerge';
+import { boardCoverage } from '../test/userScopeCoverage';
 import { useBoardMutationGuard } from './useBoardMutationGuard';
 
 const BOARD = 'board-guard';
@@ -28,11 +33,7 @@ const connection = (overrides: Partial<{ connected: boolean; authGeneration: num
 });
 
 function load(boardId = BOARD) {
-  agorStore.getState().setCoverage(boardScopeKey(boardId), {
-    status: 'loaded',
-    authorityScope: 'fixture',
-    loadEpoch: 0,
-  });
+  agorStore.getState().setCoverage(boardScopeKey(boardId), boardCoverage());
 }
 
 function unload() {
@@ -54,12 +55,7 @@ describe('board write tickets', () => {
 
   it('captures nothing for an unloaded board unless the write needs no partition', () => {
     expect(capture(true)).toBe(null);
-    agorStore.getState().setCoverage(boardScopeKey(BOARD), {
-      status: 'loading',
-      authorityScope: 'fixture',
-      loadEpoch: 0,
-      loadId: 1,
-    });
+    agorStore.getState().setCoverage(boardScopeKey(BOARD), boardCoverage('loading'));
     expect(capture(true)).toBe(null);
     expect(isBoardWriteTicketCurrent(capture(false))).toBe(true);
   });
@@ -73,6 +69,31 @@ describe('board write tickets', () => {
     load();
     expect(isBoardWriteTicketCurrent(ticket)).toBe(false);
     expect(isBoardWriteTicketCurrent(capture(true))).toBe(true);
+  });
+
+  it('a membership update keeps a ticket current; a reload ends it', () => {
+    setRealtimeAuthorityScope('guard:member:1');
+    try {
+      agorStore
+        .getState()
+        .setCoverage(boardScopeKey(BOARD), boardCoverage('loaded', captureLoadLifetime()!));
+      const ticket = capture(true);
+      const before = agorStore.getState().coverage.get(boardScopeKey(BOARD));
+      // A card created live on the board joins its membership.
+      cardCreated({ card_id: 'k-live', board_id: BOARD } as CardWithType);
+      const after = agorStore.getState().coverage.get(boardScopeKey(BOARD));
+      expect(after).not.toBe(before);
+      expect(after?.members?.cards?.has('k-live')).toBe(true);
+      expect(isBoardWriteTicketCurrent(ticket)).toBe(true);
+      expect(hasBoardWriteTicketEnded(ticket)).toBe(false);
+      // A reload is a new generation.
+      load();
+      expect(isBoardWriteTicketCurrent(ticket)).toBe(false);
+      expect(hasBoardWriteTicketEnded(ticket)).toBe(true);
+    } finally {
+      setRealtimeAuthorityScope(null);
+      agorStore.getState().setMap('cardById', new Map());
+    }
   });
 
   it('a re-authentication or an unusable connection ends a ticket', () => {

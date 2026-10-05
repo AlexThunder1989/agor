@@ -59,12 +59,13 @@ import { agorStore, shallow, useStoreWithEqualityFn } from '../store/agorStore';
 import {
   claimDisplayedBoardForResync,
   getDisplayedBoardId,
-  markBoardPartitionLoaded,
+  nextPartitionGeneration,
   otherCommittedMembers,
   partitionLoadMark,
   partitionLoadSince,
   partitionsLoadedSince,
   releaseResyncClaim,
+  settleBoardPartition,
 } from '../store/boardPartitions';
 import {
   captureLoadLifetime,
@@ -83,12 +84,7 @@ import {
   tombstoneSession,
   untombstoneSession,
 } from '../store/realtimeBatch';
-import {
-  boardPartitionScope,
-  boardScopeKey,
-  replaceScope,
-  scopeMembers,
-} from '../store/scopeMerge';
+import { boardPartitionScope, boardScopeKey, replaceScope } from '../store/scopeMerge';
 import { resetSessionMcpLinks } from '../store/sessionMcpLinks';
 import {
   isUnsupportedQueryError,
@@ -586,6 +582,9 @@ export function useAgorData(
       // can reuse one for its board (see `inflightBoardPartitionLoad`).
       const partitionMark = partitionLoadMark();
       const resyncClaim = silent ? claimDisplayedBoardForResync(loadLifetime) : null;
+      // The generation this load settles the displayed board's partition
+      // under (the claim's, when it holds one).
+      const boardGeneration = resyncClaim?.generation ?? nextPartitionGeneration();
 
       try {
         if (!silent) {
@@ -1142,30 +1141,59 @@ export function useAgorData(
         const otherScopes = boardScope
           ? otherCommittedMembers(agorStore.getState(), boardScopeKey(boardScope))
           : [];
-        agorStore.getState().applyMaps((prev) => {
-          const maps = {
-            ...prev,
-            sessionById: sessionsById,
-            sessionsByBranch: sessionsByBranchId,
-            boardById: boardsMap,
-            commentById: commentsMap,
-            cardTypeById: cardTypesMap,
-            repoById: reposMap,
-            branchById: branchesMap,
-            userById: usersMap,
-          };
-          if (!boardScope || reusedPartitionLoad) return maps;
-          return replaceScope(
-            maps,
-            boardPartitionScope(boardScope),
-            {
-              boardObjects: canUseMemberWorkspaceServices ? (boardObjectsList ?? []) : null,
-              cards: cardsList ?? [],
-            },
-            touchedInLoad,
-            otherScopes
-          );
-        });
+        // The displayed board's read (every query an unbounded `findAll`; a
+        // reconnect reads branches and sessions globally, so they are
+        // narrowed to the board). It reconciles the board's annotations and,
+        // when the full record arrived, settles its partition in the same
+        // update, with this membership.
+        const boardRows =
+          boardScope && !reusedPartitionLoad
+            ? {
+                branches: branchesList.filter((branch) => branch.board_id === boardScope),
+                sessions: (silent ? sessionsList : boardSessionsList).filter(
+                  (session) => boardIdForSession(session, branchesMap) === boardScope
+                ),
+                boardObjects: canUseMemberWorkspaceServices ? (boardObjectsList ?? []) : null,
+                cards: cardsList ?? [],
+                complete: true,
+              }
+            : null;
+        agorStore.getState().applyMaps(
+          (prev) => {
+            const maps = {
+              ...prev,
+              sessionById: sessionsById,
+              sessionsByBranch: sessionsByBranchId,
+              boardById: boardsMap,
+              commentById: commentsMap,
+              cardTypeById: cardTypesMap,
+              repoById: reposMap,
+              branchById: branchesMap,
+              userById: usersMap,
+            };
+            if (!boardScope || !boardRows) return maps;
+            return replaceScope(
+              maps,
+              boardPartitionScope(boardScope),
+              {
+                boardObjects: boardRows.boardObjects,
+                cards: boardRows.cards,
+                complete: boardRows.complete,
+              },
+              touchedInLoad,
+              otherScopes
+            );
+          },
+          boardScope && boardRows && displayedBoardFull && isLoadLifetimeCurrent(loadLifetime)
+            ? settleBoardPartition(
+                boardScope,
+                loadLifetime,
+                boardGeneration,
+                boardRows,
+                firstPaintFence.startRevisions
+              )
+            : undefined
+        );
         // This wholesale replace is NOT a `runHydration` apply, so it must bump
         // the revisions of every collection it overwrites — exactly like the
         // per-mutation realtime handlers do. Critical on the SILENT reconnect
@@ -1180,22 +1208,6 @@ export function useAgorData(
         // applies. Board objects, cards and full board records are complete
         // only per board (its partition).
         if (silent) agorStore.getState().markGloballyHydrated(['sessions', 'branches']);
-        if (displayedBoardFull && boardScope) {
-          // The board's committed membership: the ids these reads returned
-          // for it (a reconnect reads branches and sessions globally).
-          markBoardPartitionLoaded(
-            boardScope,
-            loadLifetime,
-            scopeMembers({
-              branches: branchesList.filter((branch) => branch.board_id === boardScope),
-              sessions: (silent ? sessionsList : boardSessionsList).filter(
-                (session) => boardIdForSession(session, branchesMap) === boardScope
-              ),
-              boardObjects: canUseMemberWorkspaceServices ? (boardObjectsList ?? []) : null,
-              cards: cardsList ?? [],
-            })
-          );
-        }
         // User scope (design r3 §3): the rest of my sessions, my branches, every
         // teammate I can view, and the branches my sessions and comment
         // threads reference. Started BEFORE the background global hydrations

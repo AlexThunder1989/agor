@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectionProvider } from '../../contexts/ConnectionContext';
 import { agorStore } from '../../store/agorStore';
 import { boardScopeKey } from '../../store/scopeMerge';
+import { boardCoverage } from '../../test/userScopeCoverage';
 import CardModal from './CardModal';
 
 const { showWarning } = vi.hoisted(() => ({ showWarning: vi.fn() }));
@@ -41,11 +42,7 @@ function renderWithApp(ui: React.ReactElement, connection = CONNECTED) {
 }
 
 function loadBoard() {
-  agorStore.getState().setCoverage(boardScopeKey('board-1'), {
-    status: 'loaded',
-    authorityScope: 'fixture',
-    loadEpoch: 0,
-  });
+  agorStore.getState().setCoverage(boardScopeKey('board-1'), boardCoverage());
 }
 
 beforeEach(() => {

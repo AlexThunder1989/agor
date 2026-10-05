@@ -20,12 +20,15 @@
  *
  * Every read applies with the fill-only merge and per-id touched fence
  * (`applyEntityFill`), under the lifetime of the load that started the run.
- * Each piece commits a coverage entry (`USER_SCOPE_KEYS`) with the ids its
- * read returned and whether the read was capped; the readiness flags Home and
- * the teammate surfaces read are selectors over those entries. An entry stays
- * loaded across runs within one identity (`resetMaps` clears it), so nothing
- * flickers on a reconnect; until the new run commits, its members are stale
- * and keep no row alive. A failed U1/U2/U3 read leaves its piece unloaded
+ * U1, U2 and U3 each commit a coverage entry (`USER_SCOPE_KEYS`) in the update
+ * that applies their rows, with the run's generation, their membership
+ * (`settledMembers`, then kept live by realtime) and whether the read was
+ * capped. The referenced-branch piece commits no members: they are derived
+ * (`referenceMembers`). The readiness flags Home and the teammate surfaces
+ * read are selectors over those entries. An entry stays loaded across runs
+ * within one identity (`resetMaps` clears it), so nothing flickers on a
+ * reconnect; until the new run commits, its members are stale and keep no row
+ * alive. A failed U1/U2/U3 read leaves its piece unloaded
  * (Home keeps its loading state) until the next run, which `useAgorData`
  * starts again on every silent reconnect resync.
  *
@@ -44,6 +47,7 @@ import {
   endPartitionLoad,
   type HydratedCollection,
   MAX_WHOLESALE_RESTARTS,
+  touchedIdsSince,
   touchedSince,
   WholesaleReplacementError,
   wholesaleReplacedSince,
@@ -54,8 +58,12 @@ import { isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
 import {
   type CoverageMembers,
   type ScopeCoverage,
-  scopeMembers,
+  type ScopeRows,
+  settledMembers,
   USER_SCOPE_KEYS,
+  type UserScopeKey,
+  userScopePiece,
+  withCoverage,
 } from './scopeMerge';
 import { sessionListQuery } from './sessionListQuery';
 
@@ -105,9 +113,9 @@ export function isUnsupportedQueryError(err: unknown): boolean {
 const globalSetsComplete = (s: AgorState) =>
   s.globallyHydrated.has('sessions') && s.globallyHydrated.has('branches');
 
-const loadedPiece = (s: Pick<AgorState, 'coverage'>, key: string) =>
+const loadedPiece = (s: Pick<AgorState, 'coverage'>, key: UserScopeKey) =>
   s.coverage.get(key)?.status === 'loaded';
-const cappedPiece = (s: Pick<AgorState, 'coverage'>, key: string) =>
+const cappedPiece = (s: Pick<AgorState, 'coverage'>, key: UserScopeKey) =>
   s.coverage.get(key)?.complete === false;
 
 /** Every active session the caller created is in `sessionById`. */
@@ -166,11 +174,27 @@ export function referencedBranchIds(
   return ids;
 }
 
+/**
+ * The referenced-branch piece's membership: every present (active) branch my
+ * sessions or candidate comment threads reference now, however it loaded (a
+ * partition, an event, U5). A branch no longer referenced leaves it.
+ */
+export function referenceMembers(
+  s: Pick<DataMaps, 'sessionById' | 'commentById' | 'boardById' | 'branchById'>,
+  userId: string
+): Set<string> {
+  const members = referencedBranchIds(s, userId);
+  for (const id of members) if (!s.branchById.has(id)) members.delete(id);
+  return members;
+}
+
 interface ScopeRun {
   client: AgorClient;
   userId: string;
   /** The lifetime of the load that started the run; never the current one. */
   lifetime: LoadLifetime;
+  /** The coverage generation of every piece this run commits. */
+  generation: number;
   /** Ids waiting to be sent in an id-list read. */
   queue: string[];
   /** Ids queued, in flight or waiting for a retry; never requested twice meanwhile. */
@@ -198,24 +222,40 @@ interface ScopeRun {
 }
 
 let currentRun: ScopeRun | null = null;
+let runSequence = 0;
 
 const isCurrent = (run: ScopeRun) => currentRun === run && isLoadLifetimeCurrent(run.lifetime);
+
+type FillRows = { branches?: Branch[]; sessions?: Session[] };
 
 /**
  * Read rows and fill-merge them; null when the run went stale. Read errors
  * propagate, and so does a read whose every attempt spanned a wholesale
  * replacement (`WholesaleReplacementError`): its snapshot is never applied.
+ *
+ * With `piece`, the read commits that piece in the update that applies its
+ * rows (`commitIf` resolving false applies the rows uncommitted and resolves
+ * null). Its membership is the rows it returned, with the rows realtime wrote
+ * meanwhile judged by their current value (`settledMembers`).
  */
 async function fillRead(
   run: ScopeRun,
-  read: () => Promise<{ branches?: Branch[]; sessions?: Session[] }>,
-  /** Rows the filter can't have produced mean the daemon ignored the filter. */
-  violatesFilter?: (rows: { branches?: Branch[]; sessions?: Session[] }) => boolean
-): Promise<{ branches?: Branch[]; sessions?: Session[] } | null> {
+  read: () => Promise<FillRows>,
+  options: {
+    /** Rows the filter can't have produced mean the daemon ignored the filter. */
+    violatesFilter?: (rows: FillRows) => boolean;
+    piece?: {
+      key: UserScopeKey;
+      complete: (rows: FillRows) => boolean;
+      commitIf?: () => Promise<boolean>;
+    };
+  } = {}
+): Promise<FillRows | null> {
+  const { violatesFilter, piece } = options;
   for (let attempt = 0; ; attempt++) {
     const fence = beginPartitionLoad();
     try {
-      let rows: { branches?: Branch[]; sessions?: Session[] };
+      let rows: FillRows;
       try {
         rows = await read();
       } catch (err) {
@@ -224,14 +264,35 @@ async function fillRead(
       }
       if (!isCurrent(run)) return null;
       if (violatesFilter?.(rows)) throw new UnsupportedScopeReadError('filter ignored');
+      const commit = !!piece && (piece.commitIf ? await piece.commitIf() : true);
+      if (!isCurrent(run)) return null;
       if (wholesaleReplacedSince(fence)) {
         if (attempt < MAX_WHOLESALE_RESTARTS) continue;
         throw new WholesaleReplacementError();
       }
       const touched = (collection: HydratedCollection, id: string) =>
         touchedSince(collection, id, fence.startRevisions[collection]);
-      agorStore.getState().applyMaps((prev) => applyEntityFill(prev, rows, touched));
-      return rows;
+      agorStore.getState().applyMaps(
+        (prev) => applyEntityFill(prev, rows, touched),
+        commit
+          ? (maps, coverage) =>
+              withCoverage(
+                coverage,
+                piece.key,
+                pieceEntry(run, {
+                  status: 'loaded',
+                  members: settledMembers(
+                    userScopePiece(piece.key, run.userId),
+                    rows as ScopeRows,
+                    maps,
+                    (collection) => touchedIdsSince(collection, fence.startRevisions[collection])
+                  ),
+                  complete: piece.complete(rows),
+                })
+              )
+          : undefined
+      );
+      return !piece || commit ? rows : null;
     } finally {
       endPartitionLoad();
     }
@@ -250,49 +311,38 @@ function setScope(run: ScopeRun, partial: Parameters<AgorState['setUserScope']>[
   if (isCurrent(run)) agorStore.getState().setUserScope(partial);
 }
 
-/** `key`'s entry if a read of `run`'s lifetime committed or started it. */
-function pieceInRun(run: ScopeRun, key: string): ScopeCoverage | undefined {
+/** `key`'s entry if `run` itself committed it (not an earlier run of the same lifetime). */
+function pieceInRun(run: ScopeRun, key: UserScopeKey): ScopeCoverage | undefined {
   const entry = agorStore.getState().coverage.get(key);
-  return entry?.authorityScope === run.lifetime.authorityScope &&
-    entry.loadEpoch === run.lifetime.loadEpoch
-    ? entry
-    : undefined;
+  return entry?.generation === run.generation ? entry : undefined;
+}
+
+/** A piece's coverage entry under `run`'s lifetime and generation. */
+function pieceEntry(
+  run: ScopeRun,
+  entry: Pick<ScopeCoverage, 'status' | 'members' | 'complete'>
+): ScopeCoverage {
+  return { ...entry, ...run.lifetime, generation: run.generation, userId: run.userId };
 }
 
 /** Commit one piece's coverage under `run`'s lifetime (current run only). */
 function commitPiece(
   run: ScopeRun,
-  key: string,
+  key: UserScopeKey,
   entry: Pick<ScopeCoverage, 'status' | 'members' | 'complete'>
 ): void {
   if (!isCurrent(run)) return;
-  agorStore.getState().setCoverage(key, {
-    ...entry,
-    authorityScope: run.lifetime.authorityScope,
-    loadEpoch: run.lifetime.loadEpoch,
-  });
+  agorStore.getState().setCoverage(key, pieceEntry(run, entry));
 }
 
 /**
- * Add ids the referenced-branch reads returned to that piece's members. The
- * piece accumulates over the run's id reads; a piece loaded by an earlier
- * lifetime stays loaded (no flicker) but starts its members over.
+ * Mark the referenced-branch piece loaded. Its membership is derived
+ * (`referenceMembers`), so it commits none.
+ * TODO(batch C): a reconnect should re-read every referenced id, not only the
+ * missing ones, so rows changed while disconnected reconcile too.
  */
-function addReferenceMembers(run: ScopeRun, ids: readonly string[]): void {
-  const key = USER_SCOPE_KEYS.references;
-  const previous = pieceInRun(run, key);
-  const members = previous?.members?.branches;
-  if (previous && ids.every((id) => members?.has(id))) return;
-  commitPiece(run, key, {
-    status: agorStore.getState().coverage.get(key)?.status === 'loaded' ? 'loaded' : 'loading',
-    members: { branches: new Set([...(members ?? []), ...ids]) },
-  });
-}
-
-/** Mark the referenced-branch piece loaded, keeping this run's members. */
 function settleReferencePiece(run: ScopeRun): void {
-  const members = pieceInRun(run, USER_SCOPE_KEYS.references)?.members ?? { branches: new Set() };
-  commitPiece(run, USER_SCOPE_KEYS.references, { status: 'loaded', members });
+  commitPiece(run, USER_SCOPE_KEYS.references, { status: 'loaded' });
 }
 
 /** A piece the global sets complete (`applyGlobalCompatibility`) holds no rows of its own. */
@@ -444,13 +494,15 @@ async function readBranchChunk(run: ScopeRun, chunk: string[]): Promise<void> {
           })
         ),
       }),
-      ({ branches }) => (branches ?? []).some((branch) => !requested.has(branch.branch_id))
+      {
+        violatesFilter: ({ branches }) =>
+          (branches ?? []).some((branch) => !requested.has(branch.branch_id)),
+      }
     );
     // Recheck after the await: `fillRead` applied while current, but this
     // continuation runs later, possibly after a cancellation or a new run.
     if (!rows || !isCurrent(run)) return;
     const returned = new Set((rows.branches ?? []).map((branch) => branch.branch_id as string));
-    addReferenceMembers(run, [...scopeMembers(rows).branches!]);
     const state = agorStore.getState();
     updateAbsent(
       run,
@@ -579,6 +631,7 @@ export async function startUserScope(
     client,
     userId: options.userId,
     lifetime: options.lifetime,
+    generation: ++runSequence,
     queue: [],
     pending: new Set(),
     failed: new Set(),
@@ -631,41 +684,37 @@ export async function startUserScope(
         })
       ),
     }),
-    ({ branches }) => (branches ?? []).some((row) => row.created_by !== run.userId)
-  ).then((rows) => {
-    if (!rows || !isCurrent(run)) return false;
-    commitPiece(run, USER_SCOPE_KEYS.branches, {
-      status: 'loaded',
-      members: scopeMembers(rows),
-      complete: true,
-    });
-    return true;
-  });
+    {
+      violatesFilter: ({ branches }) =>
+        (branches ?? []).some((row) => row.created_by !== run.userId),
+      piece: { key: USER_SCOPE_KEYS.branches, complete: () => true },
+    }
+  ).then((rows) => !!rows);
   // The daemon reports the real total, so a capped read is never "all teammates".
   let teammateTotal = 0;
-  const u3 = fillRead(run, async () => {
-    const result = await client.service('branches').find({
-      query: { teammate: true, archived: false, $limit: PAGINATION.MAX_TEAMMATE_BRANCHES },
-    });
-    const branches = rowsOf<Branch>(result);
-    const total = (result as { total?: unknown }).total;
-    teammateTotal = typeof total === 'number' ? total : branches.length;
-    return { branches };
-  }).then(async (rows) => {
-    if (!rows) return false;
-    // U3's rows can't be checked against its filter (the server's teammate
-    // set is a superset of the client's), but a daemon that ignores
-    // `teammate` also ignores U2's `created_by`: trust U3 only once U2 proved
-    // the keys are honoured.
-    const keysHonoured = await u2.catch(() => false);
-    if (!keysHonoured || run.degraded || !isCurrent(run)) return false;
-    commitPiece(run, USER_SCOPE_KEYS.teammates, {
-      status: 'loaded',
-      members: scopeMembers(rows),
-      complete: teammateTotal <= (rows.branches?.length ?? 0),
-    });
-    return true;
-  });
+  const u3 = fillRead(
+    run,
+    async () => {
+      const result = await client.service('branches').find({
+        query: { teammate: true, archived: false, $limit: PAGINATION.MAX_TEAMMATE_BRANCHES },
+      });
+      const branches = rowsOf<Branch>(result);
+      const total = (result as { total?: unknown }).total;
+      teammateTotal = typeof total === 'number' ? total : branches.length;
+      return { branches };
+    },
+    {
+      piece: {
+        key: USER_SCOPE_KEYS.teammates,
+        complete: (rows) => teammateTotal <= (rows.branches?.length ?? 0),
+        // U3's rows can't be checked against its filter (the server's
+        // teammate set is a superset of the client's), but a daemon that
+        // ignores `teammate` also ignores U2's `created_by`: commit U3 only
+        // once U2 proved the keys are honoured.
+        commitIf: async () => (await u2.catch(() => false)) && !run.degraded,
+      },
+    }
+  ).then((rows) => !!rows);
 
   const u1 = options.gatedMineComplete
     ? Promise.resolve(true)
@@ -686,18 +735,15 @@ export async function startUserScope(
             ),
           };
         },
-        ({ sessions }) =>
-          (sessions ?? []).some((row) => row.created_by !== run.userId || row.archived)
-      ).then((rows) => {
-        // Recheck after the await (see `readBranchChunk`).
-        if (!rows || !isCurrent(run)) return false;
-        commitPiece(run, USER_SCOPE_KEYS.sessions, {
-          status: 'loaded',
-          members: scopeMembers(rows),
-          complete: (rows.sessions?.length ?? 0) < MY_SESSIONS_FULL_LIMIT,
-        });
-        return true;
-      });
+        {
+          violatesFilter: ({ sessions }) =>
+            (sessions ?? []).some((row) => row.created_by !== run.userId || row.archived),
+          piece: {
+            key: USER_SCOPE_KEYS.sessions,
+            complete: (rows) => (rows.sessions?.length ?? 0) < MY_SESSIONS_FULL_LIMIT,
+          },
+        }
+      ).then((rows) => !!rows);
 
   const settled = await Promise.allSettled([u1, u2, u3]);
   if (!isCurrent(run)) return;

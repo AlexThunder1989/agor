@@ -28,9 +28,8 @@ import {
   useRegisterRecenter,
 } from '../contexts/CanvasNavigationContext';
 import { agorStore } from '../store/agorStore';
-import { markBoardPartitionLoaded } from '../store/boardPartitions';
-import { captureLoadLifetime } from '../store/loadLifetime';
 import { setRealtimeAuthorityScope } from '../store/realtimeBatch';
+import { markBoardLoaded } from '../test/userScopeCoverage';
 import { type UseUrlStateOptions, useUrlState } from './useUrlState';
 
 const SESSION_ID = '019e9999-0000-7000-8000-000000000001';
@@ -377,7 +376,7 @@ describe('useUrlState — /s/ links to a board whose branch is not loaded', () =
 
       // The partition lands: the card now exists, so the recenter re-runs.
       act(() => {
-        markBoardPartitionLoaded(BOARD_ID, captureLoadLifetime()!);
+        markBoardLoaded(BOARD_ID);
       });
       act(() => {
         vi.advanceTimersByTime(100);

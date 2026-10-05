@@ -17,6 +17,7 @@ import { EMPTY_MAPS } from '../../store/agorMaps';
 import { boardObjectPatched, sessionPatched } from '../../store/agorRealtimeActions';
 import { agorStore } from '../../store/agorStore';
 import { boardScopeKey } from '../../store/scopeMerge';
+import { boardCoverage } from '../../test/userScopeCoverage';
 import { ZoneNode } from './canvas/BoardObjectNodes';
 import { MarkdownNode } from './canvas/MarkdownNode';
 import SessionCanvas from './SessionCanvas';
@@ -205,11 +206,7 @@ const connected = {
 
 /** A (re)load of the fixture board's partition: a new partition lifetime. */
 function markFixtureLoaded() {
-  agorStore.getState().setCoverage(boardScopeKey(BOARD_ID), {
-    status: 'loaded',
-    authorityScope: 'fixture',
-    loadEpoch: 0,
-  });
+  agorStore.getState().setCoverage(boardScopeKey(BOARD_ID), boardCoverage());
 }
 
 function currentNode(id: string): FlowNode {
@@ -229,9 +226,7 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
       userById: new Map([[adminUser.user_id, adminUser]]),
       boardObjectsByBoardId: new Map([[BOARD_ID, [implementingPlacement, reviewingCardPlacement]]]),
       // Structural edits need the board's partition loaded (see `boardReady`).
-      coverage: new Map([
-        [boardScopeKey(BOARD_ID), { status: 'loaded', authorityScope: 'fixture', loadEpoch: 0 }],
-      ]),
+      coverage: new Map([[boardScopeKey(BOARD_ID), boardCoverage()]]),
     });
   });
 

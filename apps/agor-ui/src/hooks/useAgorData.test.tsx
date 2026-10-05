@@ -20,12 +20,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { getRevision } from '../store/agorHydration';
 import { agorStore } from '../store/agorStore';
-import {
-  markBoardPartitionLoaded,
-  registerDisplayedBoard,
-  selectBoardPartition,
-} from '../store/boardPartitions';
-import { captureLoadLifetime } from '../store/loadLifetime';
+import { registerDisplayedBoard, selectBoardPartition } from '../store/boardPartitions';
 // Session `patched`/`updated` writes are coalesced to one flush per frame (see
 // realtimeBatch); flush synchronously in tests that assert the post-patch store.
 import { flushRealtimeNow } from '../store/realtimeBatch';
@@ -37,6 +32,7 @@ import {
   selectMySessionsLoaded,
   selectTeammatesLoaded,
 } from '../store/userScope';
+import { markBoardLoaded } from '../test/userScopeCoverage';
 import { useAgorData } from './useAgorData';
 import { useBoardPartition } from './useBoardPartition';
 
@@ -2077,7 +2073,7 @@ describe('useAgorData — reconnect reconciles the displayed partition', () => {
     await waitForInitialLoad(result);
     await flush();
     // Another board was loaded before the disconnect.
-    markBoardPartitionLoaded('board-B', captureLoadLifetime()!);
+    markBoardLoaded('board-B');
     expect(agorStore.getState().cardById.has('k-deleted')).toBe(true);
 
     // While disconnected: a card and a board object deleted, a placement
@@ -2155,7 +2151,7 @@ describe('useAgorData — reconnect reconciles the displayed partition', () => {
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
     await flush();
-    markBoardPartitionLoaded('board-B', captureLoadLifetime()!);
+    markBoardLoaded('board-B');
     const before = {
       objects: fetchCount('board-objects', 'findAll'),
       cards: fetchCount('cards', 'findAll'),

@@ -5,10 +5,10 @@ import {
   boardPartitionScope,
   fillScope,
   globalSetsMembers,
-  type LoadScope,
   replaceScope,
   scopeMembers,
-  userScopeClaims,
+  USER_SCOPE_KEYS,
+  userScopePiece,
 } from './scopeMerge';
 
 const A = 'board-a';
@@ -211,8 +211,7 @@ describe('replaceScope', () => {
 });
 
 describe('replaceScope with overlapping scopes', () => {
-  const userScope = (maps: DataMaps): LoadScope =>
-    userScopeClaims(ME, () => new Set([...maps.sessionById.values()].map((s) => s.branch_id)));
+  const mySessions = userScopePiece(USER_SCOPE_KEYS.sessions, ME);
 
   it("keeps a row another scope's committed read returned", () => {
     // Both of these moved off board A while disconnected (their stale rows still say A).
@@ -245,13 +244,9 @@ describe('replaceScope with overlapping scopes', () => {
 
     // The user scope reads again and omits it too: board A's committed read
     // didn't return it, so nothing keeps it.
-    const afterUser = replaceScope(
-      afterPartition,
-      userScope(afterPartition),
-      { sessions: [] },
-      never,
-      [scopeMembers(partitionRows)]
-    );
+    const afterUser = replaceScope(afterPartition, mySessions, { sessions: [] }, never, [
+      scopeMembers(partitionRows),
+    ]);
     expect(afterUser.sessionById.has('s-mine')).toBe(false);
   });
 
@@ -264,17 +259,11 @@ describe('replaceScope with overlapping scopes', () => {
       ],
     });
     const rows = [session('s-1', 'br-1', { created_by: ME, title: 'fresh' })];
-    const capped = replaceScope(
-      prev,
-      userScope(prev),
-      { sessions: rows, complete: false },
-      never,
-      []
-    );
+    const capped = replaceScope(prev, mySessions, { sessions: rows, complete: false }, never, []);
     expect(ids(capped.sessionById)).toEqual(['s-1', 's-2']);
     expect(capped.sessionById.get('s-1')?.title).toBe('fresh');
     // The same read, complete, removes what it omitted.
-    const complete = replaceScope(prev, userScope(prev), { sessions: rows }, never, []);
+    const complete = replaceScope(prev, mySessions, { sessions: rows }, never, []);
     expect(ids(complete.sessionById)).toEqual(['s-1']);
   });
 
@@ -294,6 +283,40 @@ describe('replaceScope with overlapping scopes', () => {
     });
     const next = replaceScope(prev, scopeA, { branches: [] }, never, [user]);
     expect(ids(next.branchById)).toEqual(['br-referenced', 'br-teammate']);
+  });
+
+  it('each user-scope piece reconciles only its own rows', () => {
+    const teammate = {
+      custom_context: { teammate: { kind: 'teammate', displayName: 'T' } },
+    } as Partial<Branch>;
+    const prev = storeWith({
+      branches: [
+        branch('br-mine', { created_by: ME }),
+        branch('br-teammate', { ...teammate, created_by: BOB }),
+        branch('br-referenced', { created_by: BOB }),
+      ],
+      sessions: [session('s-mine', 'br-referenced', { created_by: ME })],
+    });
+    // My branches' read returned none: only my branch leaves.
+    const mine = replaceScope(
+      prev,
+      userScopePiece(USER_SCOPE_KEYS.branches, ME),
+      { branches: [] },
+      never,
+      []
+    );
+    expect(ids(mine.branchById)).toEqual(['br-referenced', 'br-teammate']);
+    // The teammates' read returned none: only the teammate leaves.
+    const teammates = replaceScope(
+      prev,
+      userScopePiece(USER_SCOPE_KEYS.teammates, ME),
+      { branches: [] },
+      never,
+      []
+    );
+    expect(ids(teammates.branchById)).toEqual(['br-mine', 'br-referenced']);
+    // My sessions claim no branch at all.
+    expect(replaceScope(prev, mySessions, { branches: [] }, never, [])).toBe(prev);
   });
 
   it("a row whose current value says another board is not this scope's to remove", () => {

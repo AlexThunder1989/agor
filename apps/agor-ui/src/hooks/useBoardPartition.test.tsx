@@ -3,7 +3,12 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cancelAllHydrations, resetHydrationRevisions } from '../store/agorHydration';
 import { agorStore } from '../store/agorStore';
-import { loadBoardPartition, selectBoardPartition } from '../store/boardPartitions';
+import {
+  getDisplayedBoardId,
+  loadBoardPartition,
+  registerDisplayedBoard,
+  selectBoardPartition,
+} from '../store/boardPartitions';
 import { discardRealtimeNow, setRealtimeAuthorityScope } from '../store/realtimeBatch';
 import { useBoardPartition } from './useBoardPartition';
 
@@ -70,6 +75,35 @@ describe('useBoardPartition', () => {
     await act(async () => fresh.releaseAll());
     await waitFor(() => expect(result.current.boardReady).toBe(true));
     stale.releaseAll();
+  });
+
+  it('a background consumer loads its board without becoming the displayed board', async () => {
+    agorStore.getState().setMap(
+      'boardById',
+      new Map([
+        [BOARD, { board_id: BOARD, name: 'Board' } as never],
+        ['board-2', { board_id: 'board-2', name: 'Other' } as never],
+      ])
+    );
+    const unregister = registerDisplayedBoard(BOARD);
+    const { client, sessionReads, releaseAll } = makeClient();
+    const background = renderHook(() =>
+      useBoardPartition(client, 'board-2', {
+        canUseMemberWorkspaceServices: true,
+        background: true,
+      })
+    );
+    await waitFor(() => expect(sessionReads()).toBe(1));
+    expect(getDisplayedBoardId()).toBe(BOARD);
+    // A displayed consumer takes priority, as before.
+    const shell = renderHook(() =>
+      useBoardPartition(client, 'board-2', { canUseMemberWorkspaceServices: true })
+    );
+    expect(getDisplayedBoardId()).toBe('board-2');
+    shell.unmount();
+    await act(async () => releaseAll());
+    background.unmount();
+    unregister();
   });
 
   it('is ready without a board, and for a board that does not exist', () => {

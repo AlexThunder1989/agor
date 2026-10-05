@@ -2,7 +2,6 @@ import type { AgorClient } from '@agor-live/client';
 import { useEffect, useMemo } from 'react';
 import { agorStore, useAgorStore } from '../store/agorStore';
 import {
-  isCoverageCurrent,
   loadBoardPartition,
   makeBoardPartitionSelector,
   makeBoardReadySelector,
@@ -10,6 +9,7 @@ import {
   retryBoardPartition,
   selectBoardPartition,
 } from '../store/boardPartitions';
+import { isLoadLifetimeCurrent } from '../store/loadLifetime';
 
 /**
  * Load the displayed board's partition when it is not ready yet, and report
@@ -17,11 +17,16 @@ import {
  * board's partition itself), dedupes in-flight loads, and retries a failed load
  * when the socket reconnects. Returns `boardReady` — gate every "absent means
  * none / no access" inference on it (invariant I1).
+ *
+ * The consumer registers `boardId` as the displayed board (the one a
+ * reconnect resync reconciles first) unless it passes `background`: a
+ * consumer that loads a board it doesn't display (mobile navigation
+ * expanding another board) never takes that priority from the board shell.
  */
 export function useBoardPartition(
   client: AgorClient | null,
   boardId: string | null | undefined,
-  options: { canUseMemberWorkspaceServices: boolean }
+  options: { canUseMemberWorkspaceServices: boolean; background?: boolean }
 ): { boardReady: boolean; status: 'loading' | 'loaded' | 'error' | undefined } {
   const partitionReady = useAgorStore(useMemo(() => makeBoardReadySelector(boardId), [boardId]));
   const partition = useAgorStore(useMemo(() => makeBoardPartitionSelector(boardId), [boardId]));
@@ -34,7 +39,7 @@ export function useBoardPartition(
   const authority = useAgorStore((s) => s.dataAuthority);
   // A reset orphans loads in flight; request the board again after one.
   const partitionEpoch = useAgorStore((s) => s.partitionEpoch);
-  const { canUseMemberWorkspaceServices } = options;
+  const { canUseMemberWorkspaceServices, background = false } = options;
   // Nothing to load without a board, or for one that doesn't exist (boards
   // are global and gated, so after first paint an unknown id never resolves):
   // ready, like `BoardPartitionStatus` — never "Loading board…" forever.
@@ -47,7 +52,9 @@ export function useBoardPartition(
     // An entry from another authority or load lifetime can never settle: it
     // counts as unloaded (authority transitions also forget every entry).
     const current = selectBoardPartition(agorStore.getState(), boardId);
-    if (isCoverageCurrent(current) && (status === 'loading' || status === 'error')) return;
+    if (current && isLoadLifetimeCurrent(current) && (status === 'loading' || status === 'error')) {
+      return;
+    }
     void loadBoardPartition(client, boardId, { canUseMemberWorkspaceServices });
   }, [
     boardId,
@@ -64,9 +71,9 @@ export function useBoardPartition(
   // Publish the displayed board, so a reconnect resync reconciles this board
   // in place (see `registerDisplayedBoard`).
   useEffect(() => {
-    if (!boardId || !boardKnown) return;
+    if (background || !boardId || !boardKnown) return;
     return registerDisplayedBoard(boardId);
-  }, [boardId, boardKnown]);
+  }, [background, boardId, boardKnown]);
 
   // A failed load retries automatically once the socket reconnects.
   useEffect(() => {

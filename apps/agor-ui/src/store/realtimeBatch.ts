@@ -56,6 +56,8 @@ import type { Session } from '@agor-live/client';
 import { bumpRevision, getLastAppliedRevision, getRevision, markTouched } from './agorHydration';
 import { applySessionPatchToMaps } from './agorMaps';
 import { agorStore } from './agorStore';
+import { isLoadLifetimeCurrent } from './loadLifetime';
+import { liveMembership } from './scopeMerge';
 
 interface PendingPatch {
   session: Session;
@@ -221,10 +223,19 @@ function flush(): void {
 
   // One store write for the whole frame: compose every surviving payload into a
   // single `applyMaps` pass (one subscriber notify) instead of N `sessionPatched`
-  // calls each doing two `set()`s.
-  agorStore
-    .getState()
-    .applyMaps((prev) => sessions.reduce((maps, s) => applySessionPatchToMaps(maps, s), prev));
+  // calls each doing two `set()`s. Load-scope membership follows in the same
+  // write (a patch can insert, archive or move a session); value-only patches
+  // leave coverage untouched.
+  agorStore.getState().applyMaps(
+    (prev) => sessions.reduce((maps, s) => applySessionPatchToMaps(maps, s), prev),
+    (maps, coverage) =>
+      liveMembership(
+        coverage,
+        maps,
+        { sessions: sessions.map((session) => session.session_id) },
+        (entry) => isLoadLifetimeCurrent(entry, flushAuthorityScope)
+      )
+  );
 }
 
 function handleVisibilityChange(): void {

@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import { agorStore } from '../../store/agorStore';
 import { boardScopeKey } from '../../store/scopeMerge';
+import { boardCoverage } from '../../test/userScopeCoverage';
 import { MobileApp } from './MobileApp';
 
 // Keep the real mobile shell/router/page/close callback. The heavy conversation
@@ -56,8 +57,8 @@ function mount(path = '/m/board/alpha') {
     boardById: boards,
     // Both boards' partitions are loaded (the page waits for them).
     coverage: new Map([
-      [boardScopeKey('a'), { status: 'loaded' as const, authorityScope: 'fixture', loadEpoch: 0 }],
-      ['b', { status: 'loaded' as const, authorityScope: 'fixture', loadEpoch: 0 }],
+      [boardScopeKey('a'), boardCoverage()],
+      [boardScopeKey('b'), boardCoverage()],
     ]),
     branchById: branches,
     sessionById: new Map([

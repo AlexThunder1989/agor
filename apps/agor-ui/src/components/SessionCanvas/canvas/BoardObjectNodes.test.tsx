@@ -175,8 +175,8 @@ describe('ZoneNode settings modal', () => {
   });
 
   it('writes from the settings dialog and the label editor under the ticket captured when they opened', () => {
-    const opened = { boardId: 'board-1', partition: null, authGeneration: 1 };
-    const later = { boardId: 'board-1', partition: null, authGeneration: 2 };
+    const opened = { boardId: 'board-1', generation: null, authGeneration: 1 };
+    const later = { boardId: 'board-1', generation: null, authGeneration: 2 };
     const beginBoardWrite = vi.fn().mockReturnValueOnce(opened).mockReturnValue(later);
     const onUpdate = vi.fn();
     renderZone(vi.fn(), CONNECTED, { onUpdate, beginBoardWrite });
@@ -198,8 +198,8 @@ describe('ZoneNode settings modal', () => {
 
   it('keeps a label draft rejected by a board reload to copy or discard, never under a new ticket', async () => {
     copySpy.mockClear();
-    const opened = { boardId: 'board-1', partition: null, authGeneration: 1 };
-    const fresh = { boardId: 'board-1', partition: null, authGeneration: 2 };
+    const opened = { boardId: 'board-1', generation: null, authGeneration: 1 };
+    const fresh = { boardId: 'board-1', generation: null, authGeneration: 2 };
     const beginBoardWrite = vi.fn().mockReturnValueOnce(opened).mockReturnValue(fresh);
     const onUpdate = vi.fn().mockResolvedValueOnce('stale').mockResolvedValue(true);
     renderZone(vi.fn(), CONNECTED, { onUpdate, beginBoardWrite });
@@ -242,7 +242,7 @@ describe('ZoneNode settings modal', () => {
 
   it('hands an unsaved label or settings draft to the canvas when the node unmounts', () => {
     const onDraftLost = vi.fn();
-    const beginBoardWrite = vi.fn(() => ({ boardId: 'board-1', partition: null }));
+    const beginBoardWrite = vi.fn(() => ({ boardId: 'board-1', generation: null }));
     const unchanged = renderZone(vi.fn(), CONNECTED, { onDraftLost, beginBoardWrite });
     fireEvent.click(screen.getByRole('button', { name: 'Rename zone' }));
     unchanged.unmount();
@@ -275,8 +275,8 @@ describe('ZoneNode settings modal', () => {
 
   it('keeps a label draft committed while the board is read-only, and refuses it once its partition ended', async () => {
     const owner = { alive: true };
-    // A partition entry the store no longer holds: the board unloaded.
-    const ended = { boardId: 'board-1', partition: { status: 'loaded' }, authGeneration: 0, owner };
+    // A partition generation the store no longer holds: the board unloaded.
+    const ended = { boardId: 'board-1', generation: -1, authGeneration: 0, owner };
     const onUpdate = vi.fn();
     const onDraftLost = vi.fn();
     const zone = (canEdit: boolean) => (
@@ -327,7 +327,7 @@ describe('ZoneNode settings modal', () => {
     // A ticket whose partition lifetime holds (no partition required).
     const opened = {
       boardId: 'board-1',
-      partition: null,
+      generation: null,
       authGeneration: 1,
       owner: { alive: true },
     };
@@ -369,8 +369,8 @@ describe('ZoneNode settings modal', () => {
   });
 
   it('an open zone dialog ignores a second open click and keeps its open-time ticket', async () => {
-    const opened = { boardId: 'board-1', partition: null, authGeneration: 1 };
-    const later = { boardId: 'board-1', partition: null, authGeneration: 2 };
+    const opened = { boardId: 'board-1', generation: null, authGeneration: 1 };
+    const later = { boardId: 'board-1', generation: null, authGeneration: 2 };
     const beginBoardWrite = vi.fn().mockReturnValueOnce(opened).mockReturnValue(later);
     const onUpdate = vi.fn();
     renderZone(vi.fn(), CONNECTED, { onUpdate, beginBoardWrite });

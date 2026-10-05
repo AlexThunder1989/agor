@@ -7,14 +7,24 @@ import {
   cancelAllHydrations,
   resetHydrationRevisions,
 } from './agorHydration';
-import { sessionCreated } from './agorRealtimeActions';
+import { sessionCreated, sessionPatched, sessionRemoved } from './agorRealtimeActions';
 import { agorStore } from './agorStore';
+import { otherCommittedMembers } from './boardPartitions';
 import { captureLoadLifetime } from './loadLifetime';
 import { discardRealtimeNow, setRealtimeAuthorityScope } from './realtimeBatch';
-import { USER_SCOPE_KEYS } from './scopeMerge';
+import {
+  boardPartitionScope,
+  boardScopeKey,
+  fillScope,
+  replaceScope,
+  type ScopeRows,
+  USER_SCOPE_KEYS,
+  type UserScopeKey,
+} from './scopeMerge';
 import {
   MY_SESSIONS_FULL_LIMIT,
   referencedBranchIds,
+  referenceMembers,
   selectHomeBranchesLoaded,
   selectMySessionsLoaded,
   selectMySessionsTruncated,
@@ -88,6 +98,22 @@ function makeClient(handlers: {
   return { client, calls };
 }
 
+/** A complete replace of `boardId`'s partition with `rows`, respecting every other scope. */
+const replaceBoard = (boardId: string, rows: ScopeRows) => {
+  const others = otherCommittedMembers(agorStore.getState(), boardScopeKey(boardId));
+  agorStore
+    .getState()
+    .applyMaps((prev) =>
+      replaceScope(
+        prev,
+        boardPartitionScope(boardId),
+        { ...rows, complete: true },
+        () => false,
+        others
+      )
+    );
+};
+
 const flags = () => {
   const s = agorStore.getState();
   return {
@@ -139,14 +165,19 @@ describe('user scope', () => {
     });
     const current = lifetime();
     await startUserScope(client, { userId: ME, lifetime: current, gatedMineComplete: false });
-    const piece = (key: string) => agorStore.getState().coverage.get(key);
-    const ids = (key: string, collection: 'sessions' | 'branches') => [
+    const piece = (key: UserScopeKey) => agorStore.getState().coverage.get(key);
+    const ids = (key: UserScopeKey, collection: 'sessions' | 'branches') => [
       ...(piece(key)?.members?.[collection] ?? []),
     ];
     expect(ids(USER_SCOPE_KEYS.sessions, 'sessions')).toEqual(['s-1', 's-2']);
     expect(ids(USER_SCOPE_KEYS.branches, 'branches')).toEqual(['br-mine']);
     expect(ids(USER_SCOPE_KEYS.teammates, 'branches')).toEqual(['br-mate']);
-    expect(ids(USER_SCOPE_KEYS.references, 'branches')).toEqual(['br-ref']);
+    // The referenced branches' membership is derived, however they loaded.
+    expect(piece(USER_SCOPE_KEYS.references)?.members).toBeUndefined();
+    expect([...referenceMembers(agorStore.getState(), ME)].sort()).toEqual([
+      'br-present',
+      'br-ref',
+    ]);
     for (const key of Object.values(USER_SCOPE_KEYS)) {
       expect(piece(key)).toMatchObject({
         status: 'loaded',
@@ -154,6 +185,72 @@ describe('user scope', () => {
         loadEpoch: current.loadEpoch,
       });
     }
+  });
+
+  it("a session created live after U1's read survives a later complete board replace that omits it", async () => {
+    const { client } = makeClient({});
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: false });
+    expect(flags().mySessionsLoaded).toBe(true);
+    sessionCreated(session('s-live', 'br-1', { branch_board_id: 'board-1' }));
+    expect(
+      agorStore.getState().coverage.get(USER_SCOPE_KEYS.sessions)?.members?.sessions?.has('s-live')
+    ).toBe(true);
+    // board-1's complete read predates the session.
+    replaceBoard('board-1', { sessions: [] });
+    expect(agorStore.getState().sessionById.has('s-live')).toBe(true);
+    // Archived, it leaves my sessions' membership.
+    sessionPatched(session('s-live', 'br-1', { branch_board_id: 'board-1', archived: true }));
+    expect(
+      agorStore.getState().coverage.get(USER_SCOPE_KEYS.sessions)?.members?.sessions?.has('s-live')
+    ).toBe(false);
+  });
+
+  it('a session created live during the U1 read joins its membership at settlement', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { client } = makeClient({
+      mine: async () => {
+        await gate;
+        return [session('s-read', 'br-1')];
+      },
+    });
+    const run = startUserScope(client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: false,
+    });
+    // While the read is in flight: one of mine created, one of mine removed.
+    sessionCreated(session('s-raced', 'br-1'));
+    sessionCreated(session('s-gone', 'br-1'));
+    sessionRemoved(session('s-gone', 'br-1'));
+    release();
+    await run;
+    const members = agorStore.getState().coverage.get(USER_SCOPE_KEYS.sessions)?.members?.sessions;
+    expect([...(members ?? [])].sort()).toEqual(['s-raced', 's-read']);
+  });
+
+  it("a referenced branch preloaded by a partition is in reference membership and survives another scope's replace", async () => {
+    // A board partition loaded br-ref (someone else's branch, on board-2).
+    agorStore
+      .getState()
+      .applyMaps((prev) =>
+        fillScope(prev, { branches: [branch('br-ref', { board_id: 'board-2' })] }, () => false)
+      );
+    const { client } = makeClient({ mine: () => [session('s-1', 'br-ref')] });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: false });
+    expect(flags().homeBranchesLoaded).toBe(true);
+    expect(referenceMembers(agorStore.getState(), ME).has('br-ref')).toBe(true);
+    // board-2's complete read omits it (moved off while disconnected): my
+    // session still references it, so it stays.
+    replaceBoard('board-2', { branches: [] });
+    expect(agorStore.getState().branchById.has('br-ref')).toBe(true);
+    // No longer referenced: it leaves the membership, and the replace removes it.
+    sessionPatched(session('s-1', 'br-ref', { archived: true }));
+    expect(referenceMembers(agorStore.getState(), ME).has('br-ref')).toBe(false);
+    replaceBoard('board-2', { branches: [] });
+    expect(agorStore.getState().branchById.has('br-ref')).toBe(false);
   });
 
   it('reads all of my sessions in one capped read and flags truncation', async () => {
