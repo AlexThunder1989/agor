@@ -31,6 +31,8 @@ interface UseBoardObjectsProps {
    *  "selected" outline. */
   activeUrlTargetArtifactId?: string | null;
   onEditMarkdown?: (objectId: string, content: string, width: number) => void;
+  /** A zone node unmounted with an unsaved draft (see `ZoneNodeData.onDraftLost`). */
+  onZoneDraftLost?: (draft: { objectId: string; zoneName: string; text: string }) => void;
   /**
    * The canvas's board.edit write guard. Every board-object write passes it
    * under an explicit ticket: immediate actions capture one when they run,
@@ -62,6 +64,7 @@ export const useBoardObjects = ({
   eraserMode = false,
   activeUrlTargetArtifactId,
   onEditMarkdown,
+  onZoneDraftLost,
   guard,
 }: UseBoardObjectsProps) => {
   // Use ref to avoid recreating callbacks when board changes
@@ -88,7 +91,7 @@ export const useBoardObjects = ({
    * Update an existing board object under `ticket`. Resolves `true` once
    * saved, `false` when the request failed (a dialog stays open to retry), or
    * `'stale'` when the ticket no longer holds: nothing is sent, and a dialog
-   * keeps its draft for an explicit re-apply under a new ticket.
+   * keeps its draft to copy or discard (only reopening captures a new ticket).
    */
   const handleUpdateObject = useCallback(
     async (
@@ -471,6 +474,7 @@ export const useBoardObjects = ({
           onDelete: deleteZone,
           onReorder: reorderObject,
           beginBoardWrite: guard.capture,
+          onDraftLost: onZoneDraftLost,
         },
       };
     },
@@ -485,6 +489,7 @@ export const useBoardObjects = ({
       eraserMode,
       activeUrlTargetArtifactId,
       onEditMarkdown,
+      onZoneDraftLost,
       canEdit,
       guard.capture,
       artifactGuard.capture,

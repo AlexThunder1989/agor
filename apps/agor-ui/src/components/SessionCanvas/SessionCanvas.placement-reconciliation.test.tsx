@@ -41,6 +41,12 @@ interface CapturedFlowProps {
 
 let flowProps: CapturedFlowProps | null = null;
 
+const { copySpy } = vi.hoisted(() => ({ copySpy: vi.fn(async (_text: string) => true) }));
+vi.mock('../../utils/clipboard', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../utils/clipboard')>()),
+  copyToClipboard: copySpy,
+}));
+
 vi.mock('reactflow', async () => {
   const React = await import('react');
   return {
@@ -914,22 +920,30 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
     expect(flowProps?.nodes.some((candidate) => candidate.type === 'markdown')).toBe(false);
   });
 
-  it('keeps a markdown draft rejected by a reload and saves it only on an explicit re-apply', async () => {
-    const noteBoard = {
-      ...board,
-      objects: {
-        ...board.objects,
-        'markdown-1': { type: 'markdown', x: 0, y: 0, width: 300, content: 'Old note' },
-      },
-    } as Board;
+  const noteBoard = {
+    ...board,
+    objects: {
+      ...board.objects,
+      'markdown-1': { type: 'markdown', x: 0, y: 0, width: 300, content: 'Old note' },
+    },
+  } as Board;
+  type NoteData = { onEdit: (id: string, content: string, width: number) => void };
+  const openNote = (content = 'Old note') =>
+    act(() =>
+      (currentNode('markdown-1') as FlowNode & { data: NoteData }).data.onEdit(
+        'markdown-1',
+        content,
+        300
+      )
+    );
+
+  it('keeps a markdown draft rejected by a reload to copy or discard, and saves only after reopening', async () => {
+    copySpy.mockClear();
     const patch = vi.fn(async () => ({}));
     const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
     renderCanvas(client, noteBoard);
     await act(async () => {});
-    const note = currentNode('markdown-1') as FlowNode & {
-      data: { onEdit: (id: string, content: string, width: number) => void };
-    };
-    act(() => note.data.onEdit('markdown-1', 'Old note', 300));
+    openNote();
     fireEvent.change(await screen.findByDisplayValue('Old note'), {
       target: { value: 'My careful draft' },
     });
@@ -938,26 +952,100 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     });
     expect(patch).not.toHaveBeenCalled();
-    // The editor stays open with the draft and says why.
+    // The editor stays open with the draft and says why; Save stays refused.
     expect(screen.getByText('Edit Markdown Note')).toBeTruthy();
     expect(screen.getByDisplayValue('My careful draft')).toBeTruthy();
     expect(screen.getByText(/Board reloaded — changes not saved/)).toBeTruthy();
-    // Saving again under the old ticket still refuses.
+    expect(screen.queryByRole('button', { name: 'Re-apply to reloaded board' })).toBeNull();
+    const save = screen.getByRole('button', { name: 'Save' });
+    expect(save).toBeDisabled();
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      fireEvent.click(save);
     });
-    expect(patch).not.toHaveBeenCalled();
+    // Opening the note again while its editor is open changes nothing.
+    openNote();
+    expect(screen.getByDisplayValue('My careful draft')).toBeTruthy();
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Re-apply to reloaded board' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Copy draft' }));
+    });
+    expect(copySpy).toHaveBeenCalledExactlyOnceWith('My careful draft');
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(screen.queryByText('Edit Markdown Note')).toBeNull());
+    expect(patch).not.toHaveBeenCalled();
+
+    // Reopening edits the reloaded note under a ticket captured at open.
+    openNote();
+    fireEvent.change(await screen.findByDisplayValue('Old note'), {
+      target: { value: 'Edited after reopening' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     });
     expect(boardPatches(patch)).toEqual([
       expect.objectContaining({
         _action: 'upsertObject',
         objectId: 'markdown-1',
-        objectData: expect.objectContaining({ content: 'My careful draft' }),
+        objectData: expect.objectContaining({ content: 'Edited after reopening' }),
       }),
     ]);
+    await waitFor(() => expect(screen.queryByText('Edit Markdown Note')).toBeNull());
+  });
+
+  it('keeps a markdown draft whose note a reload deleted, and says the note no longer exists', async () => {
+    const patch = vi.fn(async () => ({}));
+    const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
+    const canvas = renderCanvas(client, noteBoard);
+    await act(async () => {});
+    openNote();
+    fireEvent.change(await screen.findByDisplayValue('Old note'), {
+      target: { value: 'Draft of a deleted note' },
+    });
+    // The reload brings a board without the note.
+    act(() => canvas.rerenderBoard(board));
+    resyncReload();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    });
+    expect(patch).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue('Draft of a deleted note')).toBeTruthy();
+    expect(screen.getByText(/This note no longer exists/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy draft' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('shows the unsaved draft of a zone a reload deleted, to copy or discard', async () => {
+    copySpy.mockClear();
+    const patch = vi.fn(async () => ({}));
+    const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
+    const canvas = renderCanvas(client);
+    await act(async () => {});
+    type ZoneData = Parameters<typeof ZoneNode>[0]['data'];
+    const zoneData = (currentNode(IMPLEMENTING_ZONE_ID) as FlowNode & { data: ZoneData }).data;
+    const node = renderNode(<ZoneNode selected data={zoneData} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Rename zone' }));
+    fireEvent.change(screen.getByDisplayValue('Implementing'), {
+      target: { value: 'Unsaved rename' },
+    });
+
+    // The reload drops the zone, so React Flow unmounts its node.
+    const { [IMPLEMENTING_ZONE_ID]: _deleted, ...remaining } = board.objects ?? {};
+    act(() => canvas.rerenderBoard({ ...board, objects: remaining } as Board));
+    resyncReload();
+    act(() => node.unmount());
+
+    expect(await screen.findByText('Zone changes not saved')).toBeTruthy();
+    expect(screen.getByText('Zone "Implementing" no longer exists.')).toBeTruthy();
+    expect(screen.getByLabelText('Unsaved draft for zone Implementing')).toHaveValue(
+      'Label: Unsaved rename'
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Copy draft' }));
+    });
+    expect(copySpy).toHaveBeenCalledExactlyOnceWith('Label: Unsaved rename');
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(screen.queryByText('Zone changes not saved')).toBeNull());
+    expect(patch).not.toHaveBeenCalled();
   });
 
   afterEach(() => {

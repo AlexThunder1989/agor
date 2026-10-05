@@ -8,6 +8,11 @@ import { ConnectionProvider } from '../../../contexts/ConnectionContext';
 import { CommentNode, ZoneNode } from './BoardObjectNodes';
 
 const zoneConfigModalRenderSpy = vi.hoisted(() => vi.fn());
+const { copySpy } = vi.hoisted(() => ({ copySpy: vi.fn(async (_text: string) => true) }));
+vi.mock('../../../utils/clipboard', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../utils/clipboard')>()),
+  copyToClipboard: copySpy,
+}));
 
 vi.mock('./ZoneConfigModal', () => ({
   ZoneConfigModal: (props: { zoneName: string }) => {
@@ -33,6 +38,7 @@ function renderZone(
     canEdit?: boolean;
     onUpdate?: ReturnType<typeof vi.fn>;
     beginBoardWrite?: ReturnType<typeof vi.fn>;
+    onDraftLost?: ReturnType<typeof vi.fn>;
   }
 ) {
   const wrapper = ({ children }: { children: ReactNode }) => (
@@ -58,6 +64,7 @@ function renderZone(
         onUpdate: extra?.onUpdate,
         onReorder,
         beginBoardWrite: extra?.beginBoardWrite,
+        onDraftLost: extra?.onDraftLost,
       }}
     />,
     { wrapper }
@@ -188,7 +195,8 @@ describe('ZoneNode settings modal', () => {
     expect(beginBoardWrite).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps a label draft rejected by a board reload and re-applies it under a new ticket', async () => {
+  it('keeps a label draft rejected by a board reload to copy or discard, never under a new ticket', async () => {
+    copySpy.mockClear();
     const opened = { boardId: 'board-1', partition: null, authGeneration: 1 };
     const fresh = { boardId: 'board-1', partition: null, authGeneration: 2 };
     const beginBoardWrite = vi.fn().mockReturnValueOnce(opened).mockReturnValue(fresh);
@@ -203,17 +211,65 @@ describe('ZoneNode settings modal', () => {
     expect(screen.getByDisplayValue('Draft label')).toBeTruthy();
     expect(onUpdate).toHaveBeenCalledTimes(1);
     expect(onUpdate.mock.calls[0][2]).toBe(opened);
-    // Leaving the editor does not retry under the old ticket.
+    expect(screen.queryByRole('button', { name: 'Re-apply to reloaded board' })).toBeNull();
+    // Neither leaving the editor, Enter, nor a re-open click retries or
+    // captures a new ticket.
     fireEvent.blur(screen.getByDisplayValue('Draft label'));
+    fireEvent.keyDown(screen.getByDisplayValue('Draft label'), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename zone' }));
     expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(beginBoardWrite).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Re-apply to reloaded board' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy draft' }));
+    await waitFor(() => expect(copySpy).toHaveBeenCalledExactlyOnceWith('Draft label'));
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(screen.queryByText(/Board reloaded — changes not saved/)).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue('Draft label')).not.toBeInTheDocument();
+    expect(screen.getByText('My Zone')).toBeTruthy();
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(beginBoardWrite).toHaveBeenCalledTimes(1);
+
+    // Reopening the editor captures a new ticket at open.
+    fireEvent.click(screen.getByRole('button', { name: 'Rename zone' }));
+    const reopened = screen.getByDisplayValue('My Zone');
+    fireEvent.change(reopened, { target: { value: 'Renamed again' } });
+    fireEvent.keyDown(reopened, { key: 'Enter' });
     await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(2));
-    expect(onUpdate.mock.calls[1][1]).toMatchObject({ label: 'Draft label' });
+    expect(onUpdate.mock.calls[1][1]).toMatchObject({ label: 'Renamed again' });
     expect(onUpdate.mock.calls[1][2]).toBe(fresh);
-    await waitFor(() =>
-      expect(screen.queryByText(/Board reloaded — changes not saved/)).not.toBeInTheDocument()
-    );
+  });
+
+  it('hands an unsaved label or settings draft to the canvas when the node unmounts', () => {
+    const onDraftLost = vi.fn();
+    const beginBoardWrite = vi.fn(() => ({ boardId: 'board-1', partition: null }));
+    const unchanged = renderZone(vi.fn(), CONNECTED, { onDraftLost, beginBoardWrite });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename zone' }));
+    unchanged.unmount();
+    expect(onDraftLost).not.toHaveBeenCalled();
+
+    const view = renderZone(vi.fn(), CONNECTED, { onDraftLost, beginBoardWrite });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename zone' }));
+    fireEvent.change(screen.getByDisplayValue('My Zone'), { target: { value: 'Draft label' } });
+    view.unmount();
+    expect(onDraftLost).toHaveBeenCalledExactlyOnceWith({
+      objectId: 'zone-1',
+      zoneName: 'My Zone',
+      text: 'Label: Draft label',
+    });
+
+    onDraftLost.mockClear();
+    const dialog = renderZone(vi.fn(), CONNECTED, { onDraftLost, beginBoardWrite });
+    fireEvent.click(screen.getByRole('button', { name: 'Zone settings' }));
+    const { draftReaderRef } = (zoneConfigModalRenderSpy.mock.lastCall?.[0] ?? {}) as {
+      draftReaderRef: { current: (() => string | null) | null };
+    };
+    draftReaderRef.current = () => 'Prompt template:\nUnsaved';
+    dialog.unmount();
+    expect(onDraftLost).toHaveBeenCalledExactlyOnceWith({
+      objectId: 'zone-1',
+      zoneName: 'My Zone',
+      text: 'Prompt template:\nUnsaved',
+    });
   });
 
   it('an open zone dialog ignores a second open click and keeps its open-time ticket', async () => {

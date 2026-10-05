@@ -110,6 +110,7 @@ import { ArtifactNode } from './canvas/ArtifactNodeLazy';
 import { CommentNode, ZoneNode } from './canvas/BoardObjectNodes';
 import { MarkdownNode } from './canvas/MarkdownNode';
 import { RemoteCursorLayer, type StaticRemoteCursor } from './canvas/RemoteCursorLayer';
+import { STALE_DRAFT_TITLE, useCopyDraft } from './canvas/staleDraft';
 import { useBoardObjects } from './canvas/useBoardObjects';
 import { findIntersectingObjects, findZoneAtPosition } from './canvas/utils/collisionDetection';
 import {
@@ -490,7 +491,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
     const { token } = theme.useToken();
     const mutationGate = useMutationGate();
     const connection = useConnectionState();
-    const { showError, showSuccess, showWarning } = useThemedMessage();
+    const { showError, showWarning } = useThemedMessage();
 
     // Entity state via narrow store subscriptions. Each whole-map selector is a
     // stable module-level reference, so a slice only re-renders the canvas when
@@ -610,8 +611,9 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
       /** Captured when the editor opened; a board reload drops its save. */
       ticket: BoardWriteTicket | null;
       /**
-       * A save was refused because the board reloaded: the draft stays, and
-       * only an explicit re-apply captures a new ticket.
+       * A save was refused because the board reloaded: the draft stays to
+       * copy or discard, and Save stays refused. Nothing in this editor
+       * captures a new ticket; reopening the note (after closing) does.
        */
       stale?: boolean;
       /** The last save was rejected (e.g. permission): the draft stays open. */
@@ -619,6 +621,23 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
     } | null>(null);
     const [markdownContent, setMarkdownContent] = useState('');
     const [markdownWidth, setMarkdownWidth] = useState(500); // Default width
+    // Set synchronously on open: an open editor keeps its ticket and draft,
+    // so another open (edit or placement click) is ignored until it closes.
+    const markdownModalOpenRef = useRef(false);
+    // Unsaved zone drafts whose node unmounted (the zone was deleted, e.g. by
+    // a reload): shown to copy or discard, never saved.
+    const [lostZoneDrafts, setLostZoneDrafts] = useState<
+      Array<{ key: number; objectId: string; zoneName: string; text: string }>
+    >([]);
+    const nextLostZoneDraftKeyRef = useRef(0);
+    const handleZoneDraftLost = useCallback(
+      (draft: { objectId: string; zoneName: string; text: string }) => {
+        const key = nextLostZoneDraftKeyRef.current++;
+        setLostZoneDrafts((current) => [...current, { key, ...draft }]);
+      },
+      []
+    );
+    const copyDraft = useCopyDraft();
 
     // Branch zone trigger modal state
     const nextBranchTriggerActionIdRef = useRef(0);
@@ -861,10 +880,11 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
     // Handler to open edit modal for existing markdown note
     const handleEditMarkdownNote = useCallback(
       (objectId: string, content: string, width: number) => {
-        if (!canMutateBoard) return;
+        if (!canMutateBoard || markdownModalOpenRef.current) return;
         const node = reactFlowInstanceRef.current?.getNode(objectId);
         if (!node) return;
 
+        markdownModalOpenRef.current = true;
         setMarkdownContent(content);
         setMarkdownWidth(width);
         setMarkdownModal({
@@ -888,6 +908,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
         eraserMode: activeTool === 'eraser',
         activeUrlTargetArtifactId,
         onEditMarkdown: handleEditMarkdownNote,
+        onZoneDraftLost: handleZoneDraftLost,
         // Every board-object/zone/text/markdown write goes through this guard.
         guard: boardGuard,
       });
@@ -2586,7 +2607,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
 
     const openMarkdownPlacementModal = useCallback(
       (event: Pick<React.MouseEvent, 'clientX' | 'clientY'>): boolean => {
-        if (!canMutateBoard || !reactFlowInstanceRef.current) {
+        if (!canMutateBoard || !reactFlowInstanceRef.current || markdownModalOpenRef.current) {
           return false;
         }
 
@@ -2595,6 +2616,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
           y: event.clientY,
         });
 
+        markdownModalOpenRef.current = true;
         setMarkdownModal({ position, ticket: boardGuard.capture() });
         return true;
       },
@@ -2708,136 +2730,109 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
     ]);
 
     const closeMarkdownModal = useCallback(() => {
+      markdownModalOpenRef.current = false;
       setMarkdownModal(null);
       setMarkdownContent('');
       setMarkdownWidth(500);
       setActiveTool('select');
     }, []);
 
-    // Create/update a markdown note under `ticket`. A refused save keeps the
-    // editor open with its draft (see `markdownModal.stale`).
-    const saveMarkdownNote = useCallback(
-      async (ticket: BoardWriteTicket | null) => {
-        if (!markdownModal || !board || !client || !markdownContent.trim()) {
-          return;
-        }
-        // Unavailable for now (disconnected, still loading): keep the draft.
-        if (!canMutateBoard) {
-          return;
-        }
-        // Opened before a board reload: saving could restore a note deleted
-        // meanwhile, or overwrite edits made since. Nothing is sent, and the
-        // draft stays for an explicit re-apply (no await between this check
-        // and the write).
-        if (!boardGuard.isCurrent(ticket)) {
-          setMarkdownModal((current) => (current ? { ...current, stale: true } : current));
-          return;
-        }
-
-        const objectId = markdownModal.objectId || `markdown-${Date.now()}`;
-        const saved = markdownModal.objectId ? board.objects?.[objectId] : undefined;
-        const position = markdownModal.position;
-        const objectData: BoardObject = {
-          type: 'markdown',
-          x: position.x,
-          y: position.y,
-          width: markdownWidth,
-          content: markdownContent,
-        };
-
-        // Optimistic update
-        setNodes((nodes) => {
-          // If editing, update existing node
-          if (markdownModal.objectId && nodes.some((n) => n.id === objectId)) {
-            return nodes.map((n) =>
-              n.id === objectId
-                ? {
-                    ...n,
-                    data: {
-                      ...n.data,
-                      content: markdownContent,
-                      width: markdownWidth,
-                    },
-                  }
-                : n
-            );
-          }
-
-          // If creating new, add a node built like a hydrated one (its
-          // confirmations capture their ticket when they open).
-          return [...nodes, buildObjectNode(objectId, objectData)];
-        });
-
-        // Persist to backend
-        setMarkdownModal((current) => (current ? { ...current, saveError: undefined } : current));
-        try {
-          await client.service('boards').patch(ticket.boardId, {
-            _action: 'upsertObject',
-            objectId,
-            objectData,
-          } as unknown as Partial<Board>);
-        } catch (error) {
-          console.error('Failed to save markdown note:', error);
-          // Rollback optimistic update: the note shows what is saved.
-          if (!markdownModal.objectId) {
-            setNodes((nodes) => nodes.filter((n) => n.id !== objectId));
-          } else if (saved?.type === 'markdown') {
-            setNodes((nodes) =>
-              nodes.map((n) =>
-                n.id === objectId
-                  ? { ...n, data: { ...n.data, content: saved.content, width: saved.width } }
-                  : n
-              )
-            );
-          }
-          // Keep the editor open with the draft; only a successful save closes it.
-          const reason = error instanceof Error && error.message ? error.message : String(error);
-          setMarkdownModal((current) => (current ? { ...current, saveError: reason } : current));
-          return;
-        }
-
-        closeMarkdownModal();
-      },
-      [
-        markdownModal,
-        board,
-        client,
-        markdownContent,
-        markdownWidth,
-        setNodes,
-        buildObjectNode,
-        canMutateBoard,
-        boardGuard,
-        closeMarkdownModal,
-      ]
-    );
-
-    // Save under the ticket captured when the editor opened.
-    const handleCreateMarkdownNote = useCallback(
-      () => saveMarkdownNote(markdownModal?.ticket ?? null),
-      [saveMarkdownNote, markdownModal]
-    );
-
-    // The explicit user action that re-applies a refused draft to the
-    // reloaded board: the only place a new ticket is captured for it.
-    const handleReapplyMarkdownNote = useCallback(async () => {
-      const ticket = boardGuard.capture();
-      if (!ticket) {
-        boardGuard.warnDropped('This board is still reloading; try again in a moment.');
+    // Create/update a markdown note under the ticket captured when the editor
+    // opened. A refused save keeps the editor open with its draft (see
+    // `markdownModal.stale`).
+    const handleCreateMarkdownNote = useCallback(async () => {
+      if (!markdownModal || markdownModal.stale || !board || !client || !markdownContent.trim()) {
         return;
       }
-      setMarkdownModal((current) => (current ? { ...current, ticket, stale: false } : current));
-      await saveMarkdownNote(ticket);
-    }, [boardGuard, saveMarkdownNote]);
-
-    const handleCopyMarkdownDraft = useCallback(async () => {
-      try {
-        await navigator.clipboard.writeText(markdownContent);
-        showSuccess('Draft copied to the clipboard.');
-      } catch {
-        showError('Could not copy the draft.');
+      const { ticket } = markdownModal;
+      // Unavailable for now (disconnected, still loading): keep the draft.
+      if (!canMutateBoard) {
+        return;
       }
-    }, [markdownContent, showError, showSuccess]);
+      // Opened before a board reload: saving could restore a note deleted
+      // meanwhile, or overwrite edits made since. Nothing is sent, and the
+      // draft stays to copy or discard (no await between this check and the
+      // write).
+      if (!boardGuard.isCurrent(ticket)) {
+        setMarkdownModal((current) => (current ? { ...current, stale: true } : current));
+        return;
+      }
+
+      const objectId = markdownModal.objectId || `markdown-${Date.now()}`;
+      const saved = markdownModal.objectId ? board.objects?.[objectId] : undefined;
+      const position = markdownModal.position;
+      const objectData: BoardObject = {
+        type: 'markdown',
+        x: position.x,
+        y: position.y,
+        width: markdownWidth,
+        content: markdownContent,
+      };
+
+      // Optimistic update
+      setNodes((nodes) => {
+        // If editing, update existing node
+        if (markdownModal.objectId && nodes.some((n) => n.id === objectId)) {
+          return nodes.map((n) =>
+            n.id === objectId
+              ? {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    content: markdownContent,
+                    width: markdownWidth,
+                  },
+                }
+              : n
+          );
+        }
+
+        // If creating new, add a node built like a hydrated one (its
+        // confirmations capture their ticket when they open).
+        return [...nodes, buildObjectNode(objectId, objectData)];
+      });
+
+      // Persist to backend
+      setMarkdownModal((current) => (current ? { ...current, saveError: undefined } : current));
+      try {
+        await client.service('boards').patch(ticket.boardId, {
+          _action: 'upsertObject',
+          objectId,
+          objectData,
+        } as unknown as Partial<Board>);
+      } catch (error) {
+        console.error('Failed to save markdown note:', error);
+        // Rollback optimistic update: the note shows what is saved.
+        if (!markdownModal.objectId) {
+          setNodes((nodes) => nodes.filter((n) => n.id !== objectId));
+        } else if (saved?.type === 'markdown') {
+          setNodes((nodes) =>
+            nodes.map((n) =>
+              n.id === objectId
+                ? { ...n, data: { ...n.data, content: saved.content, width: saved.width } }
+                : n
+            )
+          );
+        }
+        // Keep the editor open with the draft; only a successful save closes it.
+        const reason = error instanceof Error && error.message ? error.message : String(error);
+        setMarkdownModal((current) => (current ? { ...current, saveError: reason } : current));
+        return;
+      }
+
+      closeMarkdownModal();
+    }, [
+      markdownModal,
+      board,
+      client,
+      markdownContent,
+      markdownWidth,
+      setNodes,
+      buildObjectNode,
+      canMutateBoard,
+      boardGuard,
+      closeMarkdownModal,
+    ]);
 
     // Node click handler for eraser mode and comment placement
     const handleNodeClick = useCallback(
@@ -3285,7 +3280,9 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
             onCancel={closeMarkdownModal}
             onOk={handleCreateMarkdownNote}
             okText={markdownModal.objectId ? 'Save' : 'Create'}
-            okButtonProps={{ disabled: !markdownContent.trim() || !canMutateBoard }}
+            okButtonProps={{
+              disabled: markdownModal.stale || !markdownContent.trim() || !canMutateBoard,
+            }}
             width={1000}
           >
             {markdownModal.saveError && !markdownModal.stale && (
@@ -3301,23 +3298,17 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
               <Alert
                 type="warning"
                 showIcon
-                title="Board reloaded — changes not saved."
+                title={STALE_DRAFT_TITLE}
                 description={
                   markdownModal.objectId && !board?.objects?.[markdownModal.objectId]
-                    ? 'This board reloaded while the note was open, and the note is no longer on it. Re-applying your draft adds the note back; you can also copy the draft or discard it.'
-                    : 'This board reloaded while the note was open, so your draft was not saved over it. Re-apply your draft to the reloaded board, copy it, or discard it.'
+                    ? 'This note no longer exists on the reloaded board, so your draft was not saved. Copy your draft to keep it.'
+                    : markdownModal.objectId
+                      ? 'This board reloaded while the note was open, so your draft was not saved over it. Copy your draft to keep it, then reopen the note to edit the reloaded one.'
+                      : 'This board reloaded while the note was open, so it was not created. Copy your draft to keep it, then add the note again.'
                 }
                 action={
                   <Space orientation="vertical" size="small">
-                    <Button
-                      size="small"
-                      type="primary"
-                      disabled={!markdownContent.trim() || !canMutateBoard}
-                      onClick={handleReapplyMarkdownNote}
-                    >
-                      Re-apply to reloaded board
-                    </Button>
-                    <Button size="small" onClick={handleCopyMarkdownDraft}>
+                    <Button size="small" onClick={() => void copyDraft(markdownContent)}>
                       Copy draft
                     </Button>
                     <Button size="small" type="text" onClick={closeMarkdownModal}>
@@ -3387,6 +3378,50 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
                 </div>
               </div>
             </div>
+          </Modal>
+        )}
+
+        {/* Unsaved zone drafts whose zone left the canvas: copy or discard */}
+        {lostZoneDrafts.length > 0 && (
+          <Modal
+            open={true}
+            title="Zone changes not saved"
+            onCancel={() => setLostZoneDrafts([])}
+            footer={[
+              <Button
+                key="copy"
+                onClick={() =>
+                  void copyDraft(lostZoneDrafts.map((draft) => draft.text).join('\n\n'))
+                }
+              >
+                Copy draft
+              </Button>,
+              <Button key="discard" onClick={() => setLostZoneDrafts([])}>
+                Discard
+              </Button>,
+            ]}
+          >
+            {lostZoneDrafts.map((draft) => (
+              <div key={draft.key} style={{ marginBottom: 16 }}>
+                <Alert
+                  type="warning"
+                  showIcon
+                  title={
+                    board?.objects?.[draft.objectId]
+                      ? `Zone "${draft.zoneName}" was reloaded while you were editing it.`
+                      : `Zone "${draft.zoneName}" no longer exists.`
+                  }
+                  description="Your changes were not saved. Copy your draft to keep it."
+                  style={{ marginBottom: 8 }}
+                />
+                <Input.TextArea
+                  aria-label={`Unsaved draft for zone ${draft.zoneName}`}
+                  value={draft.text}
+                  readOnly
+                  autoSize={{ minRows: 2, maxRows: 10 }}
+                />
+              </div>
+            ))}
           </Modal>
         )}
 

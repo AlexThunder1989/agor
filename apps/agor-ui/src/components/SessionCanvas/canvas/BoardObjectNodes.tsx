@@ -29,7 +29,7 @@ import {
   theme,
 } from 'antd';
 import type { Color } from 'antd/es/color-picker';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { NodeResizer, useViewport } from 'reactflow';
 import { useMutationGate } from '../../../contexts/ConnectionContext';
 import type { BoardWriteResult } from '../../../hooks/useBoardMutationGuard';
@@ -37,6 +37,7 @@ import type { BoardWriteTicket } from '../../../store/boardMutationGuard';
 import { getContrastingTextColor } from '../../../utils/theme';
 import { getUserInitials } from '../../UserIdentityAvatar';
 import { DeleteZoneModal } from './DeleteZoneModal';
+import { STALE_DRAFT_TITLE, useCopyDraft } from './staleDraft';
 import { ZoneConfigModal } from './ZoneConfigModal';
 import type { LayerOp } from './zOrder';
 import { toTranslucentZoneFill, ZONE_CONTENT_OPACITY } from './zoneAppearance';
@@ -88,6 +89,11 @@ interface ZoneNodeData extends Omit<ZoneBoardObject, 'type'> {
    * or delete dialog): a write from before a board reload is then dropped.
    */
   beginBoardWrite?: () => BoardWriteTicket | null;
+  /**
+   * The node unmounted with an unsaved label or settings draft (its zone was
+   * deleted, e.g. by a reload): the canvas shows the draft to copy or discard.
+   */
+  onDraftLost?: (draft: { objectId: string; zoneName: string; text: string }) => void;
   /** Effective board.edit capability. Omitted only by isolated tests/fixtures. */
   canEdit?: boolean;
   /** Number of other zones whose rectangles intersect this zone. */
@@ -144,10 +150,30 @@ const ZoneNodeComponent = ({ data, selected }: { data: ZoneNodeData; selected?: 
     return ticket;
   };
   // A label save refused because the board reloaded: the draft stays in the
-  // editor until the user re-applies it (under a new ticket) or discards it.
+  // editor to copy or discard. Its ticket never saves again, and the open
+  // editor ignores re-open clicks, so only reopening after Discard edits.
   const [labelStale, setLabelStale] = useState(false);
   const labelDraftHeldRef = useRef(false);
   labelDraftHeldRef.current = isEditingLabel || labelStale;
+  const copyDraft = useCopyDraft();
+  // The open settings dialog's draft, as text (see ZoneConfigModal).
+  const configDraftReaderRef = useRef<(() => string | null) | null>(null);
+  // An unmount with an unsaved draft hands it to the canvas. This cleanup
+  // runs before the dialog's, so its draft reader is still set.
+  const unmountDraftRef = useRef<() => void>(() => {});
+  unmountDraftRef.current = () => {
+    const drafts = [
+      isEditingLabel && label !== data.label ? `Label: ${label}` : null,
+      configDraftReaderRef.current?.() ?? null,
+    ].filter((draft): draft is string => draft !== null);
+    if (drafts.length === 0) return;
+    data.onDraftLost?.({
+      objectId: data.objectId,
+      zoneName: data.label,
+      text: drafts.join('\n\n'),
+    });
+  };
+  useLayoutEffect(() => () => unmountDraftRef.current(), []);
   const [recentColors, setRecentColors] = useState<string[]>(getRecentColors());
   const labelInputRef = useRef<HTMLInputElement>(null);
   const colors = getColorPalette(token);
@@ -162,7 +188,7 @@ const ZoneNodeComponent = ({ data, selected }: { data: ZoneNodeData; selected?: 
   const scale = 1 / zoom;
 
   // Sync label state when data.label changes (from WebSocket or modal
-  // updates), except over a draft that is being edited or awaits a re-apply.
+  // updates), except over a draft that is being edited or was refused.
   useEffect(() => {
     if (!labelDraftHeldRef.current) setLabel(data.label);
   }, [data.label]);
@@ -225,17 +251,11 @@ const ZoneNodeComponent = ({ data, selected }: { data: ZoneNodeData; selected?: 
   };
 
   const handleSaveLabel = () => {
-    // A refused draft leaves only by an explicit re-apply or discard.
+    // A refused draft leaves only by Discard (or Escape).
     if (labelStale) return;
     setIsEditingLabel(false);
     if (mutationDisabled) return;
     if (label !== data.label) void saveLabel(editTicket);
-  };
-
-  const handleReapplyLabel = () => {
-    setLabelStale(false);
-    setIsEditingLabel(false);
-    void saveLabel(beginEdit());
   };
 
   const handleDiscardLabel = () => {
@@ -696,19 +716,17 @@ const ZoneNodeComponent = ({ data, selected }: { data: ZoneNodeData; selected?: 
               className="nodrag nopan"
               type="warning"
               showIcon
-              title="Board reloaded — changes not saved."
-              description="Your label was not saved over the reloaded board."
+              title={STALE_DRAFT_TITLE}
+              description="Your label was not saved over the reloaded board. Copy it, then discard and rename the zone again."
               action={
                 <Space orientation="vertical" size={4}>
                   <Button
                     size="small"
-                    type="primary"
-                    disabled={mutationDisabled}
                     // Keep the editor focused: its blur would end the edit.
                     onMouseDown={(e) => e.preventDefault()}
-                    onClick={handleReapplyLabel}
+                    onClick={() => void copyDraft(label)}
                   >
-                    Re-apply to reloaded board
+                    Copy draft
                   </Button>
                   <Button
                     size="small"
@@ -762,9 +780,7 @@ const ZoneNodeComponent = ({ data, selected }: { data: ZoneNodeData; selected?: 
           onUpdate={(objectId, objectData) =>
             data.onUpdate ? data.onUpdate(objectId, objectData, editTicket) : undefined
           }
-          onReapply={(objectId, objectData) =>
-            data.onUpdate ? data.onUpdate(objectId, objectData, beginEdit()) : undefined
-          }
+          draftReaderRef={configDraftReaderRef}
           zoneData={zoneData}
           canEdit={data.canEdit !== false}
         />
