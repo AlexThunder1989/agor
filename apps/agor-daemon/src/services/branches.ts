@@ -250,9 +250,9 @@ function parseStartWebhookResult(options: {
  * branches the caller can view, through `BranchRepository.findTeammateBranches`,
  * at most `PAGINATION.MAX_TEAMMATE_BRANCHES` per page. `total` is the real
  * number of matching branches, so a caller can tell a capped page from a
- * complete one. The marker set is a superset of the client's teammate check (it
- * also matches branches with an enabled schedule), so clients keep their own
- * filter.
+ * complete one. It matches the teammate marker only (`markerOnly`), not the
+ * enabled-schedule backfill, so its set is the one the client's `isTeammate`
+ * sees and a live write can judge membership.
  */
 function isTeammateBranchQuery(query?: Record<string, unknown>): boolean {
   if (!query || query.teammate === undefined) return false;
@@ -1802,6 +1802,7 @@ export class BranchesService extends DrizzleService<Branch, Partial<Branch>, Bra
         archived: typeof query?.archived === 'boolean' ? query.archived : undefined,
         userId: findParams?._agorSqlBranchAccessUserId,
         minimumPermission: 'view' as const,
+        markerOnly: true,
       };
       // One row past the page tells a complete read from a capped one; only a
       // capped read pays for the count.

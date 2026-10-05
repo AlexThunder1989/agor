@@ -344,29 +344,27 @@ describe('user scope', () => {
     ]).toEqual(['mate']);
   });
 
-  it('keeps a schedule-only teammate branch U3 returned, through a later complete board replace', async () => {
-    // The daemon also returns a branch with an enabled schedule and no teammate marker.
-    const { client } = makeClient({ teammates: () => [branch('br-scheduled')] });
+  it('keeps a teammate branch U3 returned, through a later complete board replace', async () => {
+    const mate = branch('mate', { custom_context: { teammate: { kind: 'teammate' } } });
+    const { client } = makeClient({ teammates: () => [mate] });
     await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: true });
     expect([
       ...(agorStore.getState().coverage.get(USER_SCOPE_KEYS.teammates)?.members?.branches ?? []),
-    ]).toEqual(['br-scheduled']);
+    ]).toEqual(['mate']);
     replaceBoard('board-1', { branches: [] });
-    expect(agorStore.getState().branchById.has('br-scheduled')).toBe(true);
+    expect(agorStore.getState().branchById.has('mate')).toBe(true);
   });
 
-  it('a live patch keeps a schedule-only teammate in membership; archiving it leaves', async () => {
+  it('a live patch that drops the marker leaves membership, so a complete board replace removes it', async () => {
     const teammateMembers = () =>
       agorStore.getState().coverage.get(USER_SCOPE_KEYS.teammates)?.members?.branches;
-    const { client } = makeClient({ teammates: () => [branch('br-scheduled')] });
+    const mate = branch('mate', { custom_context: { teammate: { kind: 'teammate' } } });
+    const { client } = makeClient({ teammates: () => [mate] });
     await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: true });
-    // The client can't see the enabled schedule the daemon matched on.
-    branchPatched(branch('br-scheduled', { name: 'renamed' }));
-    expect(teammateMembers()?.has('br-scheduled')).toBe(true);
+    branchPatched({ ...mate, custom_context: {} });
+    expect(teammateMembers()?.has('mate')).toBe(false);
     replaceBoard('board-1', { branches: [] });
-    expect(agorStore.getState().branchById.has('br-scheduled')).toBe(true);
-    branchPatched(branch('br-scheduled', { archived: true }));
-    expect(teammateMembers()?.has('br-scheduled')).toBe(false);
+    expect(agorStore.getState().branchById.has('mate')).toBe(false);
   });
 
   it('a live patch adds a newly marked teammate to membership', async () => {

@@ -8,9 +8,9 @@
  *   during a paged read shifts rows and skips one), capped at
  *   `MY_SESSIONS_FULL_LIMIT`; hitting the cap commits an incomplete piece.
  * - U2: my branches (`branches{created_by}`).
- * - U3: every teammate branch I can view (`branches{teammate: true}`), capped
- *   at `PAGINATION.MAX_TEAMMATE_BRANCHES`; the daemon's real total sets
- *   an incomplete piece when the cap was hit.
+ * - U3: every marker teammate branch I can view (`branches{teammate: true}`),
+ *   capped at `PAGINATION.MAX_TEAMMATE_BRANCHES`; the daemon's real total
+ *   sets an incomplete piece when the cap was hit.
  * - U5: every branch my sessions or candidate comment threads reference that
  *   is still absent, read by id in chunks; ids the server does not return go
  *   into `absentBranchIds` (archived, deleted or invisible).

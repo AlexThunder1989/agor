@@ -644,6 +644,8 @@ export class BranchRepository implements BaseRepository<Branch, Partial<Branch>>
     archived?: boolean;
     userId?: UUID;
     minimumPermission?: 'view' | 'session';
+    /** Only the teammate marker, not the enabled-schedule backfill. */
+    markerOnly?: boolean;
   }): SQL[] {
     const teammateKindConditions = [
       eq(sql`${jsonExtract(this.db, branches.data, 'custom_context.teammate.kind')}`, 'teammate'),
@@ -668,7 +670,10 @@ export class BranchRepository implements BaseRepository<Branch, Partial<Branch>>
         .where(and(eq(schedules.branch_id, branches.branch_id), eq(schedules.enabled, true)))
     );
 
-    const conditions: SQL[] = [or(...teammateKindConditions, hasEnabledSchedule) ?? sql`false`];
+    const conditions: SQL[] = [
+      or(...teammateKindConditions, ...(filter?.markerOnly ? [] : [hasEnabledSchedule])) ??
+        sql`false`,
+    ];
     if (filter?.repo_id) conditions.push(eq(branches.repo_id, filter.repo_id));
     if (filter?.archived !== undefined) conditions.push(eq(branches.archived, filter.archived));
     if (filter?.userId) {
@@ -690,6 +695,7 @@ export class BranchRepository implements BaseRepository<Branch, Partial<Branch>>
     archived?: boolean;
     userId?: UUID;
     minimumPermission?: 'view' | 'session';
+    markerOnly?: boolean;
   }): Promise<number> {
     const rows = await select(this.db, { count: sql<number>`count(*)` })
       .from(branches)
@@ -704,13 +710,14 @@ export class BranchRepository implements BaseRepository<Branch, Partial<Branch>>
    * A branch is discoverable as a teammate when it has the canonical teammate
    * marker in custom_context (new or legacy key), or as a read-time backfill for
    * older hand-bootstrapped teammates, when it has at least one enabled
-   * first-class schedule.
+   * first-class schedule (unless `markerOnly`).
    */
   async findTeammateBranches(filter?: {
     repo_id?: UUID;
     archived?: boolean;
     userId?: UUID;
     minimumPermission?: 'view' | 'session';
+    markerOnly?: boolean;
     limit?: number;
     offset?: number;
   }): Promise<Branch[]> {

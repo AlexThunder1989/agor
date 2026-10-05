@@ -3,7 +3,13 @@
  * the query validators accept the new keys and cap id lists, and the RBAC
  * find hooks scope every read to what a regular caller can view.
  */
-import { createTenantScopedDatabaseProxy, type Database, UsersRepository } from '@agor/core/db';
+import {
+  createTenantScopedDatabaseProxy,
+  type Database,
+  generateId,
+  ScheduleRepository,
+  UsersRepository,
+} from '@agor/core/db';
 import { type Application, feathers } from '@agor/core/feathers';
 import {
   branchQueryValidator,
@@ -76,6 +82,21 @@ describe('user-scope reads through transport hooks', () => {
     expect(mine).toContain(publicId);
     expect(mine).not.toContain(privateId);
 
+    // An enabled schedule alone doesn't make a teammate here: the read
+    // returns marker teammates only, the set the client's `isTeammate` sees.
+    await new ScheduleRepository(db).create({
+      schedule_id: generateId(),
+      branch_id: publicId,
+      created_by: fixture.owner,
+      name: 'Heartbeat',
+      cron_expression: '0 * * * *',
+      timezone_mode: 'utc',
+      prompt: 'Heartbeat',
+      agentic_tool_config: { agentic_tool: 'claude-code' },
+      enabled: true,
+      allow_concurrent_runs: false,
+      retention: 5,
+    });
     const mates = rows<Branch>(
       await app.service('branches').find(asViewer({ teammate: 'true', archived: false }) as never)
     ).map((b) => b.branch_id);
