@@ -126,19 +126,6 @@ export type Coverage = ReadonlyMap<ScopeKey, ScopeCoverage>;
 /** A coverage change published in the same store update as a maps change. */
 export type CoverageUpdate = (maps: DataMaps, coverage: Coverage) => Coverage;
 
-function sameCoverage(a: ScopeCoverage, b: ScopeCoverage): boolean {
-  return (
-    a.status === b.status &&
-    a.authorityScope === b.authorityScope &&
-    a.loadEpoch === b.loadEpoch &&
-    a.generation === b.generation &&
-    a.userId === b.userId &&
-    a.error === b.error &&
-    a.members === b.members &&
-    a.complete === b.complete
-  );
-}
-
 /** `coverage` with `key` set (or cleared, with `null`); itself when nothing changes. */
 export function withCoverage(
   coverage: Coverage,
@@ -146,7 +133,7 @@ export function withCoverage(
   entry: ScopeCoverage | null
 ): Coverage {
   const existing = coverage.get(key);
-  if (entry === null ? !existing : existing && sameCoverage(existing, entry)) return coverage;
+  if (entry === null ? !existing : existing && shallowEqualEntity(existing, entry)) return coverage;
   const next = new Map(coverage);
   if (entry === null) next.delete(key);
   else next.set(key, entry);
@@ -241,11 +228,21 @@ function belongs(
 /** Ids per collection that live events wrote (or that a read raced). */
 export type WrittenIds = Partial<Record<CoverageCollection, Iterable<string>>>;
 
+/** `written` plus the sessions on its branches now: a session's board is its branch's. */
+export function withBranchSessions(written: WrittenIds, maps: DataMaps): WrittenIds {
+  const sessions = new Set(written.sessions ?? []);
+  for (const branchId of written.branches ?? []) {
+    for (const session of maps.sessionsByBranch.get(branchId) ?? [])
+      sessions.add(session.session_id);
+  }
+  return sessions.size > 0 ? { ...written, sessions } : written;
+}
+
 /**
- * The membership a read commits: the ids it returned (`scopeMembers`),
- * corrected for the rows realtime wrote while it was in flight (`raced`, from
- * `touchedIdsSince`): such a row belongs exactly when it is present and the
- * scope claims it now. `maps` is the store after the read applied.
+ * The membership a read commits: the ids it returned (`scopeMembers`) and the
+ * rows realtime wrote while it was in flight (`raced`, from `touchedIdsSince`,
+ * with the sessions of raced branches), each kept exactly when it is present
+ * and the scope claims it now. `maps` is the store after the read applied.
  */
 export function settledMembers(
   scope: LoadScope,
@@ -254,16 +251,14 @@ export function settledMembers(
   raced: (collection: CoverageCollection) => Iterable<string>
 ): CoverageMembers {
   const members: Partial<Record<CoverageCollection, Set<string>>> = {};
+  const racedSessions = withBranchSessions({ branches: raced('branches') }, maps).sessions ?? [];
   for (const [collection, ids] of Object.entries(scopeMembers(rows)) as [
     CoverageCollection,
     ReadonlySet<string>,
   ][]) {
-    const settled = new Set(ids);
-    for (const id of raced(collection)) {
-      if (belongs(scope, collection, id, maps)) settled.add(id);
-      else settled.delete(id);
-    }
-    members[collection] = settled;
+    const candidates = [...ids, ...raced(collection)];
+    if (collection === 'sessions') candidates.push(...racedSessions);
+    members[collection] = new Set(candidates.filter((id) => belongs(scope, collection, id, maps)));
   }
   return members;
 }
@@ -271,8 +266,8 @@ export function settledMembers(
 /**
  * Keep membership in step with a live write: every `written` row joins each
  * current (`isCurrent`), loaded scope that claims it and leaves each one that
- * no longer does (deleted, archived, moved out). A branch write re-checks its
- * sessions too (a session's board is its branch's). A value-only patch
+ * no longer does (deleted, archived, moved out). A write that moves a branch
+ * passes its sessions too (`withBranchSessions`). A value-only patch
  * changes nothing and returns `coverage` itself; so does a write no loaded
  * scope tracks.
  */
@@ -284,15 +279,6 @@ export function liveMembership(
 ): Coverage {
   const ids = Object.entries(written) as [CoverageCollection, Iterable<string>][];
   if (ids.length === 0) return coverage;
-  if (written.branches) {
-    const sessions = new Set(written.sessions ?? []);
-    for (const branchId of written.branches) {
-      for (const session of maps.sessionsByBranch.get(branchId) ?? []) {
-        sessions.add(session.session_id);
-      }
-    }
-    if (sessions.size > 0) ids.push(['sessions', sessions]);
-  }
   let next: Map<ScopeKey, ScopeCoverage> | null = null;
   for (const [key, entry] of coverage) {
     if (entry.status !== 'loaded' || !entry.members || !isCurrent(entry)) continue;
@@ -542,14 +528,15 @@ export interface BoardPartitionSnapshot extends ScopeRows {
 /**
  * Apply a board partition: branches and sessions fill-only (Steps 1–2: the
  * global sets and their resync own them), board objects, cards and the full
- * board record reconcile with `replaceScope`. Comments are global and loaded
- * before first paint, so they are not part of a partition.
+ * board record reconcile with `replaceScope`. An annotation belongs to exactly
+ * one board, so no other scope's membership can hold one this board claims.
+ * Comments are global and loaded before first paint, so they are not part of
+ * a partition.
  */
 export function applyPartitionSnapshot(
   prev: DataMaps,
   snapshot: BoardPartitionSnapshot,
-  touched: PartitionTouched,
-  others: readonly MemberLookup[]
+  touched: PartitionTouched
 ): DataMaps {
   const filled = fillScope(
     prev,
@@ -566,6 +553,6 @@ export function applyPartitionSnapshot(
       complete: snapshot.complete,
     },
     touched,
-    others
+    []
   );
 }

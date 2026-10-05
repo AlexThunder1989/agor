@@ -160,7 +160,7 @@ describe('user scope', () => {
     const { client } = makeClient({
       mine: () => [session('s-1', 'br-present'), session('s-2', 'br-ref')],
       myBranches: () => [branch('br-mine', { created_by: ME } as Partial<Branch>)],
-      teammates: () => [branch('br-mate')],
+      teammates: () => [branch('br-mate', { custom_context: { teammate: { kind: 'teammate' } } })],
       byIds: (ids) => ids.filter((id) => id === 'br-ref').map((id) => branch(id)),
     });
     const current = lifetime();
@@ -310,6 +310,33 @@ describe('user scope', () => {
     expect(agorStore.getState().branchById.get('mate')).toBe(live);
     expect(agorStore.getState().branchById.has('mate-2')).toBe(true);
     expect(flags().teammatesLoaded).toBe(true);
+  });
+
+  it("publishes teammate rows before my branches settle, deferring only U3's coverage", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { client } = makeClient({
+      myBranches: async () => {
+        await gate;
+        return [];
+      },
+      teammates: () => [branch('mate', { custom_context: { teammate: { kind: 'teammate' } } })],
+    });
+    const run = startUserScope(client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: true,
+    });
+    await vi.waitFor(() => expect(agorStore.getState().branchById.has('mate')).toBe(true));
+    expect(flags().teammatesLoaded).toBe(false);
+    release();
+    await run;
+    expect(flags().teammatesLoaded).toBe(true);
+    expect([
+      ...(agorStore.getState().coverage.get(USER_SCOPE_KEYS.teammates)?.members?.branches ?? []),
+    ]).toEqual(['mate']);
   });
 
   it('marks teammates truncated when the server reports more than the capped read', async () => {

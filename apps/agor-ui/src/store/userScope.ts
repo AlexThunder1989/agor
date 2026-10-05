@@ -57,6 +57,7 @@ import { type AgorState, agorStore } from './agorStore';
 import { isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
 import {
   type CoverageMembers,
+  type CoverageUpdate,
   type ScopeCoverage,
   type ScopeRows,
   settledMembers,
@@ -234,9 +235,10 @@ type FillRows = { branches?: Branch[]; sessions?: Session[] };
  * replacement (`WholesaleReplacementError`): its snapshot is never applied.
  *
  * With `piece`, the read commits that piece in the update that applies its
- * rows (`commitIf` resolving false applies the rows uncommitted and resolves
- * null). Its membership is the rows it returned, with the rows realtime wrote
- * meanwhile judged by their current value (`settledMembers`).
+ * rows; with `commitIf`, the rows apply at once and the piece commits once it
+ * resolves true (false resolves null). Its membership is the rows it returned,
+ * with the rows realtime wrote meanwhile judged by their current value
+ * (`settledMembers`).
  */
 async function fillRead(
   run: ScopeRun,
@@ -264,35 +266,38 @@ async function fillRead(
       }
       if (!isCurrent(run)) return null;
       if (violatesFilter?.(rows)) throw new UnsupportedScopeReadError('filter ignored');
-      const commit = !!piece && (piece.commitIf ? await piece.commitIf() : true);
-      if (!isCurrent(run)) return null;
       if (wholesaleReplacedSince(fence)) {
         if (attempt < MAX_WHOLESALE_RESTARTS) continue;
         throw new WholesaleReplacementError();
       }
       const touched = (collection: HydratedCollection, id: string) =>
         touchedSince(collection, id, fence.startRevisions[collection]);
-      agorStore.getState().applyMaps(
-        (prev) => applyEntityFill(prev, rows, touched),
-        commit
-          ? (maps, coverage) =>
-              withCoverage(
-                coverage,
-                piece.key,
-                pieceEntry(run, {
-                  status: 'loaded',
-                  members: settledMembers(
-                    userScopePiece(piece.key, run.userId),
-                    rows as ScopeRows,
-                    maps,
-                    (collection) => touchedIdsSince(collection, fence.startRevisions[collection])
-                  ),
-                  complete: piece.complete(rows),
-                })
-              )
-          : undefined
-      );
-      return !piece || commit ? rows : null;
+      const settle: CoverageUpdate | undefined =
+        piece &&
+        ((maps, coverage) =>
+          withCoverage(
+            coverage,
+            piece.key,
+            pieceEntry(run, {
+              status: 'loaded',
+              members: settledMembers(
+                userScopePiece(piece.key, run.userId),
+                rows as ScopeRows,
+                maps,
+                (collection) => touchedIdsSince(collection, fence.startRevisions[collection])
+              ),
+              complete: piece.complete(rows),
+            })
+          ));
+      let update = (prev: DataMaps) => applyEntityFill(prev, rows, touched);
+      if (piece?.commitIf) {
+        // A deferred commit publishes the rows now and the coverage once allowed.
+        agorStore.getState().applyMaps(update);
+        if (!(await piece.commitIf()) || !isCurrent(run)) return null;
+        update = (prev) => prev;
+      }
+      agorStore.getState().applyMaps(update, settle);
+      return rows;
     } finally {
       endPartitionLoad();
     }

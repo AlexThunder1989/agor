@@ -60,7 +60,6 @@ import {
   claimDisplayedBoardForResync,
   getDisplayedBoardId,
   nextPartitionGeneration,
-  otherCommittedMembers,
   partitionLoadMark,
   partitionLoadSince,
   partitionsLoadedSince,
@@ -84,7 +83,7 @@ import {
   tombstoneSession,
   untombstoneSession,
 } from '../store/realtimeBatch';
-import { boardPartitionScope, boardScopeKey, replaceScope } from '../store/scopeMerge';
+import { boardPartitionScope, replaceScope } from '../store/scopeMerge';
 import { resetSessionMcpLinks } from '../store/sessionMcpLinks';
 import {
   isUnsupportedQueryError,
@@ -1138,9 +1137,6 @@ export function useAgorData(
         // Other boards' rows are untouched (Home reads none).
         const touchedInLoad = (collection: PartitionCollection, id: string) =>
           touchedSince(collection, id, firstPaintFence.startRevisions[collection]);
-        const otherScopes = boardScope
-          ? otherCommittedMembers(agorStore.getState(), boardScopeKey(boardScope))
-          : [];
         // The displayed board's read (every query an unbounded `findAll`; a
         // reconnect reads branches and sessions globally, so they are
         // narrowed to the board). It reconciles the board's annotations and,
@@ -1181,7 +1177,8 @@ export function useAgorData(
                 complete: boardRows.complete,
               },
               touchedInLoad,
-              otherScopes
+              // An annotation belongs to one board: no other scope holds it.
+              []
             );
           },
           boardScope && boardRows && displayedBoardFull && isLoadLifetimeCurrent(loadLifetime)

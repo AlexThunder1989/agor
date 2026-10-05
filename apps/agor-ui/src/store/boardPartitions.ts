@@ -351,9 +351,8 @@ export function loadBoardPartition(
         }
         const touched = (collection: HydratedCollection, id: string) =>
           touchedSince(collection, id, fence.startRevisions[collection]);
-        const others = otherCommittedMembers(store(), boardScopeKey(boardId));
         store().applyMaps(
-          (prev) => applyPartitionSnapshot(prev, snapshot, touched, others),
+          (prev) => applyPartitionSnapshot(prev, snapshot, touched),
           settleBoardPartition(boardId, lifetime, generation, snapshot, fence.startRevisions)
         );
         return;

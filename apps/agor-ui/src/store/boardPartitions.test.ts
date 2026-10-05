@@ -19,7 +19,13 @@ import {
   touchedSince,
 } from './agorHydration';
 import { EMPTY_MAPS } from './agorMaps';
-import { branchRemoved, cardCreated, cardRemoved, sessionPatched } from './agorRealtimeActions';
+import {
+  branchPatched,
+  branchRemoved,
+  cardCreated,
+  cardRemoved,
+  sessionPatched,
+} from './agorRealtimeActions';
 import { agorStore } from './agorStore';
 import {
   loadBoardPartition,
@@ -41,7 +47,9 @@ import {
 import {
   applyPartitionSnapshot,
   type BoardPartitionSnapshot,
+  boardPartitionScope,
   boardScopeKey,
+  replaceScope,
   USER_SCOPE_KEYS,
 } from './scopeMerge';
 
@@ -81,21 +89,15 @@ const snapshotOf = (overrides: Partial<BoardPartitionSnapshot> = {}): BoardParti
   boardObjects: [],
   cards: [],
   board: null,
+  complete: true,
   ...overrides,
 });
 
 const never = () => false;
 
-// Partitions are applied with no other loaded scope unless a test says so.
-const applyBoardPartition = (
-  prev: Parameters<typeof applyPartitionSnapshot>[0],
-  snapshot: BoardPartitionSnapshot,
-  touched: Parameters<typeof applyPartitionSnapshot>[2]
-) => applyPartitionSnapshot(prev, snapshot, touched, []);
-
 describe('applyPartitionSnapshot', () => {
   it('inserts absent rows into every map and the session buckets', () => {
-    const next = applyBoardPartition(
+    const next = applyPartitionSnapshot(
       EMPTY_MAPS,
       snapshotOf({
         branches: [branch('br-1')],
@@ -117,12 +119,12 @@ describe('applyPartitionSnapshot', () => {
   it('never overwrites a present branch or session (the global sets own them)', () => {
     const live = session('s-1', 'br-1', { title: 'live' });
     const liveBranch = branch('br-1', { name: 'live' });
-    const prev = applyBoardPartition(
+    const prev = applyPartitionSnapshot(
       EMPTY_MAPS,
       snapshotOf({ branches: [liveBranch], sessions: [live] }),
       never
     );
-    const next = applyBoardPartition(
+    const next = applyPartitionSnapshot(
       prev,
       snapshotOf({
         branches: [branch('br-1', { name: 'stale' })],
@@ -137,7 +139,7 @@ describe('applyPartitionSnapshot', () => {
 
   it('skips touched ids and rows on a touched-and-absent branch', () => {
     const touched = new Set(['sessions:s-gone', 'branches:br-archived', 'cards:k-gone']);
-    const next = applyBoardPartition(
+    const next = applyPartitionSnapshot(
       EMPTY_MAPS,
       snapshotOf({
         branches: [branch('br-1'), branch('br-archived')],
@@ -161,11 +163,11 @@ describe('applyPartitionSnapshot', () => {
     const lean = { board_id: BOARD, name: 'Board' } as Board;
     const prev = { ...EMPTY_MAPS, boardById: new Map([[BOARD, lean]]) };
     expect(
-      applyBoardPartition(prev, snapshotOf({ board: fullBoard() }), never).boardById.get(BOARD)
+      applyPartitionSnapshot(prev, snapshotOf({ board: fullBoard() }), never).boardById.get(BOARD)
         ?.objects
     ).toBeDefined();
     expect(
-      applyBoardPartition(
+      applyPartitionSnapshot(
         prev,
         snapshotOf({ board: fullBoard() }),
         (collection) => collection === 'boards'
@@ -186,7 +188,7 @@ describe('applyPartitionSnapshot', () => {
         ],
       },
     } as Partial<Session>);
-    const next = applyBoardPartition(
+    const next = applyPartitionSnapshot(
       EMPTY_MAPS,
       snapshotOf({ branches: [branch('br-1'), branch('br-2')], sessions: [source, target] }),
       never
@@ -410,6 +412,54 @@ describe('loadBoardPartition', () => {
     expect(state.sessionById.size).toBe(0);
     expect(state.boardObjectById.size).toBe(0);
     expect(ready()).toBe(true);
+    // The cascade wrote no session or board-object ids: they leave the membership anyway.
+    const members = selectBoardPartition(state, BOARD)?.members;
+    expect([...(members?.sessions ?? [])]).toEqual([]);
+    expect([...(members?.boardObjects ?? [])]).toEqual([]);
+  });
+
+  it("a branch moved off the board during its read takes its sessions out of the board's membership", async () => {
+    const { client, release } = makePartitionClient({
+      branches: [branch('br-1')],
+      sessions: [session('s-1', 'br-1')],
+    });
+    const load = loadBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true });
+    branchPatched(branch('br-1', { board_id: 'board-2' }));
+    release();
+    await load;
+    expect([
+      ...(selectBoardPartition(agorStore.getState(), BOARD)?.members?.sessions ?? []),
+    ]).toEqual([]);
+    // So a complete replace of the board it moved to, which omits s-1, removes it.
+    const others = otherCommittedMembers(agorStore.getState(), boardScopeKey('board-2'));
+    agorStore
+      .getState()
+      .applyMaps((prev) =>
+        replaceScope(prev, boardPartitionScope('board-2'), { sessions: [] }, never, others)
+      );
+    expect(agorStore.getState().sessionById.has('s-1')).toBe(false);
+  });
+
+  it("a branch moved onto the board during its read brings its present sessions into the board's membership", async () => {
+    agorStore.getState().applyMaps((prev) =>
+      applyPartitionSnapshot(
+        prev,
+        snapshotOf({
+          boardId: 'board-2',
+          branches: [branch('br-2', { board_id: 'board-2' })],
+          sessions: [session('s-2', 'br-2', { branch_board_id: 'board-2' })],
+        }),
+        never
+      )
+    );
+    const { client, release } = makePartitionClient({});
+    const load = loadBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true });
+    branchPatched(branch('br-2'));
+    release();
+    await load;
+    const members = selectBoardPartition(agorStore.getState(), BOARD)?.members;
+    expect([...(members?.branches ?? [])]).toEqual(['br-2']);
+    expect([...(members?.sessions ?? [])]).toEqual(['s-2']);
   });
 
   it('keeps a session patched live during the load', async () => {
@@ -556,7 +606,7 @@ describe('loadBoardPartition', () => {
   it('reloading a board reconciles its annotations: deleted, moved and hidden rows leave', async () => {
     // Rows left from before a reconnect unloaded the board.
     agorStore.getState().applyMaps((prev) =>
-      applyBoardPartition(
+      applyPartitionSnapshot(
         prev,
         snapshotOf({
           boardObjects: [boardObject('o-kept', 'br-1'), boardObject('o-hidden', 'br-private')],

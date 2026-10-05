@@ -55,7 +55,12 @@ import {
 } from './agorMaps';
 import { type AgorState, agorStore } from './agorStore';
 import { isLoadLifetimeCurrent } from './loadLifetime';
-import { type CoverageUpdate, liveMembership, type WrittenIds } from './scopeMerge';
+import {
+  type CoverageUpdate,
+  liveMembership,
+  type WrittenIds,
+  withBranchSessions,
+} from './scopeMerge';
 import { pruneSessionMcpLinks } from './sessionMcpLinks';
 
 // Thin bindings to the store primitives. The vanilla store and its actions are
@@ -73,11 +78,19 @@ const applyBranchHardDeleteCascade: AgorState['applyBranchHardDeleteCascade'] = 
   coverage
 ) => agorStore.getState().applyBranchHardDeleteCascade(branchId, coverage);
 
-/** The membership update for a live write of `written` (current scopes only). */
+/**
+ * The membership update for a live write of `written` (current scopes only);
+ * `branchSessions` re-checks the sessions on its branches (a create or move).
+ */
 export const liveCoverage =
-  (written: WrittenIds): CoverageUpdate =>
+  (written: WrittenIds, branchSessions = false): CoverageUpdate =>
   (maps, coverage) =>
-    liveMembership(coverage, maps, written, (entry) => isLoadLifetimeCurrent(entry));
+    liveMembership(
+      coverage,
+      maps,
+      branchSessions ? withBranchSessions(written, maps) : written,
+      isLoadLifetimeCurrent
+    );
 
 /** The ids a branch eviction cascade removes with it. */
 function evictedWith(branchId: string, withBoardObjects: boolean): WrittenIds {
@@ -255,7 +268,7 @@ export function branchCreated(branch: Branch) {
       if (prev.branchById.has(branch.branch_id)) return prev; // Already exists, shouldn't happen
       return { ...prev, branchById: new Map(prev.branchById).set(branch.branch_id, branch) };
     },
-    liveCoverage({ branches: [branch.branch_id] })
+    liveCoverage({ branches: [branch.branch_id] }, true)
   );
 }
 export function branchPatched(branch: Branch) {
@@ -269,12 +282,13 @@ export function branchPatched(branch: Branch) {
     return;
   }
 
+  const moved = agorStore.getState().branchById.get(branch.branch_id)?.board_id !== branch.board_id;
   applyMaps(
     (prev) => {
       const branchById = replaceIfChanged(prev.branchById, branch.branch_id, branch);
       return branchById === prev.branchById ? prev : { ...prev, branchById };
     },
-    liveCoverage({ branches: [branch.branch_id] })
+    liveCoverage({ branches: [branch.branch_id] }, moved)
   );
 }
 export function branchRemoved(branch: Branch) {
