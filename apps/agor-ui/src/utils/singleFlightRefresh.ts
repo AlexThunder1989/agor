@@ -30,7 +30,12 @@
 
 import type { AuthenticatedAgorClient } from '@agor-live/client';
 import { isDefiniteAuthFailure } from './authErrors';
-import { type RefreshResult, refreshAndStoreTokens } from './tokenRefresh';
+import {
+  getStoredRefreshToken,
+  type RefreshResult,
+  RefreshSupersededError,
+  refreshAndStoreTokens,
+} from './tokenRefresh';
 
 /** Custom DOM event fired after tokens have been successfully refreshed. */
 export const TOKENS_REFRESHED_EVENT = 'agor:tokens-refreshed';
@@ -52,7 +57,13 @@ export function dispatchTokensRefreshed(result: RefreshResult): void {
  */
 export const TOKENS_REFRESH_UNRECOVERABLE_EVENT = 'agor:tokens-refresh-unrecoverable';
 
-let inflight: Promise<RefreshResult> | null = null;
+/**
+ * In-flight refreshes keyed by the refresh token they were issued with. A
+ * caller holding different (for example newer, rotated by another tab)
+ * credentials must never join a refresh for an older token: it would receive
+ * a result for credentials it does not hold, or inherit that refresh's failure.
+ */
+const inflight = new Map<string, Promise<RefreshResult>>();
 
 /**
  * Latched once the refresh endpoint returns a definite auth failure. While
@@ -129,9 +140,10 @@ export function refreshTokensSingleFlight(
     return Promise.reject(new RefreshUnrecoverableError());
   }
 
-  if (inflight) return inflight;
+  const existing = inflight.get(refreshToken);
+  if (existing) return existing;
 
-  inflight = refreshAndStoreTokens(client, refreshToken)
+  const flight: Promise<RefreshResult> = refreshAndStoreTokens(client, refreshToken)
     .then((result) => {
       // Successful refresh clears any prior unrecoverable state — e.g. if
       // the user logged out and back in, or a transient failure was
@@ -154,13 +166,20 @@ export function refreshTokensSingleFlight(
       // `cause` preserves diagnostics. Subsequent callers fast-fail with the
       // same type via the `unrecoverable` guard above.
       if (isDefiniteAuthFailure(err)) {
+        // A rejection of a refresh token that is no longer the stored one
+        // (rotated by another tab, replaced by a newer sign-in, or cleared by
+        // logout) says nothing about the credentials now in force. It must
+        // neither latch nor broadcast, or it would sign out a user who has
+        // since authenticated with newer tokens.
+        if (getStoredRefreshToken() !== refreshToken) throw new RefreshSupersededError();
         throw markAuthenticationUnrecoverable(err);
       }
       throw err;
     })
     .finally(() => {
-      inflight = null;
+      if (inflight.get(refreshToken) === flight) inflight.delete(refreshToken);
     });
 
-  return inflight;
+  inflight.set(refreshToken, flight);
+  return flight;
 }

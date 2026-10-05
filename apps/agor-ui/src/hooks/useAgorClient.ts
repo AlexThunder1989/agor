@@ -14,7 +14,11 @@ import {
   RefreshUnrecoverableError,
   refreshTokensSingleFlight,
 } from '../utils/singleFlightRefresh';
-import { getStoredRefreshToken } from '../utils/tokenRefresh';
+import {
+  getStoredAccessToken,
+  getStoredRefreshToken,
+  RefreshSupersededError,
+} from '../utils/tokenRefresh';
 import { announceSessionStreamsCapability } from './sessionStreamsCapability';
 
 interface UseAgorClientResult {
@@ -353,6 +357,23 @@ export function useAgorClient(options: UseAgorClientOptions): UseAgorClientResul
                 // Namespace rejection disables Socket.IO's automatic retries.
                 // A failed REST refresh must therefore schedule its own retry.
                 scheduleManualReconnect();
+                return;
+              }
+              if (recoveryError instanceof RefreshSupersededError) {
+                // The credentials this recovery started with were replaced
+                // (another tab rotated them, or the user signed out/in). That
+                // is not a connection failure: retry the handshake with what
+                // is stored now, or stand down if nothing is. Auth state is
+                // owned by useAuth, which rebuilds this client on a change.
+                const current = getStoredAccessToken();
+                if (current) {
+                  connectionAccessTokenRef.current = current;
+                  scheduleManualReconnect();
+                  return;
+                }
+                setConnecting(false);
+                clearDisconnectGrace();
+                setConnected(false);
                 return;
               }
               if (recoveryError instanceof RefreshUnrecoverableError) {

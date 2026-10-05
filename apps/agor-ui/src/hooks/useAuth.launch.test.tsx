@@ -753,4 +753,134 @@ describe('same-authority network revalidation', () => {
     expect(result.current.authenticated).toBe(false);
     expect(result.current.user).toBeNull();
   });
+
+  describe('refresh superseded while revalidating', () => {
+    const userA = { user_id: 'user-a', role: 'member', email: 'a@example.test' };
+    const userB = { user_id: 'user-b', role: 'member', email: 'b@example.test' };
+
+    function mountWithRefreshOnly(refreshToken: string) {
+      window.history.replaceState({}, '', '/');
+      localStorage.clear();
+      localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+      const post = deferred<{ accessToken: string; refreshToken: string; user: typeof userA }>();
+      refreshCreate.mockReturnValueOnce(post.promise);
+      const hook = renderHook(() => useAuth());
+      return { ...hook, post };
+    }
+
+    async function settlePostAfterRotation(
+      post: ReturnType<typeof mountWithRefreshOnly>['post'],
+      rotated: { access: string; refresh: string }
+    ) {
+      // Another tab rotates the shared refresh token while this tab's POST is out.
+      localStorage.setItem(ACCESS_TOKEN_KEY, rotated.access);
+      localStorage.setItem(REFRESH_TOKEN_KEY, rotated.refresh);
+      await act(async () => {
+        post.resolve({ accessToken: 'discarded', refreshToken: 'discarded', user: userA });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    it('clears the mount spinner by continuing with the tokens another tab stored', async () => {
+      const { result, post } = mountWithRefreshOnly('refresh-rotated-1');
+      await waitFor(() => expect(refreshCreate).toHaveBeenCalledTimes(1));
+      expect(result.current.loading).toBe(true);
+      authenticate.mockResolvedValueOnce({ accessToken: 'access-from-tab-b', user: userA });
+
+      await settlePostAfterRotation(post, {
+        access: 'access-from-tab-b',
+        refresh: 'refresh-from-tab-b',
+      });
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(authenticate).toHaveBeenCalledWith({
+        strategy: 'jwt',
+        accessToken: 'access-from-tab-b',
+      });
+      expect(result.current.authenticated).toBe(true);
+      expect(result.current.user).toEqual(userA);
+      expect(localStorage.getItem(REFRESH_TOKEN_KEY)).toBe('refresh-from-tab-b');
+    });
+
+    it('refreshes with the newly stored refresh token when the other tab left no usable access token', async () => {
+      const { result, post } = mountWithRefreshOnly('refresh-rotated-2');
+      await waitFor(() => expect(refreshCreate).toHaveBeenCalledTimes(1));
+      refreshCreate.mockResolvedValueOnce({
+        accessToken: 'access-second',
+        refreshToken: 'refresh-second',
+        user: userA,
+      });
+
+      localStorage.setItem(REFRESH_TOKEN_KEY, 'refresh-from-tab-b-2');
+      await act(async () => {
+        post.resolve({ accessToken: 'discarded', refreshToken: 'discarded', user: userA });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      await waitFor(() => expect(result.current.authenticated).toBe(true));
+      expect(refreshCreate).toHaveBeenLastCalledWith({ refreshToken: 'refresh-from-tab-b-2' });
+      expect(result.current.loading).toBe(false);
+    });
+
+    it('settles unauthenticated, not loading, when the other tab signed out', async () => {
+      const { result, post } = mountWithRefreshOnly('refresh-rotated-3');
+      await waitFor(() => expect(refreshCreate).toHaveBeenCalledTimes(1));
+
+      localStorage.clear();
+      await act(async () => {
+        post.resolve({ accessToken: 'discarded', refreshToken: 'discarded', user: userA });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.authenticated).toBe(false);
+    });
+
+    it('still lets a logout during the continuation win', async () => {
+      const { result, post } = mountWithRefreshOnly('refresh-rotated-4');
+      await waitFor(() => expect(refreshCreate).toHaveBeenCalledTimes(1));
+      const continuation = deferred<{ accessToken: string; user: typeof userA }>();
+      authenticate.mockReturnValueOnce(continuation.promise);
+
+      await settlePostAfterRotation(post, { access: 'access-tab-b-4', refresh: 'refresh-tab-b-4' });
+      await waitFor(() => expect(authenticate).toHaveBeenCalled());
+      await act(async () => {
+        await result.current.logout();
+      });
+      await act(async () => {
+        continuation.resolve({ accessToken: 'access-tab-b-4', user: userA });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      expect(result.current.authenticated).toBe(false);
+      expect(result.current.user).toBeNull();
+      expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBeNull();
+    });
+
+    it('does not log out a user who signed in with newer tokens when the superseded refresh is rejected', async () => {
+      const { result, post } = mountWithRefreshOnly('refresh-old-401');
+      await waitFor(() => expect(refreshCreate).toHaveBeenCalledTimes(1));
+      authenticate.mockResolvedValueOnce({
+        accessToken: 'token-b',
+        refreshToken: 'refresh-b',
+        user: userB,
+      });
+      await act(async () => {
+        await result.current.login('b@example.test', 'pw');
+      });
+      expect(result.current.user).toEqual(userB);
+
+      await act(async () => {
+        post.reject(
+          Object.assign(new Error('jwt expired'), { code: 401, name: 'NotAuthenticated' })
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      expect(result.current.authenticated).toBe(true);
+      expect(result.current.user).toEqual(userB);
+      expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBe('token-b');
+      expect(localStorage.getItem(REFRESH_TOKEN_KEY)).toBe('refresh-b');
+    });
+  });
 });

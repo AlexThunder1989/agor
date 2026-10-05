@@ -5,6 +5,7 @@ import {
   resetRefreshFailureState,
   TOKENS_REFRESH_UNRECOVERABLE_EVENT,
 } from '../utils/singleFlightRefresh';
+import { RefreshSupersededError } from '../utils/tokenRefresh';
 import { useAgorClient } from './useAgorClient';
 
 // Keep every real export; only stub the client factory so the hook wires a
@@ -554,6 +555,53 @@ describe('weak-network recovery', () => {
     expect(io.connect).toHaveBeenCalledTimes(2);
     expect(result.current.connected).toBe(true);
     localStorage.clear();
+    refreshTokensMock.mockReset();
+  });
+
+  it('retries the handshake with the stored credentials, with no error, when its refresh is superseded', async () => {
+    vi.useFakeTimers();
+    const { io, fireIo, result } = await connectedSeam();
+    localStorage.setItem('agor-refresh-token', 'refresh-old');
+    vi.mocked(createRestClient).mockResolvedValue({} as never);
+    refreshTokensMock.mockRejectedValueOnce(new RefreshSupersededError());
+    // Another tab has since rotated and stored fresh credentials.
+    localStorage.setItem('agor-access-token', 'access-from-other-tab');
+    act(() => {
+      io.connected = false;
+      fireIo('disconnect', 'transport close');
+      fireIo('connect_error', Object.assign(new Error('expired'), { code: 401 }));
+    });
+    await act(async () => {});
+    expect(result.current.error).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    expect(io.connect).toHaveBeenCalledTimes(2);
+    expect(result.current.connected).toBe(true);
+    const tokenSource = vi.mocked(createClient).mock.calls.at(-1)?.[2]
+      ?.socketAuthentication?.accessToken;
+    expect((tokenSource as () => string | null | undefined)()).toBe('access-from-other-tab');
+    localStorage.clear();
+    refreshTokensMock.mockReset();
+  });
+
+  it('stands down without an error when a superseded refresh left no stored credentials', async () => {
+    vi.useFakeTimers();
+    const { io, fireIo, result } = await connectedSeam();
+    localStorage.setItem('agor-refresh-token', 'refresh-old');
+    vi.mocked(createRestClient).mockResolvedValue({} as never);
+    refreshTokensMock.mockImplementationOnce(async () => {
+      localStorage.clear();
+      throw new RefreshSupersededError();
+    });
+    act(() => {
+      io.connected = false;
+      fireIo('disconnect', 'transport close');
+      fireIo('connect_error', Object.assign(new Error('expired'), { code: 401 }));
+    });
+    await act(async () => {});
+    await act(() => vi.advanceTimersByTimeAsync(31_000));
+    expect(result.current.error).toBeNull();
+    expect(result.current.connecting).toBe(false);
+    expect(io.connect).toHaveBeenCalledTimes(1);
     refreshTokensMock.mockReset();
   });
 });

@@ -200,6 +200,7 @@ export function useAuth(): UseAuthReturn {
   const reAuthenticate = useCallback(
     async (retryCount = 0, pendingLaunchCode?: string, ownEpoch?: number): Promise<void> => {
       const MAX_RETRIES = 5;
+      const MAX_SUPERSEDED_RETRIES = 3;
       // A fresh call supersedes any in-flight revalidation; internal retries
       // keep the epoch of the run that scheduled them.
       const epoch = ownEpoch ?? ++revalidationEpochRef.current;
@@ -210,9 +211,7 @@ export function useAuth(): UseAuthReturn {
       // uses its own blocking lifecycle below.
       setState((prev) => ({ ...prev, loading: !prev.authenticated, error: null }));
 
-      const storedAccessToken = getStoredAccessToken();
-      const storedRefreshToken = getStoredRefreshToken();
-      const hasStoredTokens = !!storedAccessToken || !!storedRefreshToken;
+      const hasStoredTokens = !!getStoredAccessToken() || !!getStoredRefreshToken();
       const activeLaunchCode =
         pendingLaunchCode ||
         (typeof window !== 'undefined' ? getLaunchCodeFromSearch(window.location.search) : null);
@@ -220,8 +219,13 @@ export function useAuth(): UseAuthReturn {
       let launchFailed = false;
 
       async function authenticateWithStoredTokens(
-        client: Awaited<ReturnType<typeof createRestClient>>
+        client: Awaited<ReturnType<typeof createRestClient>>,
+        supersededRetries = 0
       ) {
+        // Re-read on every pass: another tab can rotate the shared refresh
+        // token while a refresh is in flight, and the retry must use it.
+        const storedAccessToken = getStoredAccessToken();
+        const storedRefreshToken = getStoredRefreshToken();
         if (!storedAccessToken && !storedRefreshToken) return false;
 
         // Try to authenticate with stored access token first
@@ -268,8 +272,15 @@ export function useAuth(): UseAuthReturn {
             return true;
           } catch (refreshError) {
             if (isStale()) return true;
-            // Another authority replaced the credentials mid-flight; it owns state.
-            if (refreshError instanceof RefreshSupersededError) return true;
+            // The credentials were replaced mid-flight (another tab rotated the
+            // shared refresh token, or this tab's own authority changed). A
+            // local replacement already advanced the epoch (isStale above);
+            // otherwise continue with whatever is stored now rather than
+            // leaving the mount spinner up.
+            if (refreshError instanceof RefreshSupersededError) {
+              if (supersededRetries >= MAX_SUPERSEDED_RETRIES) throw refreshError;
+              return authenticateWithStoredTokens(client, supersededRetries + 1);
+            }
             // Refresh token also expired or invalid
             if (
               !isDefiniteAuthFailure(refreshError) &&
