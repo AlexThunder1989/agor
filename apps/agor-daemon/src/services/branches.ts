@@ -183,6 +183,7 @@ function shouldSqlPageBranchQuery(query?: Record<string, unknown>): boolean {
     'branch_id',
     'created_by',
     'zone_id',
+    'search',
     '$limit',
     '$skip',
     '$sort',
@@ -191,7 +192,7 @@ function shouldSqlPageBranchQuery(query?: Record<string, unknown>): boolean {
   // An empty virtual filter historically goes through the generic adapter;
   // do not turn it into an unrestricted SQL page.
   if (query.zone_id === '') return false;
-  for (const key of ['archived', 'board_id', 'repo_id', 'zone_id', 'created_by']) {
+  for (const key of ['archived', 'board_id', 'repo_id', 'zone_id', 'created_by', 'search']) {
     if (query[key] !== undefined && typeof query[key] !== 'boolean' && key === 'archived') {
       return false;
     }
@@ -1840,6 +1841,7 @@ export class BranchesService extends DrizzleService<Branch, Partial<Branch>, Bra
         archived: typeof query?.archived === 'boolean' ? query.archived : undefined,
         branchIds,
         createdBy: typeof query?.created_by === 'string' ? (query.created_by as UUID) : undefined,
+        search: typeof query?.search === 'string' ? query.search : undefined,
         visibleToUserId: findParams?._agorSqlBranchAccessUserId,
         limit,
         offset: skip,

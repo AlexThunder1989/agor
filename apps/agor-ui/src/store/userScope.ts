@@ -54,7 +54,7 @@ import {
 } from './agorHydration';
 import { applyEntityFill, type DataMaps } from './agorMaps';
 import { type AgorState, agorStore } from './agorStore';
-import { isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
+import { captureLoadLifetime, isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
 import {
   type CoverageMembers,
   type CoverageUpdate,
@@ -135,7 +135,7 @@ export const selectTeammatesLoaded = (s: Pick<AgorState, 'coverage'>) =>
 export const selectTeammatesTruncated = (s: Pick<AgorState, 'coverage'>) =>
   cappedPiece(s, USER_SCOPE_KEYS.teammates);
 
-const rowsOf = <T>(result: unknown): T[] =>
+export const rowsOf = <T>(result: unknown): T[] =>
   Array.isArray(result) ? (result as T[]) : ((result as { data?: T[] })?.data ?? []);
 
 /**
@@ -227,10 +227,10 @@ let runSequence = 0;
 
 const isCurrent = (run: ScopeRun) => currentRun === run && isLoadLifetimeCurrent(run.lifetime);
 
-type FillRows = { branches?: Branch[]; sessions?: Session[] };
+export type FillRows = { branches?: Branch[]; sessions?: Session[] };
 
 /**
- * Read rows and fill-merge them; null when the run went stale. Read errors
+ * Read rows and fill-merge them; null once `current` turns false. Read errors
  * propagate, and so does a read whose every attempt spanned a wholesale
  * replacement (`WholesaleReplacementError`): its snapshot is never applied.
  *
@@ -241,12 +241,13 @@ type FillRows = { branches?: Branch[]; sessions?: Session[] };
  * (`settledMembers`).
  */
 async function fillRead(
-  run: ScopeRun,
+  current: () => boolean,
   read: () => Promise<FillRows>,
   options: {
     /** Rows the filter can't have produced mean the daemon ignored the filter. */
     violatesFilter?: (rows: FillRows) => boolean;
     piece?: {
+      run: ScopeRun;
       key: UserScopeKey;
       complete: (rows: FillRows) => boolean;
       commitIf?: () => Promise<boolean>;
@@ -264,7 +265,7 @@ async function fillRead(
         if (isUnsupportedQueryError(err)) throw new UnsupportedScopeReadError(String(err));
         throw err;
       }
-      if (!isCurrent(run)) return null;
+      if (!current()) return null;
       if (violatesFilter?.(rows)) throw new UnsupportedScopeReadError('filter ignored');
       if (wholesaleReplacedSince(fence)) {
         if (attempt < MAX_WHOLESALE_RESTARTS) continue;
@@ -278,10 +279,10 @@ async function fillRead(
           withCoverage(
             coverage,
             piece.key,
-            pieceEntry(run, {
+            pieceEntry(piece.run, {
               status: 'loaded',
               members: settledMembers(
-                userScopePiece(piece.key, run.userId),
+                userScopePiece(piece.key, piece.run.userId),
                 rows as ScopeRows,
                 maps,
                 (collection) => touchedIdsSince(collection, fence.startRevisions[collection])
@@ -293,7 +294,7 @@ async function fillRead(
       if (piece?.commitIf) {
         // A deferred commit publishes the rows now and the coverage once allowed.
         agorStore.getState().applyMaps(update);
-        if (!(await piece.commitIf()) || !isCurrent(run)) return null;
+        if (!(await piece.commitIf()) || !current()) return null;
         update = (prev) => prev;
       }
       agorStore.getState().applyMaps(update, settle);
@@ -302,6 +303,18 @@ async function fillRead(
       endPartitionLoad();
     }
   }
+}
+
+/**
+ * Read rows on demand — search results, a deep link's target, genealogy
+ * links — and fill-merge them under the current load lifetime. They join no
+ * scope: no coverage is committed. Null without an authority or once the
+ * lifetime ends; read errors propagate.
+ */
+export async function fillOnDemand(read: () => Promise<FillRows>): Promise<FillRows | null> {
+  const lifetime = captureLoadLifetime();
+  if (!lifetime) return null;
+  return fillRead(() => isLoadLifetimeCurrent(lifetime), read);
 }
 
 /**
@@ -491,7 +504,7 @@ async function readBranchChunk(run: ScopeRun, chunk: string[]): Promise<void> {
   try {
     const requested = new Set(chunk);
     const rows = await fillRead(
-      run,
+      () => isCurrent(run),
       async () => ({
         branches: rowsOf<Branch>(
           await run.client.service('branches').find({
@@ -681,7 +694,7 @@ export async function startUserScope(
   // Small reads first (U2, U3), then the bulk U1: on a slow socket the
   // teammate and branch answers then don't queue behind thousands of rows.
   const u2 = fillRead(
-    run,
+    () => isCurrent(run),
     async () => ({
       branches: rowsOf<Branch>(
         await client.service('branches').findAll({
@@ -692,13 +705,13 @@ export async function startUserScope(
     {
       violatesFilter: ({ branches }) =>
         (branches ?? []).some((row) => row.created_by !== run.userId),
-      piece: { key: USER_SCOPE_KEYS.branches, complete: () => true },
+      piece: { run, key: USER_SCOPE_KEYS.branches, complete: () => true },
     }
   ).then((rows) => !!rows);
   // The daemon reports the real total, so a capped read is never "all teammates".
   let teammateTotal = 0;
   const u3 = fillRead(
-    run,
+    () => isCurrent(run),
     async () => {
       const result = await client.service('branches').find({
         query: { teammate: true, archived: false, $limit: PAGINATION.MAX_TEAMMATE_BRANCHES },
@@ -710,6 +723,7 @@ export async function startUserScope(
     },
     {
       piece: {
+        run,
         key: USER_SCOPE_KEYS.teammates,
         complete: (rows) => teammateTotal <= (rows.branches?.length ?? 0),
         // U3's rows can't be checked against its filter (the server's
@@ -724,7 +738,7 @@ export async function startUserScope(
   const u1 = options.gatedMineComplete
     ? Promise.resolve(true)
     : fillRead(
-        run,
+        () => isCurrent(run),
         async () => {
           // Await only a real barrier: even `await undefined` would send U1 a
           // microtask late, behind the global snapshots started right after.
@@ -744,6 +758,7 @@ export async function startUserScope(
           violatesFilter: ({ sessions }) =>
             (sessions ?? []).some((row) => row.created_by !== run.userId || row.archived),
           piece: {
+            run,
             key: USER_SCOPE_KEYS.sessions,
             complete: (rows) => (rows.sessions?.length ?? 0) < MY_SESSIONS_FULL_LIMIT,
           },

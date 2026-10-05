@@ -229,11 +229,46 @@ export async function exerciseUserScopeReads(db: Database) {
     { data: [], total: 0 }
   );
 
+  // ── search: every token in a searchable field, over the visible set. ────
+  const branchSearch = async (search: string, visibleToUserId: UserID) =>
+    new Set(
+      (await branchRepo.findPage({ visibleToUserId, search, archived: false })).data.map(
+        (b) => b.branch_id
+      )
+    );
+  expect(await branchSearch('MATE', viewer)).toEqual(new Set([ids.mate]));
+  expect(await branchSearch('mate', owner)).toEqual(new Set([ids.mate, ids.privateMate]));
+  expect(await branchSearch('priv mate', owner)).toEqual(new Set([ids.privateMate]));
+  expect(await branchSearch('%', owner)).toEqual(new Set());
+  const titled = await sessionRepo.create({
+    branch_id: ids.public,
+    created_by: owner,
+    status: 'idle',
+    title: 'Fix the LOGIN flow',
+    description: '100% done',
+  });
+  const hiddenTitled = await sessionRepo.create({
+    branch_id: ids.private,
+    created_by: owner,
+    status: 'idle',
+    title: 'Fix the login page',
+  });
+  const sessionSearch = async (search: string, visibleToUserId: UserID) =>
+    (await sessionRepo.findPage({ visibleToUserId, search, limit: 10 })).data.map(
+      (s) => s.session_id
+    );
+  expect(await sessionSearch('login fix', viewer)).toEqual([titled.session_id]);
+  expect((await sessionSearch('login fix', owner)).length).toBe(2);
+  expect(await sessionSearch('100%', viewer)).toEqual([titled.session_id]);
+  expect(await sessionSearch('_', viewer)).toEqual([]);
+  expect(await sessionSearch('   ', owner)).toEqual([]);
+
   return {
     owner,
     viewer,
     boardIds: [sharedBoard.board_id, privateBoard.board_id] as BoardID[],
     branchIds: Object.values(ids),
     sessionIds,
+    titledSessionIds: [titled.session_id, hiddenTitled.session_id] as SessionID[],
   };
 }

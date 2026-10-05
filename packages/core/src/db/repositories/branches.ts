@@ -59,6 +59,7 @@ import {
   jsonExtract,
   lockRowForUpdate,
   runDatabaseTransaction,
+  searchTokensCondition,
   select,
   txAsDb,
   update,
@@ -488,6 +489,8 @@ export class BranchRepository implements BaseRepository<Branch, Partial<Branch>>
     branchIds?: BranchID[];
     /** Restrict to branches created by this user (a filter, never an access grant). */
     createdBy?: UUID;
+    /** Restrict to branches matching this search (`SEARCHABLE_FIELDS.branch`). */
+    search?: string;
     visibleToUserId?: UUID;
     limit?: number;
     offset?: number;
@@ -508,6 +511,22 @@ export class BranchRepository implements BaseRepository<Branch, Partial<Branch>>
     if (opts.archived !== undefined) conditions.push(eq(branches.archived, opts.archived));
     if (opts.branchIds) conditions.push(inArray(branches.branch_id, opts.branchIds));
     if (opts.createdBy) conditions.push(eq(branches.created_by, opts.createdBy));
+    if (opts.search !== undefined) {
+      const data = (path: string) => jsonExtract(this.db, branches.data, path);
+      conditions.push(
+        searchTokensCondition(opts.search, [
+          branches.name,
+          branches.ref,
+          data('notes'),
+          data('issue_url'),
+          data('pull_request_url'),
+          // A superset of `getTeammateConfig(b)?.displayName`.
+          data('custom_context.teammate.displayName'),
+          data('custom_context.assistant.displayName'),
+          data('custom_context.agent.displayName'),
+        ])
+      );
+    }
     if (opts.visibleToUserId) {
       conditions.push(visibleBranchAccessCondition(this.db, opts.visibleToUserId));
     }

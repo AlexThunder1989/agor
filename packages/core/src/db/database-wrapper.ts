@@ -19,6 +19,7 @@ import type { LibSQLDatabase } from 'drizzle-orm/libsql';
 import type { PgTable } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type { SQLiteTable } from 'drizzle-orm/sqlite-core';
+import { tokenizeSearchQuery } from '../search/searchable-fields';
 import type { Database } from './client';
 import type * as postgresSchema from './schema.postgres';
 import type * as sqliteSchema from './schema.sqlite';
@@ -185,6 +186,25 @@ export function jsonExtract(db: Database, column: SQL.Aliased | SQL | any, path:
       return sql`${column}${sql.join(objectParts, sql``)}${sql.raw(`->>'${lastPart}'`)}`;
     }
   }
+}
+
+/**
+ * `matchSearchTokens` (`@agor/core/search`) as SQL: every token of `search`
+ * (`tokenizeSearchQuery`) appears, case-insensitively and literally, in at
+ * least one of `fields`. A search without tokens matches nothing, as on the
+ * client.
+ */
+export function searchTokensCondition(search: string, fields: SQLWrapper[]): SQL {
+  const tokens = tokenizeSearchQuery(search);
+  if (tokens.length === 0) return sql`1 = 0`;
+  const haystack = sql`lower(${sql.join(
+    fields.map((field) => sql`coalesce(${field}, '')`),
+    sql` || ' ' || `
+  )})`;
+  const matches = tokens.map(
+    (token) => sql`${haystack} like ${`%${token.replace(/[\\%_]/g, '\\$&')}%`} escape '\\'`
+  );
+  return sql`(${sql.join(matches, sql` and `)})`;
 }
 
 /**

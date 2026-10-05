@@ -244,12 +244,14 @@ function shouldSqlPageSessionQuery(query?: Record<string, unknown>, forcePage = 
   const wantsBoard = query.board_id !== undefined;
   const wantsBranch = query.branch_id !== undefined;
   const wantsSessions = query.session_id !== undefined;
+  const wantsSearch = query.search !== undefined;
   if (
     !wantsRecency &&
     !wantsCreatedAt &&
     !wantsBoard &&
     !wantsBranch &&
     !wantsSessions &&
+    !wantsSearch &&
     !forcePage
   )
     return false;
@@ -261,6 +263,7 @@ function shouldSqlPageSessionQuery(query?: Record<string, unknown>, forcePage = 
     'branch_id',
     'session_id',
     'created_by',
+    'search',
     '$sort',
     '$limit',
     '$count',
@@ -277,6 +280,7 @@ function shouldSqlPageSessionQuery(query?: Record<string, unknown>, forcePage = 
     return false;
   if (wantsBoard && typeof query.board_id !== 'string') return false;
   if (query.created_by !== undefined && typeof query.created_by !== 'string') return false;
+  if (wantsSearch && typeof query.search !== 'string') return false;
   if (wantsSessions && idFilterValues(query.session_id) === undefined) return false;
   if (wantsBranch) {
     const branchFilter = query.branch_id;
@@ -2092,6 +2096,7 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
             ? (idFilterValues(query.session_id) as SessionID[])
             : undefined,
         createdBy: query?.created_by as UserID | undefined,
+        search: query?.search as string | undefined,
         archived: query?.archived as boolean | undefined,
         sortUpdatedAt: sortSpec?.updated_at,
         sortCreatedAt: sortSpec?.created_at,

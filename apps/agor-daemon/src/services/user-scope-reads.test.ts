@@ -149,6 +149,30 @@ describe('user-scope reads through transport hooks', () => {
       expect(rows<Session>(result).map((s) => s.session_id)).toEqual([fixture.sessionIds[0]]);
     }
     const tooMany = Array.from({ length: 201 }, () => fixture.sessionIds[0]);
+    // A search runs on the SQL page, for a regular caller and for a superadmin.
+    const admin = await new UsersRepository(db).create({
+      email: 'admin@example.invalid',
+      role: 'superadmin',
+    });
+    for (const [user, expected] of [
+      [viewer, [fixture.titledSessionIds[0]]],
+      [admin, fixture.titledSessionIds],
+    ] as const) {
+      const found = await app.service('sessions').find({
+        provider: 'rest',
+        user,
+        query: { search: 'login FIX', archived: false, $limit: 10, $count: false },
+      } as never);
+      expect(new Set(rows<Session>(found).map((s) => s.session_id))).toEqual(new Set(expected));
+    }
+    const branches = rows<Branch>(
+      await app.service('branches').find({
+        provider: 'rest',
+        user: viewer,
+        query: { search: 'mate', archived: false },
+      } as never)
+    ).map((b) => b.branch_id);
+    expect(branches).toEqual([fixture.branchIds[2]]);
     await expect(
       app.service('sessions').find({
         provider: 'rest',

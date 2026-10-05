@@ -161,6 +161,8 @@ export const sessionQuerySchema = createQuerySchema(
     forked_from_session_id: Type.Optional(CommonSchemas.uuid),
     schedule_id: Type.Optional(CommonSchemas.uuid),
     created_by: Type.Optional(CommonSchemas.uuid),
+    // Every token in `SEARCHABLE_FIELDS.session` (SQL page only).
+    search: Type.Optional(Type.String({ maxLength: 255 })),
     archived: Type.Optional(CommonSchemas.boolean),
     created_at: Type.Optional(CommonSchemas.timestamp),
     updated_at: Type.Optional(CommonSchemas.timestamp),
@@ -343,6 +345,8 @@ export const branchQuerySchema = createQuerySchema(
     created_by: Type.Optional(CommonSchemas.uuid),
     // Teammate marker filter (`BranchRepository.findTeammateBranches`).
     teammate: Type.Optional(CommonSchemas.boolean),
+    // Every token in `SEARCHABLE_FIELDS.branch` (SQL page only).
+    search: Type.Optional(Type.String({ maxLength: 255 })),
     repo_id: Type.Optional(CommonSchemas.uuid),
     board_id: Type.Optional(CommonSchemas.uuid),
     zone_id: Type.Optional(Type.String({ maxLength: 255 })),

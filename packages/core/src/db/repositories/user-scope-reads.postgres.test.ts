@@ -41,6 +41,18 @@ describe.skipIf(!url || process.env.AGOR_DB_DIALECT !== 'postgresql')(
           expect(
             await sessions.findPage({ visibleToUserId, sessionIds: foreign.sessionIds, limit: 10 })
           ).toEqual({ data: [], total: 0 });
+          const found = [
+            ...(await branches.findPage({ visibleToUserId, search: 'mate' })).data.map(
+              (b) => b.branch_id
+            ),
+            ...(await sessions.findPage({ visibleToUserId, search: 'login', limit: 10 })).data.map(
+              (s) => s.session_id
+            ),
+          ];
+          expect(found.length).toBeGreaterThan(0);
+          for (const id of [...foreign.branchIds, ...foreign.titledSessionIds]) {
+            expect(found).not.toContain(id);
+          }
           const counted = (await branches.countActiveByBoard({ visibleToUserId })).map(
             (row) => row.board_id
           );

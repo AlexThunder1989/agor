@@ -510,6 +510,7 @@ export const MobileApp: React.FC<MobileAppProps> = ({
             path="search"
             element={
               <MobileSearchPage
+                client={client}
                 currentUser={user}
                 onOpenWorkspaceSettings={onOpenWorkspaceSettings}
                 onOpenBranch={(branchId) => setBranchEditor({ branchId, tab: 'general' })}

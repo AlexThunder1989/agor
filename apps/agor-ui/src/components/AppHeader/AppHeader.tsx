@@ -347,6 +347,7 @@ const AppHeaderInner: React.FC<AppHeaderProps> = ({
           />
         )}
         <AppHeaderGlobalSearch
+          client={presenceClient}
           currentUserId={currentUserId}
           branchById={branchById}
           boardById={boardById}

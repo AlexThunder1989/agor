@@ -39,8 +39,10 @@ import {
   deleteFrom,
   insert,
   isPostgresDatabase,
+  jsonExtract,
   lockRowForUpdate,
   runDatabaseTransaction,
+  searchTokensCondition,
   select,
   txAsDb,
   update,
@@ -132,6 +134,8 @@ export interface SessionPageOptions {
   sessionIds?: SessionID[];
   /** Restrict to sessions created by this user (a filter, never an access grant). */
   createdBy?: UserID;
+  /** Restrict to sessions matching this search (`SEARCHABLE_FIELDS.session`). */
+  search?: string;
   archived?: boolean;
   sortUpdatedAt?: 1 | -1;
   sortCreatedAt?: 1 | -1;
@@ -653,6 +657,15 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
       if (opts.sessionIds !== undefined)
         conditions.push(inArray(sessions.session_id, opts.sessionIds));
       if (opts.createdBy !== undefined) conditions.push(eq(sessions.created_by, opts.createdBy));
+      if (opts.search !== undefined) {
+        conditions.push(
+          searchTokensCondition(opts.search, [
+            jsonExtract(this.db, sessions.data, 'title'),
+            jsonExtract(this.db, sessions.data, 'description'),
+            sessions.agentic_tool,
+          ])
+        );
+      }
       if (opts.archived !== undefined) conditions.push(eq(sessions.archived, opts.archived));
       if (opts.visibleToUserId) {
         // Same branch.view policy either way; only the evaluation shape differs.

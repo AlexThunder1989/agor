@@ -1,10 +1,15 @@
 import {
+  type AgorClient,
+  type Branch,
   isTeammate,
   matchSearchTokens,
   SEARCHABLE_FIELDS,
+  type Session,
   tokenizeSearchQuery,
 } from '@agor-live/client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { sessionListQuery } from '../../store/sessionListQuery';
+import { fillOnDemand, rowsOf } from '../../store/userScope';
 import {
   type ChipFilter,
   EMPTY_COUNTS,
@@ -21,6 +26,8 @@ import {
 import { byTimestamp, hasAnyEntries } from './utils';
 
 interface UseGlobalSearchInput extends GlobalSearchEntityMaps {
+  /** Also search the daemon's sessions and branches (see `useServerSearch`). */
+  client?: AgorClient | null;
   query: string;
   ownedByMe: boolean;
   activeTypeChip: ChipFilter;
@@ -42,15 +49,55 @@ function useDebouncedSearchQuery(query: string) {
 }
 
 /**
+ * The server half of a search: read the sessions and branches matching
+ * `query` from the daemon (its `search` key, under the caller's visibility)
+ * and fill them into the store, so the local pass below finds rows the store
+ * never loaded. Display only: the rows join no scope. Rows the query can't
+ * have matched (a daemon that ignores `search`) are dropped.
+ */
+function useServerSearch(
+  client: AgorClient | null | undefined,
+  query: string,
+  createdBy: string | undefined
+) {
+  useEffect(() => {
+    const search = query.trim();
+    const tokens = tokenizeSearchQuery(search);
+    if (!client || search.length < MIN_QUERY_LENGTH || tokens.length === 0) return;
+    const filter = {
+      search,
+      archived: false,
+      ...(createdBy ? { created_by: createdBy } : {}),
+      $sort: { updated_at: -1 },
+      $limit: SECTION_LIMIT_EXPANDED,
+    };
+    fillOnDemand(async () => {
+      const [sessions, branches] = await Promise.all([
+        client.service('sessions').find({ query: sessionListQuery({ ...filter, $count: false }) }),
+        client.service('branches').find({ query: filter }),
+      ]);
+      return {
+        sessions: rowsOf<Session>(sessions).filter((s) =>
+          matchSearchTokens(tokens, SEARCHABLE_FIELDS.session(s))
+        ),
+        branches: rowsOf<Branch>(branches).filter((b) =>
+          matchSearchTokens(tokens, SEARCHABLE_FIELDS.branch(b))
+        ),
+      };
+    }).catch((err) => console.warn('[GlobalSearch] server search failed:', err));
+  }, [client, query, createdBy]);
+}
+
+/**
  * Global-search client-side filter over the in-memory entity maps from useAgorData.
  *
  * V1 scaffolding: AND-of-tokens substring match over each entity's
  * `SEARCHABLE_FIELDS` set (the canonical registry in `@agor/core/search`).
- * No backend round-trip; the maps are already streamed by WebSocket. When V2
- * lands (message search, FTS), this hook gets replaced with a server-driven
- * fan-out keeping the same return shape and reading the same registry.
+ * Sessions and branches also come from the daemon (`useServerSearch`), filled
+ * into the maps after the debounce, so the store need not hold them all.
  */
 export function useGlobalSearch({
+  client,
   query,
   ownedByMe,
   activeTypeChip,
@@ -72,6 +119,7 @@ export function useGlobalSearch({
   flush: () => void;
 } {
   const { debouncedQuery, flush } = useDebouncedSearchQuery(query);
+  useServerSearch(client, debouncedQuery, ownedByMe ? currentUserId : undefined);
 
   const { results, counts } = useMemo<{ results: ResultsByType; counts: SearchCounts }>(() => {
     const trimmed = debouncedQuery.trim();
