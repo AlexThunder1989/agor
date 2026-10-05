@@ -99,7 +99,5 @@ it('renders an asynchronously created branch in its zone without remounting the 
     expect(nodes[0].style.transform.replaceAll(' ', '')).toBe('translate(180px,220px)');
   });
   expect(agorStore.getState().branchById.get(branch.branch_id)?.filesystem_status).toBe('ready');
-  expect(agorStore.getState().boardObjectByBranchId.get(branch.branch_id)?.zone_id).toBe(
-    'zone-tasks'
-  );
+  expect(agorStore.getState().boardObjectsByBoardId.get(board.board_id)).toEqual([placement]);
 });
