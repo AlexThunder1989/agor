@@ -68,6 +68,11 @@ export interface UserScopeMeta {
   /** Referenced branch ids the server did not return (archived, deleted or invisible). */
   absentBranchIds: Set<string>;
   /**
+   * Deep-link targets (`/s/`, `/m/session/`, `/w/` tokens) whose targeted read
+   * returned nothing displayable: "not found" is shown only for these.
+   */
+  missingLinkTargets: Set<string>;
+  /**
    * The daemon does not support the user-scope reads (an older daemon rejects
    * or ignores their query keys). Terminal for the run; while global
    * hydration exists (Steps 1–2) its snapshots complete the scope instead.
@@ -77,6 +82,7 @@ export interface UserScopeMeta {
 
 const INITIAL_USER_SCOPE: UserScopeMeta = {
   absentBranchIds: new Set(),
+  missingLinkTargets: new Set(),
   userScopeDegraded: false,
 };
 
@@ -287,6 +293,7 @@ export const agorStore = createStore<AgorState>()(
         partitionEpoch: get().partitionEpoch + 1,
         globallyHydrated: new Set(),
         absentBranchIds: new Set(),
+        missingLinkTargets: new Set(),
         sessionMcpLoaded: new Set(),
       }),
 
@@ -307,6 +314,7 @@ export const agorStore = createStore<AgorState>()(
         sessionMcpLoaded: new Set(),
         ...INITIAL_USER_SCOPE,
         absentBranchIds: new Set(),
+        missingLinkTargets: new Set(),
       }),
 
     // Meta setters mirror `useState`'s bail-out: a write equal to the current

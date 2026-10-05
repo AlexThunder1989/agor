@@ -163,12 +163,9 @@ it('lets the user exit when an open session is removed or becomes inaccessible',
   expect(window.location.pathname).toBe('/m');
 });
 
-it('keeps uncached session wording neutral after bootstrap and renders a late targeted result', async () => {
+it('waits for the targeted read of an uncached session and renders its late result', async () => {
   mount('/m/session/archived');
-  expect(screen.getByText('Session not loaded')).toBeInTheDocument();
-  expect(
-    screen.getByText('It may still be loading or may no longer be available.')
-  ).toBeInTheDocument();
+  expect(screen.queryByText('Session not loaded')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Back to home' })).toBeInTheDocument();
   await act(async () =>
     agorStore.setState({

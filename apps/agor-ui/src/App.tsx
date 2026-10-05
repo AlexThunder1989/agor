@@ -431,6 +431,7 @@ function AppContent() {
 
   const directSessionIdFromPath =
     location.pathname.match(/^\/(?:s|m\/session)\/([^/]+)\/?$/)?.[1] ?? null;
+  const directBranchIdFromPath = location.pathname.match(/^\/w\/([^/]+)\/?$/)?.[1] ?? null;
   const authenticatedUserCanListUsers = hasMinimumRole(user?.role, ROLES.MEMBER);
 
   // Pass the stable client lifetime, not `connected ? client : null`:
@@ -447,6 +448,7 @@ function AppContent() {
   } = useAgorData(client, {
     enabled: workspaceSurfaceShouldRun && !(user?.must_change_password && passwordWriteAvailable),
     directSessionId: directSessionIdFromPath,
+    directBranchId: directBranchIdFromPath,
     authenticatedUserId: user?.user_id,
     authenticatedUserRole: user?.role,
     authGeneration,

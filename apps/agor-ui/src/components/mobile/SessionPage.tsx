@@ -87,6 +87,12 @@ export const SessionPage: React.FC<SessionPageProps> = ({
 
   const navigate = useNavigate();
   const loading = useAgorStore((state) => state.loading);
+  // "Not loaded" only once the targeted read missed (`useAgorData`), or once a
+  // session this page showed left the store; until then the read may be in flight.
+  const missed = useAgorStore((state) => !!sessionId && state.missingLinkTargets.has(sessionId));
+  const [shownId, setShownId] = useState<string>();
+  if (session && shownId !== sessionId) setShownId(sessionId);
+  const waiting = loading || (!missed && shownId !== sessionId);
   const boardId = sessionBoardId(session, branchById, boardById);
   // X is an exit, not browser Back. Replace this detail entry so a cold link
   // also closes inside Agor. Earlier deliberate navigations remain in history.
@@ -138,11 +144,9 @@ export const SessionPage: React.FC<SessionPageProps> = ({
   if (!session) {
     return (
       <Flex vertical align="center" justify="center" gap="middle" style={{ height: '100%' }}>
-        {loading ? (
+        {waiting ? (
           <Spin size="large" />
         ) : (
-          // Bootstrap may be complete while the data owner fetches an uncached
-          // session. Do not infer a failed request from its absence in the store.
           <Alert
             type="info"
             title="Session not loaded"

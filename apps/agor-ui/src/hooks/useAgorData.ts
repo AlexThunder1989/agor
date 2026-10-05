@@ -86,6 +86,7 @@ import {
 import { boardPartitionScope, replaceScope } from '../store/scopeMerge';
 import { resetSessionMcpLinks } from '../store/sessionMcpLinks';
 import {
+  fillOnDemand,
   isUnsupportedQueryError,
   MY_SESSIONS_GATED_LIMIT,
   mySessionsQuery,
@@ -309,6 +310,8 @@ export function useAgorData(
   options?: {
     enabled?: boolean;
     directSessionId?: string | null;
+    /** Optional branch short/full ID from a direct `/w/` URL; fetched by ID when not loaded. */
+    directBranchId?: string | null;
     /** Authenticated identity, independent from the privileged users directory. */
     authenticatedUserId?: string;
     /**
@@ -326,6 +329,7 @@ export function useAgorData(
 ): UseAgorDataResult {
   const enabled = options?.enabled ?? true;
   const directSessionId = options?.directSessionId ?? null;
+  const directBranchId = options?.directBranchId ?? null;
   // Preserve the hook's historical standalone-test/default behavior when the
   // caller does not provide role context. App always provides the property,
   // including `undefined` before auth resolves, and therefore fails closed.
@@ -1515,78 +1519,81 @@ export function useAgorData(
   // reconnect and explicit OAuth events, not on an idle-tab timer. Execution
   // independently resolves credentials; this UI snapshot never authorizes use.
 
-  // If the user navigates to /s/<id>/ after the initial active-session fetch,
-  // load that one session by ID as well. This keeps direct links to archived
-  // sessions openable without changing the default list query.
+  // A deep link (`/s/`, `/m/session/`, `/w/`) whose session or branch the
+  // store doesn't hold after the initial load — archived, outside every loaded
+  // scope, or an ambiguous short id: read it by id (the daemon resolves short
+  // ids) and fill it, joining no scope. An active session brings its branch;
+  // an archived one is inserted for display only, outside every list. A
+  // target the read doesn't return is recorded in `missingLinkTargets`.
   useEffect(() => {
-    if (!client || !enabled || !authorityScopeKey || !hasInitiallyFetched || !directSessionId)
-      return;
+    const target = directSessionId
+      ? { kind: 'session' as const, token: directSessionId }
+      : directBranchId
+        ? { kind: 'branch' as const, token: directBranchId }
+        : null;
+    if (!client || !enabled || !authorityScopeKey || !hasInitiallyFetched || !target) return;
     const directFetchAuthorityScope = authorityScopeKey;
     const authorityIsCurrent = () => authorityScopeKeyRef.current === directFetchAuthorityScope;
-    const { sessionById } = agorStore.getState();
-    if (sessionById.has(directSessionId)) return;
-    if (hasIdMatchingPrefix(directSessionId, sessionById.values(), (s) => s.session_id)) {
+    const { sessionById, branchById } = agorStore.getState();
+    if (
+      target.kind === 'session'
+        ? sessionById.has(target.token) || resolveSessionFromShortIdPure(target.token, sessionById)
+        : branchById.has(target.token) || resolveBranchFromShortIdPure(target.token, branchById)
+    ) {
       return;
     }
 
     let cancelled = false;
+    const missed = () => {
+      if (cancelled || !authorityIsCurrent()) return;
+      const { missingLinkTargets, setUserScope } = agorStore.getState();
+      if (missingLinkTargets.has(target.token)) return;
+      setUserScope({ missingLinkTargets: new Set(missingLinkTargets).add(target.token) });
+    };
+    const fillBranch = (id: string) =>
+      fillOnDemand(async () => ({
+        branches: [(await client.service('branches').get(id)) as Branch].filter(Boolean),
+      }));
     (async () => {
       try {
-        const directSession = (await client.service('sessions').get(directSessionId)) as Session;
-        if (cancelled || !authorityIsCurrent()) return;
-
-        // This is a live write to the sessions maps — bump so a sessions
-        // hydration in flight discards its (session-missing) snapshot rather
-        // than clobbering this deep-link heal.
-        bumpRevision('sessions');
-        agorStore.getState().setMap('sessionById', (prev) => {
-          if (prev.has(directSession.session_id)) return prev;
-          const next = new Map(prev);
-          next.set(directSession.session_id, directSession);
-          return next;
-        });
-        if (!directSession.archived) {
-          agorStore.getState().setMap('sessionsByBranch', (prev) => {
-            const branchSessions = prev.get(directSession.branch_id) || [];
-            if (branchSessions.some((s) => s.session_id === directSession.session_id)) return prev;
-            const next = new Map(prev);
-            next.set(directSession.branch_id, [...branchSessions, directSession]);
-            return next;
-          });
+        if (target.kind === 'branch') {
+          const rows = await fillBranch(target.token);
+          if (rows && !rows.branches?.some((branch) => !branch.archived)) missed();
+          return;
         }
-
+        const directSession = (await client.service('sessions').get(target.token)) as Session;
+        if (cancelled || !authorityIsCurrent()) return;
+        if (!directSession) return missed();
+        if (directSession.archived) {
+          // A live write to the sessions map — bump so a sessions hydration in
+          // flight discards its (session-missing) snapshot rather than
+          // clobbering this deep-link heal.
+          bumpRevision('sessions');
+          agorStore.getState().setMap('sessionById', (prev) => {
+            if (prev.has(directSession.session_id)) return prev;
+            return new Map(prev).set(directSession.session_id, directSession);
+          });
+          return;
+        }
+        await fillOnDemand(async () => ({ sessions: [directSession] }));
         if (
-          !directSession.archived &&
           directSession.branch_id &&
           !agorStore.getState().branchById.has(directSession.branch_id)
         ) {
-          try {
-            const directBranch = (await client
-              .service('branches')
-              .get(directSession.branch_id)) as Branch;
-            if (cancelled || !authorityIsCurrent()) return;
-            bumpRevision('branches');
-            agorStore.getState().setMap('branchById', (prev) => {
-              if (directBranch.archived) return prev;
-              if (prev.has(directBranch.branch_id)) return prev;
-              const next = new Map(prev);
-              next.set(directBranch.branch_id, directBranch);
-              return next;
-            });
-          } catch {
-            // Session can still be selected if its branch is inaccessible/gone.
-          }
+          // The session can still be selected if its branch is inaccessible or gone.
+          await fillBranch(directSession.branch_id).catch(() => undefined);
         }
       } catch {
-        // Keep unresolved session URLs sticky; the normal URL resolver will
-        // avoid self-healing until a matching session exists.
+        // Not found, ambiguous, or failed: the URL stays sticky and the normal
+        // resolver keeps waiting; surfaces may now say "not found".
+        missed();
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [authorityScopeKey, client, directSessionId, enabled, hasInitiallyFetched]);
+  }, [authorityScopeKey, client, directBranchId, directSessionId, enabled, hasInitiallyFetched]);
 
   // Subscribe to real-time updates
   //

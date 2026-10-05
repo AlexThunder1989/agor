@@ -426,6 +426,54 @@ describe('useAgorData — socket-event bailouts', () => {
     expect(agorStore.getState().branchById.has('b-archived')).toBe(false);
   });
 
+  it('fills a /w/ branch the store lacks after the initial load, joining no scope', async () => {
+    const target = makeBranch({ branch_id: 'b-target-full', board_id: 'board-x' });
+    const { client, fetchArguments } = makeMockClient({ branches: [], 'branches:get': target });
+    const { result } = renderHook(() => useAgorData(client, { directBranchId: 'b-target' }));
+    await waitForInitialLoad(result);
+    await waitFor(() =>
+      expect(agorStore.getState().branchById.get('b-target-full')).toMatchObject({
+        board_id: 'board-x',
+      })
+    );
+    expect(fetchArguments('branches', 'get')).toEqual(['b-target']);
+    expect(
+      [...agorStore.getState().coverage.values()].some((entry) =>
+        entry.members?.branches?.has('b-target-full')
+      )
+    ).toBe(false);
+  });
+
+  it('records a link target only once its targeted get missed', async () => {
+    let reject!: (err: Error) => void;
+    const { client, onFetch } = makeMockClient({ sessions: [] });
+    // The first-paint get misses; the post-load fallback's get is held open.
+    onFetch('sessions', 'get', (call) =>
+      call === 1
+        ? Promise.reject(new Error('NotFound'))
+        : new Promise((_, fail) => {
+            reject = fail;
+          })
+    );
+    const { result } = renderHook(() => useAgorData(client, { directSessionId: 'gone' }));
+    await waitForInitialLoad(result);
+    await waitFor(() => expect(reject).toBeDefined());
+    expect(agorStore.getState().missingLinkTargets.has('gone')).toBe(false);
+    await act(async () => reject(new Error('NotFound')));
+    expect(agorStore.getState().missingLinkTargets.has('gone')).toBe(true);
+  });
+
+  it('asks the server for an ambiguous short id instead of waiting forever', async () => {
+    const { client, fetchCount, onFetch } = makeMockClient({
+      sessions: [makeSession({ session_id: 'abc-1' }), makeSession({ session_id: 'abc-2' })],
+    });
+    onFetch('sessions', 'get', () => Promise.reject(new Error('ambiguous')));
+    const { result } = renderHook(() => useAgorData(client, { directSessionId: 'abc' }));
+    await waitForInitialLoad(result);
+    await waitFor(() => expect(agorStore.getState().missingLinkTargets.has('abc')).toBe(true));
+    expect(fetchCount('sessions', 'get')).toBeGreaterThan(0);
+  });
+
   it('drops a duplicate `sessions.patched` (content-equal) without changing byId references', async () => {
     const session = makeSession();
     const { client, emit } = makeMockClient({ sessions: [session] });
