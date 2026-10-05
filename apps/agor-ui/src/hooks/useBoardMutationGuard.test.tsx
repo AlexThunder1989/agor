@@ -107,6 +107,18 @@ describe('board write tickets', () => {
     expect(hasBoardWriteTicketEnded(unpartitioned)).toBe(true);
     expect(hasBoardWriteTicketEnded(null)).toBe(true);
   });
+
+  it('a re-authentication ends a ticket for good, partitioned or not', () => {
+    load();
+    const ticket = capture(true);
+    const unpartitioned = capture(false);
+    publishConnectionSnapshot(publisher, connection({ authGeneration: 2 }));
+    expect(hasBoardWriteTicketEnded(ticket)).toBe(true);
+    expect(hasBoardWriteTicketEnded(unpartitioned)).toBe(true);
+    // Disconnected under the new generation: still ended.
+    publishConnectionSnapshot(publisher, connection({ connected: false, authGeneration: 2 }));
+    expect(hasBoardWriteTicketEnded(unpartitioned)).toBe(true);
+  });
 });
 
 describe('useBoardMutationGuard', () => {

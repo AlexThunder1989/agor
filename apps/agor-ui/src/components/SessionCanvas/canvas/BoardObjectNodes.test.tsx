@@ -27,6 +27,7 @@ const CONNECTED = {
   outOfSync: false,
   capturedSha: null,
   currentSha: null,
+  authGeneration: 1,
 };
 const DISCONNECTED = { ...CONNECTED, connected: false };
 
@@ -327,7 +328,7 @@ describe('ZoneNode settings modal', () => {
     const opened = {
       boardId: 'board-1',
       partition: null,
-      authGeneration: 0,
+      authGeneration: 1,
       owner: { alive: true },
     };
     const onUpdate = vi.fn();
