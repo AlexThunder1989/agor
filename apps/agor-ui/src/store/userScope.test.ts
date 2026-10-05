@@ -339,6 +339,17 @@ describe('user scope', () => {
     ]).toEqual(['mate']);
   });
 
+  it('keeps a schedule-only teammate branch U3 returned, through a later complete board replace', async () => {
+    // The daemon also returns a branch with an enabled schedule and no teammate marker.
+    const { client } = makeClient({ teammates: () => [branch('br-scheduled')] });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: true });
+    expect([
+      ...(agorStore.getState().coverage.get(USER_SCOPE_KEYS.teammates)?.members?.branches ?? []),
+    ]).toEqual(['br-scheduled']);
+    replaceBoard('board-1', { branches: [] });
+    expect(agorStore.getState().branchById.has('br-scheduled')).toBe(true);
+  });
+
   it('marks teammates truncated when the server reports more than the capped read', async () => {
     const { client } = makeClient({ teammates: () => [branch('mate-1')] });
     const find = client.service('branches').find;

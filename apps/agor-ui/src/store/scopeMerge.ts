@@ -210,19 +210,25 @@ const ROWS: Record<CoverageCollection, (maps: DataMaps) => ReadonlyMap<string, o
 };
 
 /**
- * Whether row `id` of `collection` is present and `scope` claims it; an
- * archived branch or session never belongs, an archived card does (see
+ * Row `id` of `collection` when it is present and could belong to a scope:
+ * an archived branch or session never does, an archived card can (see
  * `scopeMembers`).
  */
+function liveRow(collection: CoverageCollection, id: string, maps: DataMaps): object | undefined {
+  const row = ROWS[collection](maps).get(id) as { archived?: boolean } | undefined;
+  return row && (collection === 'cards' || !row.archived) ? row : undefined;
+}
+
+/** Whether row `id` of `collection` is live (`liveRow`) and `scope` claims it. */
 function belongs(
   scope: LoadScope,
   collection: CoverageCollection,
   id: string,
   maps: DataMaps
 ): boolean {
-  const row = ROWS[collection](maps).get(id) as { archived?: boolean } | undefined;
+  const row = liveRow(collection, id, maps);
   const claim = scope.claims[collection] as ((row: object, maps: DataMaps) => boolean) | undefined;
-  return !!row && (collection === 'cards' || !row.archived) && !!claim?.(row, maps);
+  return !!row && !!claim?.(row, maps);
 }
 
 /** Ids per collection that live events wrote (or that a read raced). */
@@ -239,10 +245,13 @@ export function withBranchSessions(written: WrittenIds, maps: DataMaps): Written
 }
 
 /**
- * The membership a read commits: the ids it returned (`scopeMembers`) and the
- * rows realtime wrote while it was in flight (`raced`, from `touchedIdsSince`,
- * with the sessions of raced branches), each kept exactly when it is present
- * and the scope claims it now. `maps` is the store after the read applied.
+ * The membership a read commits: the ids it returned (`scopeMembers`) that
+ * realtime left alone, kept while still present — the server's filter is the
+ * authority for them (U3 also returns scheduled branches no client predicate
+ * recognises) — and the rows realtime wrote while it was in flight (`raced`,
+ * from `touchedIdsSince`, with the sessions of raced branches), kept exactly
+ * when they are present and the scope claims them now. `maps` is the store
+ * after the read applied.
  */
 export function settledMembers(
   scope: LoadScope,
@@ -256,9 +265,12 @@ export function settledMembers(
     CoverageCollection,
     ReadonlySet<string>,
   ][]) {
-    const candidates = [...ids, ...raced(collection)];
-    if (collection === 'sessions') candidates.push(...racedSessions);
-    members[collection] = new Set(candidates.filter((id) => belongs(scope, collection, id, maps)));
+    const touched = new Set(raced(collection));
+    if (collection === 'sessions') for (const id of racedSessions) touched.add(id);
+    const kept = new Set<string>();
+    for (const id of ids) if (!touched.has(id) && liveRow(collection, id, maps)) kept.add(id);
+    for (const id of touched) if (belongs(scope, collection, id, maps)) kept.add(id);
+    members[collection] = kept;
   }
   return members;
 }
