@@ -60,7 +60,7 @@ import {
   claimDisplayedBoardForResync,
   getDisplayedBoardId,
   markBoardPartitionLoaded,
-  otherLoadedScopes,
+  otherCommittedMembers,
   partitionLoadMark,
   partitionLoadSince,
   partitionsLoadedSince,
@@ -83,7 +83,12 @@ import {
   tombstoneSession,
   untombstoneSession,
 } from '../store/realtimeBatch';
-import { boardPartitionScope, replaceScope } from '../store/scopeMerge';
+import {
+  boardPartitionScope,
+  boardScopeKey,
+  replaceScope,
+  scopeMembers,
+} from '../store/scopeMerge';
 import { resetSessionMcpLinks } from '../store/sessionMcpLinks';
 import {
   isUnsupportedQueryError,
@@ -92,6 +97,7 @@ import {
   startUserScope,
   stopUserScope,
 } from '../store/userScope';
+import { boardIdForSession } from '../utils/boardIdForSession';
 import { createInitialLoadDebugTimer, isInitialLoadDebugEnabled } from '../utils/initialLoadDebug';
 import { runLatestMCPOAuthStatusRequest } from '../utils/mcpOAuthAttempt';
 import { TOKENS_REFRESHED_EVENT } from '../utils/singleFlightRefresh';
@@ -1133,7 +1139,9 @@ export function useAgorData(
         // Other boards' rows are untouched (Home reads none).
         const touchedInLoad = (collection: PartitionCollection, id: string) =>
           touchedSince(collection, id, firstPaintFence.startRevisions[collection]);
-        const otherScopes = boardScope ? otherLoadedScopes(agorStore.getState(), boardScope) : [];
+        const otherScopes = boardScope
+          ? otherCommittedMembers(agorStore.getState(), boardScopeKey(boardScope))
+          : [];
         agorStore.getState().applyMaps((prev) => {
           const maps = {
             ...prev,
@@ -1172,7 +1180,22 @@ export function useAgorData(
         // applies. Board objects, cards and full board records are complete
         // only per board (its partition).
         if (silent) agorStore.getState().markGloballyHydrated(['sessions', 'branches']);
-        if (displayedBoardFull) markBoardPartitionLoaded(boardScope, loadLifetime);
+        if (displayedBoardFull && boardScope) {
+          // The board's committed membership: the ids these reads returned
+          // for it (a reconnect reads branches and sessions globally).
+          markBoardPartitionLoaded(
+            boardScope,
+            loadLifetime,
+            scopeMembers({
+              branches: branchesList.filter((branch) => branch.board_id === boardScope),
+              sessions: (silent ? sessionsList : boardSessionsList).filter(
+                (session) => boardIdForSession(session, branchesMap) === boardScope
+              ),
+              boardObjects: canUseMemberWorkspaceServices ? (boardObjectsList ?? []) : null,
+              cards: cardsList ?? [],
+            })
+          );
+        }
         // User scope (design r3 §3): the rest of my sessions, my branches, every
         // teammate I can view, and the branches my sessions and comment
         // threads reference. Started BEFORE the background global hydrations

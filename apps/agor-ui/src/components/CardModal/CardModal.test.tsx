@@ -4,6 +4,7 @@ import { App as AntApp, Modal } from 'antd';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectionProvider } from '../../contexts/ConnectionContext';
 import { agorStore } from '../../store/agorStore';
+import { boardScopeKey } from '../../store/scopeMerge';
 import CardModal from './CardModal';
 
 const { showWarning } = vi.hoisted(() => ({ showWarning: vi.fn() }));
@@ -40,7 +41,7 @@ function renderWithApp(ui: React.ReactElement, connection = CONNECTED) {
 }
 
 function loadBoard() {
-  agorStore.getState().setBoardPartition('board-1', {
+  agorStore.getState().setCoverage(boardScopeKey('board-1'), {
     status: 'loaded',
     authorityScope: 'fixture',
     loadEpoch: 0,
@@ -48,7 +49,7 @@ function loadBoard() {
 }
 
 beforeEach(() => {
-  agorStore.setState({ boardPartitions: new Map() });
+  agorStore.setState({ coverage: new Map() });
   showWarning.mockClear();
 });
 

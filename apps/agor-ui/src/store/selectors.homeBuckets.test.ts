@@ -73,7 +73,6 @@ const state = ({
     commentById: new Map(comments.map((c) => [c.comment_id, c])),
     branchById: new Map(branches.map((b) => [b.branch_id, b])),
     boardById: new Map(boards.map((b) => [b.board_id, b])),
-    mySessionsLoaded: true,
     absentBranchIds: new Set(absentBranchIds),
   }) as unknown as AgorState;
 

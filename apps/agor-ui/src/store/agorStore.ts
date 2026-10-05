@@ -30,6 +30,7 @@ import { immer } from 'zustand/middleware/immer';
 import { createStore } from 'zustand/vanilla';
 import type { InitialLoadItemKey, InitialLoadingStage } from '../hooks/useAgorData';
 import { type DataMaps, EMPTY_MAPS, isSessionRowRemovedWith, MAP_KEYS, pickMaps } from './agorMaps';
+import { BOARD_SCOPE_PREFIX, boardScopeKey, type ScopeCoverage } from './scopeMerge';
 
 // Immer needs this to draft Map/Set state. Called once at module load; the
 // store's state is entirely Maps and one Set.
@@ -42,25 +43,6 @@ export type ItemCounts = Partial<Record<InitialLoadItemKey, number>>;
 export type GatedHydrationFlag = 'mcpServersHydrated' | 'gatewayChannelsHydrated';
 
 /**
- * Loading state of one board partition: that board's branches, sessions,
- * board objects, cards, comments and full board record. Presence of rows in a
- * map never implies completeness; only `loaded` does (see `boardPartitions.ts`).
- */
-export type BoardPartitionStatus = 'loading' | 'loaded' | 'error';
-export interface BoardPartitionState {
-  status: BoardPartitionStatus;
-  /** Authority scope the load ran under; a load never applies across scopes. */
-  authorityScope: string;
-  /** Hydration cancellation epoch of that load; another epoch counts as unloaded. */
-  loadEpoch: number;
-  /** The load that owns a `loading` entry; only its owner may settle or release it. */
-  loadId?: number;
-  /** The load that settled a `loaded` entry (absent when first paint or a resync did). */
-  loadedBy?: number;
-  error?: string;
-}
-
-/**
  * Collections loaded globally in the background (Steps 1–2; removed in 3.3).
  * Board objects, cards and full board records load per board only.
  */
@@ -71,20 +53,10 @@ export const GLOBALLY_HYDRATED_COLLECTIONS: readonly GloballyHydratedCollection[
 ];
 
 /**
- * Completeness flags of the caller's user scope (`userScope.ts`). Each says a
- * user-scoped set is complete in the store; none says the workspace is loaded.
+ * User-scope state outside its coverage entries (`userScope.ts`); whether each
+ * piece is loaded or capped lives in `coverage` (`USER_SCOPE_KEYS`).
  */
 export interface UserScopeMeta {
-  /** Every active session the caller created is in `sessionById`. */
-  mySessionsLoaded: boolean;
-  /** The all-my-sessions read hit its cap; counts are lower bounds ("N+"). */
-  mySessionsTruncated: boolean;
-  /** Every branch my sessions or candidate comment threads reference is present or absent. */
-  homeBranchesLoaded: boolean;
-  /** The teammate read finished; with `teammatesTruncated`, only up to its cap. */
-  teammatesLoaded: boolean;
-  /** More teammates are visible than the capped read returned: lists are partial. */
-  teammatesTruncated: boolean;
   /** Referenced branch ids the server did not return (archived, deleted or invisible). */
   absentBranchIds: Set<string>;
   /**
@@ -96,11 +68,6 @@ export interface UserScopeMeta {
 }
 
 const INITIAL_USER_SCOPE: UserScopeMeta = {
-  mySessionsLoaded: false,
-  mySessionsTruncated: false,
-  homeBranchesLoaded: false,
-  teammatesLoaded: false,
-  teammatesTruncated: false,
   absentBranchIds: new Set(),
   userScopeDegraded: false,
 };
@@ -120,10 +87,13 @@ interface AgorMeta {
   agenticToolSettingsByName: Map<TenantAgenticToolName, TenantAgenticToolSettings>;
   /** Set once the background agentic-tool-settings hydration first applies (empty result included). */
   agenticToolSettingsHydrated: boolean;
-  /** Per-board partition loading state (see `boardPartitions.ts`). */
-  boardPartitions: Map<string, BoardPartitionState>;
   /**
-   * Bumped (monotonically) by every reset of `boardPartitions`. A partition
+   * Every load scope's coverage, by scope key: board partitions
+   * (`boardScopeKey`) and the user scope's pieces (`USER_SCOPE_KEYS`).
+   */
+  coverage: Map<string, ScopeCoverage>;
+  /**
+   * Bumped (monotonically) by every reset of the board partitions. A partition
    * load in flight across a reset is orphaned: it can no longer settle its
    * board, so loads dedupe per epoch and the board is requested again.
    */
@@ -198,14 +168,15 @@ interface AgorActions {
    * all-no-op reducer leaves the outer state object untouched.
    */
   applyMaps: (updater: (prev: DataMaps) => DataMaps) => void;
-  /** Set (or clear, with `null`) one board's partition state. */
-  setBoardPartition: (boardId: string, state: BoardPartitionState | null) => void;
-  /** Merge user-scope flags; a no-op when nothing changes. */
+  /** Set (or clear, with `null`) one scope's coverage; a no-op when nothing changes. */
+  setCoverage: (key: string, entry: ScopeCoverage | null) => void;
+  /** Merge user-scope meta; a no-op when nothing changes. */
   setUserScope: (partial: Partial<UserScopeMeta>) => void;
   /**
-   * Forget every board partition (authority transitions orphan their loads)
-   * and bump `partitionEpoch`; the `keep` boards' entries survive (a
-   * reconnect resync keeps the boards whose loads started after it did).
+   * Forget every board partition's coverage (authority transitions orphan
+   * their loads) and bump `partitionEpoch`; the `keep` boards' entries survive
+   * (a reconnect resync keeps the boards whose loads started after it did).
+   * User-scope entries are kept: they belong to the identity.
    */
   resetBoardPartitions: (keep?: readonly string[]) => void;
   /** Record that a global snapshot of these collections has applied. */
@@ -226,14 +197,16 @@ interface AgorActions {
 
 export type AgorState = DataMaps & AgorMetaWithUserScope & AgorActions;
 
-function shallowEqualPartition(a: BoardPartitionState, b: BoardPartitionState): boolean {
+function sameCoverage(a: ScopeCoverage, b: ScopeCoverage): boolean {
   return (
     a.status === b.status &&
     a.authorityScope === b.authorityScope &&
     a.loadEpoch === b.loadEpoch &&
     a.loadId === b.loadId &&
     a.loadedBy === b.loadedBy &&
-    a.error === b.error
+    a.error === b.error &&
+    a.members === b.members &&
+    a.complete === b.complete
   );
 }
 
@@ -286,7 +259,7 @@ const INITIAL_META: AgorMetaWithUserScope = {
   gatewayChannelsHydrated: false,
   agenticToolSettingsByName: new Map(),
   agenticToolSettingsHydrated: false,
-  boardPartitions: new Map(),
+  coverage: new Map(),
   partitionEpoch: 0,
   globallyHydrated: new Set(),
   sessionMcpLoaded: new Set(),
@@ -303,7 +276,7 @@ export const agorStore = createStore<AgorState>()(
       set({
         ...EMPTY_MAPS,
         ...INITIAL_META,
-        boardPartitions: new Map(),
+        coverage: new Map(),
         partitionEpoch: get().partitionEpoch + 1,
         globallyHydrated: new Set(),
         absentBranchIds: new Set(),
@@ -320,8 +293,8 @@ export const agorStore = createStore<AgorState>()(
         deletedMcpServerIds: new Set(),
         agenticToolSettingsByName: new Map(),
         agenticToolSettingsHydrated: false,
-        // Readiness describes the maps being cleared, so it resets with them.
-        boardPartitions: new Map(),
+        // Coverage describes the maps being cleared, so it resets with them.
+        coverage: new Map(),
         partitionEpoch: get().partitionEpoch + 1,
         globallyHydrated: new Set(),
         sessionMcpLoaded: new Set(),
@@ -365,14 +338,14 @@ export const agorStore = createStore<AgorState>()(
       set({ agenticToolSettingsByName: next });
     },
 
-    setBoardPartition: (boardId, state) => {
-      const current = get().boardPartitions;
-      const existing = current.get(boardId);
-      if (state === null ? !existing : existing && shallowEqualPartition(existing, state)) return;
+    setCoverage: (key, entry) => {
+      const current = get().coverage;
+      const existing = current.get(key);
+      if (entry === null ? !existing : existing && sameCoverage(existing, entry)) return;
       const next = new Map(current);
-      if (state === null) next.delete(boardId);
-      else next.set(boardId, state);
-      set({ boardPartitions: next });
+      if (entry === null) next.delete(key);
+      else next.set(key, entry);
+      set({ coverage: next });
     },
     setUserScope: (partial) => {
       const state = get();
@@ -382,14 +355,13 @@ export const agorStore = createStore<AgorState>()(
       if (changed) set(partial as Partial<AgorState>);
     },
     resetBoardPartitions: (keep = []) => {
-      const current = get().boardPartitions;
-      const kept = new Map<string, BoardPartitionState>();
-      for (const boardId of keep) {
-        const entry = current.get(boardId);
-        if (entry) kept.set(boardId, entry);
+      const kept = new Set(keep.map(boardScopeKey));
+      const next = new Map<string, ScopeCoverage>();
+      for (const [key, entry] of get().coverage) {
+        if (!key.startsWith(BOARD_SCOPE_PREFIX) || kept.has(key)) next.set(key, entry);
       }
       set({
-        boardPartitions: kept,
+        coverage: next,
         partitionEpoch: get().partitionEpoch + 1,
       });
     },

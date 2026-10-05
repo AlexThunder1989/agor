@@ -11,6 +11,7 @@ import {
   isBoardWriteTicketCurrent,
 } from '../store/boardMutationGuard';
 import { publishConnectionSnapshot, withdrawConnectionSnapshot } from '../store/connectionSnapshot';
+import { boardScopeKey } from '../store/scopeMerge';
 import { useBoardMutationGuard } from './useBoardMutationGuard';
 
 const BOARD = 'board-guard';
@@ -27,7 +28,7 @@ const connection = (overrides: Partial<{ connected: boolean; authGeneration: num
 });
 
 function load(boardId = BOARD) {
-  agorStore.getState().setBoardPartition(boardId, {
+  agorStore.getState().setCoverage(boardScopeKey(boardId), {
     status: 'loaded',
     authorityScope: 'fixture',
     loadEpoch: 0,
@@ -45,7 +46,7 @@ describe('board write tickets', () => {
     captureBoardWriteTicket(BOARD, { requirePartition, owner });
 
   beforeEach(() => {
-    agorStore.setState({ boardPartitions: new Map() });
+    agorStore.setState({ coverage: new Map() });
     owner.alive = true;
     publishConnectionSnapshot(publisher, connection());
   });
@@ -53,7 +54,7 @@ describe('board write tickets', () => {
 
   it('captures nothing for an unloaded board unless the write needs no partition', () => {
     expect(capture(true)).toBe(null);
-    agorStore.getState().setBoardPartition(BOARD, {
+    agorStore.getState().setCoverage(boardScopeKey(BOARD), {
       status: 'loading',
       authorityScope: 'fixture',
       loadEpoch: 0,
@@ -123,7 +124,7 @@ describe('board write tickets', () => {
 
 describe('useBoardMutationGuard', () => {
   beforeEach(() => {
-    agorStore.setState({ boardPartitions: new Map() });
+    agorStore.setState({ coverage: new Map() });
   });
 
   function renderGuard(
@@ -240,7 +241,7 @@ describe('useBoardMutationGuard unmount commit', () => {
   let previousActEnvironment: unknown;
 
   beforeEach(() => {
-    agorStore.setState({ boardPartitions: new Map() });
+    agorStore.setState({ coverage: new Map() });
     // Real scheduling: a default-priority unmount commits, then React runs
     // its passive effects in a later task. `act` would flush them at once.
     previousActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: unknown })

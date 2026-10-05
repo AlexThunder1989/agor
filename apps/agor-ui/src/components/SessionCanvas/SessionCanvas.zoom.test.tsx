@@ -5,6 +5,7 @@ import type { ButtonHTMLAttributes, MouseEventHandler, ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectionProvider } from '../../contexts/ConnectionContext';
 import { agorStore } from '../../store/agorStore';
+import { boardScopeKey } from '../../store/scopeMerge';
 import SessionCanvas from './SessionCanvas';
 
 const permissionState = vi.hoisted(() => ({ canEdit: true }));
@@ -68,8 +69,11 @@ beforeEach(() => {
     userById: new Map(),
     commentById: new Map(),
     // Structural edits need the board's partition loaded.
-    boardPartitions: new Map([
-      ['board-1', { status: 'loaded' as const, authorityScope: 'fixture', loadEpoch: 0 }],
+    coverage: new Map([
+      [
+        boardScopeKey('board-1'),
+        { status: 'loaded' as const, authorityScope: 'fixture', loadEpoch: 0 },
+      ],
     ]),
   });
 });

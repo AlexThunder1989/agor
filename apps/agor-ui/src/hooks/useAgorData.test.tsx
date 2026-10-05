@@ -20,13 +20,23 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { getRevision } from '../store/agorHydration';
 import { agorStore } from '../store/agorStore';
-import { markBoardPartitionLoaded, registerDisplayedBoard } from '../store/boardPartitions';
+import {
+  markBoardPartitionLoaded,
+  registerDisplayedBoard,
+  selectBoardPartition,
+} from '../store/boardPartitions';
 import { captureLoadLifetime } from '../store/loadLifetime';
 // Session `patched`/`updated` writes are coalesced to one flush per frame (see
 // realtimeBatch); flush synchronously in tests that assert the post-patch store.
 import { flushRealtimeNow } from '../store/realtimeBatch';
+import { boardScopeKey } from '../store/scopeMerge';
 import { makeBranchesForBoardSelector } from '../store/selectors';
 import { loadSessionMcpServerIds } from '../store/sessionMcpLinks';
+import {
+  selectHomeBranchesLoaded,
+  selectMySessionsLoaded,
+  selectTeammatesLoaded,
+} from '../store/userScope';
 import { useAgorData } from './useAgorData';
 import { useBoardPartition } from './useBoardPartition';
 
@@ -1357,7 +1367,7 @@ describe('useAgorData — user-scope flags', () => {
     await waitForInitialLoad(result);
     const scopeLoaded = () => {
       const s = agorStore.getState();
-      return [s.mySessionsLoaded, s.homeBranchesLoaded, s.teammatesLoaded];
+      return [selectMySessionsLoaded(s), selectHomeBranchesLoaded(s), selectTeammatesLoaded(s)];
     };
     await waitFor(() => expect(scopeLoaded()).toEqual([true, true, true]));
 
@@ -1626,7 +1636,7 @@ describe('useAgorData — opened session transcript priority', () => {
       })
     );
     await waitForInitialLoad(result);
-    await waitFor(() => expect(agorStore.getState().teammatesLoaded).toBe(true));
+    await waitFor(() => expect(selectTeammatesLoaded(agorStore.getState())).toBe(true));
     expect(u1Sent()).toBe(false);
 
     await act(async () => prefetch.resolve());
@@ -1656,7 +1666,7 @@ describe('useAgorData — opened session transcript priority', () => {
       })
     );
     expect(fetchCount('sessions', 'findAll')).toBe(0);
-    await waitFor(() => expect(agorStore.getState().teammatesLoaded).toBe(true));
+    await waitFor(() => expect(selectTeammatesLoaded(agorStore.getState())).toBe(true));
 
     await act(async () => prefetch.resolve());
     await waitFor(() => expect(fetchCount('sessions', 'findAll')).toBe(1));
@@ -1708,7 +1718,7 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
     expect(fetchArguments('board-objects', 'findAll')).toEqual([]);
     expect(fetchArguments('cards', 'findAll')).toEqual([]);
     // One gated row < 200: the gated page already holds all of my sessions.
-    await waitFor(() => expect(agorStore.getState().mySessionsLoaded).toBe(true));
+    await waitFor(() => expect(selectMySessionsLoaded(agorStore.getState())).toBe(true));
   });
 
   it('degrades to the global recent slice when an older daemon rejects the my-sessions page', async () => {
@@ -1849,7 +1859,7 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
     expect(u1OnlyRead).toBeGreaterThanOrEqual(0);
     expect(u1OnlyRead).toBeLessThan(order.indexOf('sessions:findAll'));
     expect(u1OnlyRead).toBeLessThan(order.lastIndexOf('branches:findAll'));
-    await waitFor(() => expect(agorStore.getState().homeBranchesLoaded).toBe(true));
+    await waitFor(() => expect(selectHomeBranchesLoaded(agorStore.getState())).toBe(true));
   });
 
   it('sends the U1-only id reads before the global snapshots even when my branches fail', async () => {
@@ -1932,7 +1942,7 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
     );
     try {
       await waitForInitialLoad(bob.result);
-      await waitFor(() => expect(agorStore.getState().mySessionsLoaded).toBe(true));
+      await waitFor(() => expect(selectMySessionsLoaded(agorStore.getState())).toBe(true));
       const readsBefore = fetchArguments('branches', 'findAll').length;
 
       await act(async () => {
@@ -1999,9 +2009,9 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
       await waitFor(() => {
         const state = agorStore.getState();
         expect(state.userScopeDegraded).toBe(true);
-        expect(state.mySessionsLoaded).toBe(true);
-        expect(state.teammatesLoaded).toBe(true);
-        expect(state.homeBranchesLoaded).toBe(true);
+        expect(selectMySessionsLoaded(state)).toBe(true);
+        expect(selectTeammatesLoaded(state)).toBe(true);
+        expect(selectHomeBranchesLoaded(state)).toBe(true);
       });
       expect(agorStore.getState().sessionById.has('s-lost')).toBe(true);
       expect([...agorStore.getState().absentBranchIds]).toEqual(['b-gone']);
@@ -2096,8 +2106,13 @@ describe('useAgorData — reconnect reconciles the displayed partition', () => {
     expect(state.branchById.has('b-arch')).toBe(false);
     expect(state.boardById.get('board-A')?.objects).toBeDefined();
     // The displayed board is complete again; every other board is unloaded.
-    expect(state.boardPartitions.get('board-A')?.status).toBe('loaded');
-    expect(state.boardPartitions.has('board-B')).toBe(false);
+    expect(selectBoardPartition(state, 'board-A')?.status).toBe('loaded');
+    // It commits what the resync read for the board, branches read globally included.
+    const members = selectBoardPartition(state, 'board-A')?.members;
+    expect([...(members?.cards ?? [])]).toEqual(['k-1']);
+    expect([...(members?.boardObjects ?? [])].sort()).toEqual(['bo-1', 'bo-arch', 'bo-card']);
+    expect([...(members?.branches ?? [])]).toEqual(['b-1']);
+    expect(state.coverage.has(boardScopeKey('board-B'))).toBe(false);
     expect([...state.globallyHydrated].sort()).toEqual(['branches', 'sessions']);
     // Annotations were read for the displayed board only.
     const resyncReads = [
@@ -2152,7 +2167,9 @@ describe('useAgorData — reconnect reconciles the displayed partition', () => {
     await flush();
     expect(fetchCount('board-objects', 'findAll')).toBe(before.objects);
     expect(fetchCount('cards', 'findAll')).toBe(before.cards);
-    expect(agorStore.getState().boardPartitions.size).toBe(0);
+    expect(
+      [...agorStore.getState().coverage.keys()].filter((key) => key.startsWith('board:'))
+    ).toEqual([]);
   });
 });
 
@@ -2176,7 +2193,7 @@ describe('useAgorData — reconnect follows the board the UI displays', () => {
 
     act(() => emitIo('connect'));
     await waitFor(() =>
-      expect(agorStore.getState().boardPartitions.get('board-art')?.status).toBe('loaded')
+      expect(selectBoardPartition(agorStore.getState(), 'board-art')?.status).toBe('loaded')
     );
     expect(fetchArguments('cards', 'findAll').at(-1)).toMatchObject({
       query: { board_id: 'board-art' },
@@ -2218,7 +2235,7 @@ describe('useAgorData — reauthentication reads the displayed board once', () =
 
     rerender({ generation: 2 }); // reauthenticated: partitions reset, silent resync
     await waitFor(() =>
-      expect(agorStore.getState().boardPartitions.get('board-1')?.status).toBe('loaded')
+      expect(selectBoardPartition(agorStore.getState(), 'board-1')?.status).toBe('loaded')
     );
     await flush();
     expect(boardReads() - before).toBe(1);
@@ -2277,7 +2294,7 @@ describe('useAgorData — navigating while a reconnect resync runs', () => {
       await firstB.promise;
     });
     await waitFor(() =>
-      expect(agorStore.getState().boardPartitions.get('board-b')?.status).toBe('loaded')
+      expect(selectBoardPartition(agorStore.getState(), 'board-b')?.status).toBe('loaded')
     );
     expect(bReads).toBe(2);
   });
@@ -2307,7 +2324,7 @@ describe('useAgorData — navigating while a reconnect resync runs', () => {
       fetchArguments('cards', 'findAll').filter(
         (args) => (args as { query?: { board_id?: string } }).query?.board_id === boardId
       ).length;
-    const partition = (boardId: string) => agorStore.getState().boardPartitions.get(boardId);
+    const partition = (boardId: string) => selectBoardPartition(agorStore.getState(), boardId);
 
     // Hold the resync in its board-scoped batch (A is already resolved).
     const resync = deferred();
@@ -2397,13 +2414,13 @@ describe('useAgorData — navigating during the resync light batch', () => {
       });
       await flush();
       await waitFor(() =>
-        expect(agorStore.getState().boardPartitions.get('board-b')?.status).toBe('loaded')
+        expect(selectBoardPartition(agorStore.getState(), 'board-b')?.status).toBe('loaded')
       );
       await flush();
       // One read of B's annotations: the resync reused B's in-flight load.
       expect(boardReads('cards')).toBe(1);
       expect(boardReads('board-objects')).toBe(1);
-      expect(agorStore.getState().boardPartitions.get('board-b')?.status).toBe('loaded');
+      expect(selectBoardPartition(agorStore.getState(), 'board-b')?.status).toBe('loaded');
     }
   );
 });

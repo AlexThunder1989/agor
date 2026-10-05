@@ -27,6 +27,11 @@ import {
   lastRunStartedAt,
   makeHomeBucketsSelector,
 } from '../../store/selectors';
+import {
+  selectHomeBranchesLoaded,
+  selectMySessionsLoaded,
+  selectMySessionsTruncated,
+} from '../../store/userScope';
 import { useThemedMessage } from '../../utils/message';
 import { runWithLimit } from '../../utils/promisePool';
 import {
@@ -122,9 +127,9 @@ function greeting(date = new Date()) {
 
 // Counts wait for the user scope: all of my sessions and every branch they or
 // my comment threads reference (never for the whole workspace).
-const selectHydrated = (s: AgorState) => s.mySessionsLoaded && s.homeBranchesLoaded;
+const selectHydrated = (s: AgorState) => selectMySessionsLoaded(s) && selectHomeBranchesLoaded(s);
 // My sessions hit the single read's cap: session counts are lower bounds ("N+").
-const selectTruncated = (s: AgorState) => s.mySessionsTruncated;
+const selectTruncated = selectMySessionsTruncated;
 
 /** Onboarding steps the caller can perform, subscribed only while the card can still show. */
 const HomeOnboarding: React.FC<{

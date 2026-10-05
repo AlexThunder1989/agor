@@ -2,12 +2,13 @@ import type { AgorClient } from '@agor-live/client';
 import { useEffect, useMemo } from 'react';
 import { agorStore, useAgorStore } from '../store/agorStore';
 import {
-  isPartitionStateCurrent,
+  isCoverageCurrent,
   loadBoardPartition,
   makeBoardPartitionSelector,
   makeBoardReadySelector,
   registerDisplayedBoard,
   retryBoardPartition,
+  selectBoardPartition,
 } from '../store/boardPartitions';
 
 /**
@@ -45,8 +46,8 @@ export function useBoardPartition(
     if (partitionReady) return;
     // An entry from another authority or load lifetime can never settle: it
     // counts as unloaded (authority transitions also forget every entry).
-    const current = agorStore.getState().boardPartitions.get(boardId);
-    if (isPartitionStateCurrent(current) && (status === 'loading' || status === 'error')) return;
+    const current = selectBoardPartition(agorStore.getState(), boardId);
+    if (isCoverageCurrent(current) && (status === 'loading' || status === 'error')) return;
     void loadBoardPartition(client, boardId, { canUseMemberWorkspaceServices });
   }, [
     boardId,
@@ -71,7 +72,7 @@ export function useBoardPartition(
   useEffect(() => {
     if (!client || !boardId || status !== 'error') return;
     const retry = () => {
-      if (agorStore.getState().boardPartitions.get(boardId)?.status === 'error') {
+      if (selectBoardPartition(agorStore.getState(), boardId)?.status === 'error') {
         retryBoardPartition(boardId);
       }
     };

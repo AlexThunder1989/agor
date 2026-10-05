@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_MAPS } from '../../store/agorMaps';
 import { agorStore } from '../../store/agorStore';
+import { userScopeCoverage } from '../../test/userScopeCoverage';
 import { resetAccessCacheForTests } from '../../utils/accessCache';
 import { TeammatesDirectory } from './TeammatesDirectory';
 
@@ -30,7 +31,7 @@ function seed(branches: Branch[], boards: Board[], { hydrated = true } = {}) {
     branchById: new Map(branches.map((b) => [b.branch_id, b])),
     boardById: new Map(boards.map((b) => [b.board_id, b])),
     userById: new Map([['owner-1', { user_id: 'owner-1', name: 'Zoë Owner' } as User]]),
-    teammatesLoaded: hydrated,
+    coverage: userScopeCoverage({ teammates: hydrated }),
   } as never);
 }
 
@@ -150,7 +151,7 @@ describe('TeammatesDirectory', () => {
     seed([teammate('shared', 'b-shared')], [board('b-shared')]);
     renderDirectory();
     expect(screen.queryByText(/Showing the first/)).not.toBeInTheDocument();
-    act(() => agorStore.setState({ teammatesTruncated: true }));
+    act(() => agorStore.setState({ coverage: userScopeCoverage({ teammates: 'capped' }) }));
     expect(screen.getByText(/Showing the first 1,000 teammates/)).toBeInTheDocument();
   });
 
@@ -204,7 +205,7 @@ describe('TeammatesDirectory', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Loading teammates…');
     expect(screen.queryByText(/No teammates/)).not.toBeInTheDocument();
 
-    act(() => agorStore.setState({ teammatesLoaded: true } as never));
+    act(() => agorStore.setState({ coverage: userScopeCoverage({ teammates: true }) }));
     expect(screen.getByRole('status')).toHaveTextContent('Loading teammates…');
     await waitFor(() => expect(grant).toBeDefined());
     await act(async () =>

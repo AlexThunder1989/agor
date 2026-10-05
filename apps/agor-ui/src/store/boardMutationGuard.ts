@@ -8,7 +8,7 @@
  * captured when the work is queued or its dialog opens, and checked
  * immediately before every dispatch, including each dispatch after an await.
  *
- * The lifetime token is the `loaded` partition entry itself. `setBoardPartition`
+ * The lifetime token is the `loaded` partition entry itself. `setCoverage`
  * replaces the entry on every change, so an unload followed by a reload yields
  * a new entry: a ticket from before the unload never matches again, even once
  * the board is loaded.
@@ -19,8 +19,10 @@
  * generation are read from the published snapshot when checked, never from
  * values an owner rendered.
  */
-import { agorStore, type BoardPartitionState } from './agorStore';
+import { agorStore } from './agorStore';
+import { selectBoardPartition } from './boardPartitions';
 import { connectionAllowsWrites, getConnectionSnapshot } from './connectionSnapshot';
+import type { ScopeCoverage } from './scopeMerge';
 
 /** The mounted lifetime of one guard; `alive` turns false when it unmounts. */
 export interface BoardWriteOwner {
@@ -30,7 +32,7 @@ export interface BoardWriteOwner {
 export interface BoardWriteTicket {
   readonly boardId: string;
   /** The loaded partition the write was decided against; `null` when the write doesn't need one. */
-  readonly partition: BoardPartitionState | null;
+  readonly partition: ScopeCoverage | null;
   /** Socket-auth generation at capture: a re-authentication ends the ticket. */
   readonly authGeneration: number;
   /** The guard that captured the ticket: its unmount ends the ticket. */
@@ -51,7 +53,7 @@ export function captureBoardWriteTicket(
   if (!boardId || !owner.alive || !connectionAllowsWrites(connection)) return null;
   const { authGeneration } = connection;
   if (!requirePartition) return { boardId, partition: null, authGeneration, owner };
-  const partition = agorStore.getState().boardPartitions.get(boardId);
+  const partition = selectBoardPartition(agorStore.getState(), boardId);
   if (partition?.status !== 'loaded') return null;
   return { boardId, partition, authGeneration, owner };
 }
@@ -69,7 +71,7 @@ export function isBoardWriteTicketCurrent(
   if (!connectionAllowsWrites(connection)) return false;
   if (ticket.authGeneration !== connection.authGeneration) return false;
   if (ticket.partition === null) return true;
-  const current = agorStore.getState().boardPartitions.get(ticket.boardId);
+  const current = selectBoardPartition(agorStore.getState(), ticket.boardId);
   return current === ticket.partition && current.status === 'loaded';
 }
 
@@ -83,5 +85,5 @@ export function hasBoardWriteTicketEnded(ticket: BoardWriteTicket | null | undef
   if (!ticket?.owner?.alive) return true;
   if (ticket.authGeneration !== getConnectionSnapshot().authGeneration) return true;
   if (ticket.partition === null) return false;
-  return agorStore.getState().boardPartitions.get(ticket.boardId) !== ticket.partition;
+  return selectBoardPartition(agorStore.getState(), ticket.boardId) !== ticket.partition;
 }

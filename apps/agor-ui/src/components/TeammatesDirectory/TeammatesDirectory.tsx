@@ -6,6 +6,7 @@ import { memo, useEffect, useMemo, useState } from 'react';
 import { useSessionAccess } from '../../hooks/useSessionAccess';
 import { useSharedTeammates } from '../../hooks/useSharedTeammates';
 import { useAgorStore } from '../../store/agorStore';
+import { selectTeammatesLoaded, selectTeammatesTruncated } from '../../store/userScope';
 import { VISUALLY_HIDDEN_STYLE } from '../../utils/accessibility';
 import { teammateLabel } from '../../utils/teammateLabels';
 // Home's layout primitives: the directory is a Home-styled page.
@@ -38,9 +39,9 @@ export const TeammatesDirectory = memo(function TeammatesDirectory({
   // The status region mounts blank (keeping its line) and gains its text after, since readers may skip text a live region starts with.
   const [announce, setAnnounce] = useState(false);
   useEffect(() => setAnnounce(true), []);
-  const hydrated = useAgorStore((s) => s.teammatesLoaded);
+  const hydrated = useAgorStore(selectTeammatesLoaded);
   // More teammates are shared than one read returns: say the list is partial.
-  const truncated = useAgorStore((s) => s.teammatesTruncated);
+  const truncated = useAgorStore(selectTeammatesTruncated);
   const {
     teammates,
     settled: sharingSettled,

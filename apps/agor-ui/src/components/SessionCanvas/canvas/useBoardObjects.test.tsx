@@ -7,6 +7,7 @@ import { ConnectionProvider } from '../../../contexts/ConnectionContext';
 import { useBoardMutationGuard } from '../../../hooks/useBoardMutationGuard';
 import { agorStore } from '../../../store/agorStore';
 import type { BoardWriteTicket } from '../../../store/boardMutationGuard';
+import { boardScopeKey } from '../../../store/scopeMerge';
 import { useBoardObjects } from './useBoardObjects';
 
 // Spy the themed error toast so the failure path of reorderObject is observable.
@@ -32,7 +33,7 @@ const connectionState = {
 };
 
 function loadBoard() {
-  agorStore.getState().setBoardPartition('board-1', {
+  agorStore.getState().setCoverage(boardScopeKey('board-1'), {
     status: 'loaded',
     authorityScope: 'fixture',
     loadEpoch: 0,
@@ -41,7 +42,7 @@ function loadBoard() {
 
 beforeEach(() => {
   // Board writes need the board's partition loaded (`useBoardMutationGuard`).
-  agorStore.setState({ boardPartitions: new Map() });
+  agorStore.setState({ coverage: new Map() });
   loadBoard();
   showError.mockClear();
   connectionState.connected = true;

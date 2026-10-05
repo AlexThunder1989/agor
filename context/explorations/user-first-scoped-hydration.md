@@ -231,6 +231,13 @@ globallyHydrated: Set<'sessions' | 'branches' | 'boardObjects' | 'cards' | 'boar
 selectBoardReady(boardId) = status === 'loaded' || all five in globallyHydrated;  // shortcut removed in 2.2
 ```
 
+**Step 3 batch A (coverage model).** `boardPartitions` and the user-scope flags of §3.6 are folded into one
+`coverage: Map<scopeKey, ScopeCoverage>` (`store/scopeMerge.ts`): board partitions (`board:<id>`) and the user
+scope's pieces (`user:sessions`, `user:branches`, `user:teammates`, `user:references`). Each entry carries status,
+lifetime and, once loaded, its **committed membership** (ids its read returned) and `complete` (false for a capped
+read). The §3.6 flags and partition status are selectors over it. `replaceScope` keeps a row for another scope only
+through that scope's committed membership (current lifetime, `loaded`), and removes nothing for a capped read.
+
 ### 4.2 Trigger
 
 - `useBoardPartition(client, boardId, …)` is mounted in `components/App/App.tsx` and `MobileApp.tsx`.

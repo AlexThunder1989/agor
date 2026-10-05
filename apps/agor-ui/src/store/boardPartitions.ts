@@ -35,19 +35,32 @@ import {
   WholesaleReplacementError,
   wholesaleReplacedSince,
 } from './agorHydration';
-import { type AgorState, agorStore, type BoardPartitionState } from './agorStore';
+import { type AgorState, agorStore } from './agorStore';
 import { captureLoadLifetime, isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
 import { getRealtimeAuthorityScope } from './realtimeBatch';
 import {
   applyPartitionSnapshot,
+  BOARD_SCOPE_PREFIX,
   type BoardPartitionSnapshot,
-  boardPartitionScope,
-  globalSetsClaims,
-  type LoadScope,
-  userScopeClaims,
+  boardScopeKey,
+  type CoverageMembers,
+  globalSetsMembers,
+  type MemberLookup,
+  type ScopeCoverage,
+  scopeMembers,
 } from './scopeMerge';
 import { sessionListQuery } from './sessionListQuery';
-import { getUserScopeUserId, referencedBranchIds } from './userScope';
+
+/** `boardId`'s partition coverage entry, if any. */
+export function selectBoardPartition(
+  s: Pick<AgorState, 'coverage'>,
+  boardId: string
+): ScopeCoverage | undefined {
+  return s.coverage.get(boardScopeKey(boardId));
+}
+
+const setBoardPartition = (boardId: string, entry: ScopeCoverage | null) =>
+  agorStore.getState().setCoverage(boardScopeKey(boardId), entry);
 
 /**
  * Whether `boardId` is complete: its partition is loaded. Nothing else makes a
@@ -58,16 +71,17 @@ export function makeBoardReadySelector(
   boardId: string | null | undefined
 ): (s: AgorState) => boolean {
   return (s) => {
-    return !!boardId && s.boardPartitions.get(boardId)?.status === 'loaded';
+    return !!boardId && selectBoardPartition(s, boardId)?.status === 'loaded';
   };
 }
 
 /**
- * A partition entry recorded under another authority or lifetime describes
- * loads that can no longer settle (or data that may no longer apply): it
- * counts as unloaded. Authority transitions also forget every entry.
+ * A coverage entry recorded under another authority or lifetime describes
+ * loads that can no longer settle (or data that may no longer apply): a
+ * partition counts as unloaded, and no entry's members keep rows alive.
+ * Authority transitions also forget every partition entry.
  */
-export function isPartitionStateCurrent(state: BoardPartitionState | undefined): boolean {
+export function isCoverageCurrent(state: ScopeCoverage | undefined): boolean {
   return (
     !!state &&
     state.authorityScope === getRealtimeAuthorityScope() &&
@@ -76,51 +90,45 @@ export function isPartitionStateCurrent(state: BoardPartitionState | undefined):
 }
 
 /**
- * Every scope that is loading or loaded under the current lifetime, except
- * `exceptBoardId`'s partition: the claims a replace must respect (a row one of
- * them still claims is never removed). Overlapping scopes are normal: my
- * session on a loaded board belongs to the user scope and to that partition.
+ * The committed memberships a replace of `exceptKey` must respect: every
+ * other scope loaded under the current lifetime (a row one of them returned
+ * is never removed), and the global sets while they exist. Loading, failed
+ * and stale scopes hold nothing. Overlapping scopes are normal: my session on
+ * a loaded board belongs to the user scope and to that partition.
  */
-export function otherLoadedScopes(state: AgorState, exceptBoardId?: string): LoadScope[] {
-  const scopes: LoadScope[] = [];
-  for (const [boardId, partition] of state.boardPartitions) {
-    if (boardId === exceptBoardId || partition.status === 'error') continue;
-    if (isPartitionStateCurrent(partition)) scopes.push(boardPartitionScope(boardId));
+export function otherCommittedMembers(state: AgorState, exceptKey?: string): MemberLookup[] {
+  const members: MemberLookup[] = [];
+  for (const [key, entry] of state.coverage) {
+    if (key === exceptKey || entry.status !== 'loaded' || !entry.members) continue;
+    if (isCoverageCurrent(entry)) members.push(entry.members);
   }
-  const userId = getUserScopeUserId();
-  if (userId) {
-    let referenced: Set<string> | null = null;
-    scopes.push(
-      userScopeClaims(userId, () => {
-        referenced ??= referencedBranchIds(state, userId);
-        return referenced;
-      })
-    );
-  }
-  scopes.push(globalSetsClaims(state.globallyHydrated));
-  return scopes;
+  members.push(globalSetsMembers(state.globallyHydrated));
+  return members;
 }
 
 export function makeBoardPartitionSelector(
   boardId: string | null | undefined
-): (s: AgorState) => BoardPartitionState | undefined {
-  return (s) => (boardId ? s.boardPartitions.get(boardId) : undefined);
+): (s: AgorState) => ScopeCoverage | undefined {
+  return (s) => (boardId ? selectBoardPartition(s, boardId) : undefined);
 }
 
 /**
  * Record that the gated first-paint apply loaded `boardId`'s partition (the
  * board-scoped first paint runs the same queries as a partition load), under
- * that load's lifetime; a lifetime that is no longer current records nothing.
+ * that load's lifetime, with the ids its reads returned for the board; a
+ * lifetime that is no longer current records nothing.
  */
 export function markBoardPartitionLoaded(
   boardId: string | null | undefined,
-  lifetime: LoadLifetime
+  lifetime: LoadLifetime,
+  members: CoverageMembers = {}
 ): void {
   if (!boardId || !isLoadLifetimeCurrent(lifetime)) return;
-  agorStore.getState().setBoardPartition(boardId, {
+  setBoardPartition(boardId, {
     status: 'loaded',
     authorityScope: lifetime.authorityScope,
     loadEpoch: lifetime.loadEpoch,
+    members,
   });
 }
 
@@ -160,9 +168,9 @@ export function claimDisplayedBoardForResync(
   lifetime: LoadLifetime
 ): { boardId: string; loadId: number } | null {
   const boardId = getDisplayedBoardId();
-  if (!boardId || agorStore.getState().boardPartitions.has(boardId)) return null;
+  if (!boardId || agorStore.getState().coverage.has(boardScopeKey(boardId))) return null;
   const loadId = ++loadSequence;
-  agorStore.getState().setBoardPartition(boardId, {
+  setBoardPartition(boardId, {
     status: 'loading',
     authorityScope: lifetime.authorityScope,
     loadEpoch: lifetime.loadEpoch,
@@ -173,8 +181,8 @@ export function claimDisplayedBoardForResync(
 
 export function releaseResyncClaim(claim: { boardId: string; loadId: number } | null): void {
   if (!claim) return;
-  if (agorStore.getState().boardPartitions.get(claim.boardId)?.loadId === claim.loadId) {
-    agorStore.getState().setBoardPartition(claim.boardId, null);
+  if (selectBoardPartition(agorStore.getState(), claim.boardId)?.loadId === claim.loadId) {
+    setBoardPartition(claim.boardId, null);
   }
 }
 
@@ -202,7 +210,7 @@ export function partitionLoadSince(
   lifetime: LoadLifetime,
   sinceMark: number
 ): Promise<void> | undefined {
-  const entry = agorStore.getState().boardPartitions.get(boardId);
+  const entry = selectBoardPartition(agorStore.getState(), boardId);
   if (
     !entry ||
     entry.authorityScope !== lifetime.authorityScope ||
@@ -228,7 +236,9 @@ export function partitionLoadSince(
  */
 export function partitionsLoadedSince(lifetime: LoadLifetime, sinceMark: number): string[] {
   const boardIds: string[] = [];
-  for (const [boardId, entry] of agorStore.getState().boardPartitions) {
+  for (const [key, entry] of agorStore.getState().coverage) {
+    if (!key.startsWith(BOARD_SCOPE_PREFIX)) continue;
+    const boardId = key.slice(BOARD_SCOPE_PREFIX.length);
     if (
       entry.authorityScope !== lifetime.authorityScope ||
       entry.loadEpoch !== lifetime.loadEpoch
@@ -248,8 +258,9 @@ export function partitionsLoadedSince(lifetime: LoadLifetime, sinceMark: number)
 
 /** Forget a failed partition so `useBoardPartition` loads it again. */
 export function retryBoardPartition(boardId: string): void {
-  const state = agorStore.getState().boardPartitions.get(boardId);
-  if (state?.status === 'error') agorStore.getState().setBoardPartition(boardId, null);
+  if (selectBoardPartition(agorStore.getState(), boardId)?.status === 'error') {
+    setBoardPartition(boardId, null);
+  }
 }
 
 async function fetchBoardPartition(
@@ -322,10 +333,10 @@ export function loadBoardPartition(
 
   const loadId = ++loadSequence;
   const store = () => agorStore.getState();
-  const owns = () => store().boardPartitions.get(boardId)?.loadId === loadId;
+  const owns = () => selectBoardPartition(store(), boardId)?.loadId === loadId;
   const isCurrent = () => isLoadLifetimeCurrent(lifetime) && owns();
   const run = async () => {
-    store().setBoardPartition(boardId, { status: 'loading', authorityScope, loadEpoch, loadId });
+    setBoardPartition(boardId, { status: 'loading', authorityScope, loadEpoch, loadId });
     for (let attempt = 0; ; attempt++) {
       const fence = beginPartitionLoad();
       try {
@@ -343,22 +354,23 @@ export function loadBoardPartition(
         }
         const touched = (collection: HydratedCollection, id: string) =>
           touchedSince(collection, id, fence.startRevisions[collection]);
-        const others = otherLoadedScopes(store(), boardId);
+        const others = otherCommittedMembers(store(), boardScopeKey(boardId));
         store().applyMaps((prev) => applyPartitionSnapshot(prev, snapshot, touched, others));
         // `applyMaps` notifies subscribers synchronously; one may have ended
         // this lifetime (logout, remount) or started a load that owns the entry.
         if (!isCurrent()) return;
-        store().setBoardPartition(boardId, {
+        setBoardPartition(boardId, {
           status: 'loaded',
           authorityScope,
           loadEpoch,
           loadedBy: loadId,
+          members: scopeMembers(snapshot),
         });
         return;
       } catch (err) {
         if (!isCurrent()) return;
         console.warn(`[boardPartitions] load failed for board ${boardId}:`, err);
-        store().setBoardPartition(boardId, {
+        setBoardPartition(boardId, {
           status: 'error',
           authorityScope,
           loadEpoch,
@@ -374,7 +386,7 @@ export function loadBoardPartition(
     inflight.delete(key);
     // Cancelled or dropped while still loading: release the entry so the
     // board counts as unloaded and the next mount/authority loads it again.
-    if (owns()) store().setBoardPartition(boardId, null);
+    if (owns()) setBoardPartition(boardId, null);
   });
   inflight.set(key, promise);
   return promise;

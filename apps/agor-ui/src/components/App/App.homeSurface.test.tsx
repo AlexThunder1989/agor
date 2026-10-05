@@ -16,6 +16,7 @@ import { useAppNavigation } from '../../hooks/useAppNavigation';
 import { useSettingsRoute } from '../../hooks/useSettingsRoute';
 import { EMPTY_MAPS } from '../../store/agorMaps';
 import { agorStore } from '../../store/agorStore';
+import { userScopeCoverage } from '../../test/userScopeCoverage';
 import { resetAccessCacheForTests } from '../../utils/accessCache';
 import { App } from './App';
 
@@ -152,9 +153,7 @@ function seedStore() {
       [BRANCH_B, [session2]],
     ]),
     userById: new Map([[user.user_id, user]]),
-    mySessionsLoaded: true,
-    homeBranchesLoaded: true,
-    teammatesLoaded: true,
+    coverage: userScopeCoverage({ sessions: true, references: true, teammates: true }),
   } as never);
 }
 

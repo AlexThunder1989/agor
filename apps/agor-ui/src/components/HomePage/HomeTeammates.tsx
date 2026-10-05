@@ -5,6 +5,7 @@ import { memo, useMemo, useState } from 'react';
 import { useSessionAccess } from '../../hooks/useSessionAccess';
 import { useSharedTeammates } from '../../hooks/useSharedTeammates';
 import { useAgorStore } from '../../store/agorStore';
+import { selectTeammatesLoaded, selectTeammatesTruncated } from '../../store/userScope';
 import { TeammateCard } from '../TeammateCard';
 import { HomeCard, HomeLink, HomeSection, HomeSkeleton } from './HomeSection';
 import { formatCount, homeDivider } from './homeLayout';
@@ -34,8 +35,8 @@ export const HomeTeammatesSection = memo(function HomeTeammatesSection({
     retry: retrySharing,
     retrying: sharingRetrying,
   } = useSharedTeammates(client, currentUser);
-  const hydrated = useAgorStore((s) => s.teammatesLoaded);
-  const truncated = useAgorStore((s) => s.teammatesTruncated);
+  const hydrated = useAgorStore(selectTeammatesLoaded);
+  const truncated = useAgorStore(selectTeammatesTruncated);
   const [offset, setOffset] = useState(0);
   const shown = useMemo(
     () =>

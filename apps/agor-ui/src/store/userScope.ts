@@ -6,11 +6,11 @@
  *   sessions. Fewer rows than the limit already means "all of mine".
  * - U1: all of my active sessions in ONE read (no offset pages: an archive
  *   during a paged read shifts rows and skips one), capped at
- *   `MY_SESSIONS_FULL_LIMIT`; hitting the cap sets `mySessionsTruncated`.
+ *   `MY_SESSIONS_FULL_LIMIT`; hitting the cap commits an incomplete piece.
  * - U2: my branches (`branches{created_by}`).
  * - U3: every teammate branch I can view (`branches{teammate: true}`), capped
  *   at `PAGINATION.MAX_TEAMMATE_BRANCHES`; the daemon's real total sets
- *   `teammatesTruncated` when the cap was hit.
+ *   an incomplete piece when the cap was hit.
  * - U5: every branch my sessions or candidate comment threads reference that
  *   is still absent, read by id in chunks; ids the server does not return go
  *   into `absentBranchIds` (archived, deleted or invisible).
@@ -20,10 +20,14 @@
  *
  * Every read applies with the fill-only merge and per-id touched fence
  * (`applyEntityFill`), under the lifetime of the load that started the run.
- * Flags only ever become true within one identity; `resetMaps` clears them.
- * A failed U1/U2/U3 read leaves its flag unset (Home keeps its loading state)
- * until the next run, which `useAgorData` starts again on every silent
- * reconnect resync.
+ * Each piece commits a coverage entry (`USER_SCOPE_KEYS`) with the ids its
+ * read returned and whether the read was capped; the readiness flags Home and
+ * the teammate surfaces read are selectors over those entries. An entry stays
+ * loaded across runs within one identity (`resetMaps` clears it), so nothing
+ * flickers on a reconnect; until the new run commits, its members are stale
+ * and keep no row alive. A failed U1/U2/U3 read leaves its piece unloaded
+ * (Home keeps its loading state) until the next run, which `useAgorData`
+ * starts again on every silent reconnect resync.
  *
  * Realtime keeps the scope complete for rows; a store subscription, installed
  * before the first read, keeps it complete for new REFERENCES (a new session of
@@ -47,6 +51,12 @@ import {
 import { applyEntityFill, type DataMaps } from './agorMaps';
 import { type AgorState, agorStore } from './agorStore';
 import { isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
+import {
+  type CoverageMembers,
+  type ScopeCoverage,
+  scopeMembers,
+  USER_SCOPE_KEYS,
+} from './scopeMerge';
 import { sessionListQuery } from './sessionListQuery';
 
 /** Gated first-paint page of my sessions (replaces the global recent slice). */
@@ -94,6 +104,27 @@ export function isUnsupportedQueryError(err: unknown): boolean {
 /** Whether the global session and branch snapshots have applied (Steps 1–2 only). */
 const globalSetsComplete = (s: AgorState) =>
   s.globallyHydrated.has('sessions') && s.globallyHydrated.has('branches');
+
+const loadedPiece = (s: Pick<AgorState, 'coverage'>, key: string) =>
+  s.coverage.get(key)?.status === 'loaded';
+const cappedPiece = (s: Pick<AgorState, 'coverage'>, key: string) =>
+  s.coverage.get(key)?.complete === false;
+
+/** Every active session the caller created is in `sessionById`. */
+export const selectMySessionsLoaded = (s: Pick<AgorState, 'coverage'>) =>
+  loadedPiece(s, USER_SCOPE_KEYS.sessions);
+/** The all-my-sessions read hit its cap; counts are lower bounds ("N+"). */
+export const selectMySessionsTruncated = (s: Pick<AgorState, 'coverage'>) =>
+  cappedPiece(s, USER_SCOPE_KEYS.sessions);
+/** Every branch my sessions or candidate comment threads reference is present or absent. */
+export const selectHomeBranchesLoaded = (s: Pick<AgorState, 'coverage'>) =>
+  loadedPiece(s, USER_SCOPE_KEYS.references);
+/** The teammate read finished; with `selectTeammatesTruncated`, only up to its cap. */
+export const selectTeammatesLoaded = (s: Pick<AgorState, 'coverage'>) =>
+  loadedPiece(s, USER_SCOPE_KEYS.teammates);
+/** More teammates are visible than the capped read returned: lists are partial. */
+export const selectTeammatesTruncated = (s: Pick<AgorState, 'coverage'>) =>
+  cappedPiece(s, USER_SCOPE_KEYS.teammates);
 
 const rowsOf = <T>(result: unknown): T[] =>
   Array.isArray(result) ? (result as T[]) : ((result as { data?: T[] })?.data ?? []);
@@ -171,14 +202,6 @@ let currentRun: ScopeRun | null = null;
 const isCurrent = (run: ScopeRun) => currentRun === run && isLoadLifetimeCurrent(run.lifetime);
 
 /**
- * The user whose scope is loading or loaded under the current lifetime, or
- * null. Its rows are claimed against other scopes' replaces (`scopeMerge`).
- */
-export function getUserScopeUserId(): string | null {
-  return currentRun && isCurrent(currentRun) ? currentRun.userId : null;
-}
-
-/**
  * Read rows and fill-merge them; null when the run went stale. Read errors
  * propagate, and so does a read whose every attempt spanned a wholesale
  * replacement (`WholesaleReplacementError`): its snapshot is never applied.
@@ -216,15 +239,72 @@ async function fillRead(
 }
 
 /**
- * Write user-scope metadata for `run` — only while it is current. Every flag
- * and absent-mark write goes through here (or `updateAbsent`), so a
- * continuation that resumes after its run was cancelled or superseded (an
- * awaited read's completion, a `.then`, a timer) can never write into the
- * next authority's store, even when its rows were applied while it was
- * still current.
+ * Write user-scope metadata for `run` — only while it is current. Every
+ * coverage, flag and absent-mark write goes through here (or `commitPiece`,
+ * `updateAbsent`), so a continuation that resumes after its run was cancelled
+ * or superseded (an awaited read's completion, a `.then`, a timer) can never
+ * write into the next authority's store, even when its rows were applied
+ * while it was still current.
  */
 function setScope(run: ScopeRun, partial: Parameters<AgorState['setUserScope']>[0]): void {
   if (isCurrent(run)) agorStore.getState().setUserScope(partial);
+}
+
+/** `key`'s entry if a read of `run`'s lifetime committed or started it. */
+function pieceInRun(run: ScopeRun, key: string): ScopeCoverage | undefined {
+  const entry = agorStore.getState().coverage.get(key);
+  return entry?.authorityScope === run.lifetime.authorityScope &&
+    entry.loadEpoch === run.lifetime.loadEpoch
+    ? entry
+    : undefined;
+}
+
+/** Commit one piece's coverage under `run`'s lifetime (current run only). */
+function commitPiece(
+  run: ScopeRun,
+  key: string,
+  entry: Pick<ScopeCoverage, 'status' | 'members' | 'complete'>
+): void {
+  if (!isCurrent(run)) return;
+  agorStore.getState().setCoverage(key, {
+    ...entry,
+    authorityScope: run.lifetime.authorityScope,
+    loadEpoch: run.lifetime.loadEpoch,
+  });
+}
+
+/**
+ * Add ids the referenced-branch reads returned to that piece's members. The
+ * piece accumulates over the run's id reads; a piece loaded by an earlier
+ * lifetime stays loaded (no flicker) but starts its members over.
+ */
+function addReferenceMembers(run: ScopeRun, ids: readonly string[]): void {
+  const key = USER_SCOPE_KEYS.references;
+  const previous = pieceInRun(run, key);
+  const members = previous?.members?.branches;
+  if (previous && ids.every((id) => members?.has(id))) return;
+  commitPiece(run, key, {
+    status: agorStore.getState().coverage.get(key)?.status === 'loaded' ? 'loaded' : 'loading',
+    members: { branches: new Set([...(members ?? []), ...ids]) },
+  });
+}
+
+/** Mark the referenced-branch piece loaded, keeping this run's members. */
+function settleReferencePiece(run: ScopeRun): void {
+  const members = pieceInRun(run, USER_SCOPE_KEYS.references)?.members ?? { branches: new Set() };
+  commitPiece(run, USER_SCOPE_KEYS.references, { status: 'loaded', members });
+}
+
+/** A piece the global sets complete (`applyGlobalCompatibility`) holds no rows of its own. */
+const NO_MEMBERS: CoverageMembers = {};
+
+/** Ids of my active sessions in the store. */
+function mySessionIds(s: AgorState, userId: string): Set<string> {
+  const ids = new Set<string>();
+  for (const session of s.sessionById.values()) {
+    if (!session.archived && session.created_by === userId) ids.add(session.session_id);
+  }
+  return ids;
 }
 
 /** Add absent marks and drop the marks of branches that are present now (current run only). */
@@ -271,12 +351,16 @@ function applyGlobalCompatibility(run: ScopeRun): void {
   );
   updateAbsent(run, unresolved);
   for (const id of unresolved) run.failed.delete(id);
-  setScope(run, {
-    ...(state.mySessionsLoaded ? {} : { mySessionsLoaded: true, mySessionsTruncated: false }),
-    teammatesLoaded: true,
-    teammatesTruncated: false,
+  // The global sets hold these rows (`globalSetsMembers`), so a piece the
+  // compatibility path completes commits no members of its own.
+  if (!selectMySessionsLoaded(state)) {
+    commitPiece(run, USER_SCOPE_KEYS.sessions, { status: 'loaded', members: NO_MEMBERS });
+  }
+  commitPiece(run, USER_SCOPE_KEYS.teammates, {
+    status: 'loaded',
+    members: pieceInRun(run, USER_SCOPE_KEYS.teammates)?.members ?? NO_MEMBERS,
   });
-  if (run.pending.size === 0) setScope(run, { homeBranchesLoaded: true });
+  if (run.pending.size === 0) settleReferencePiece(run);
 }
 
 /** Stop sending scope reads: the daemon doesn't support them (terminal for the run). */
@@ -293,13 +377,13 @@ function enterDegraded(run: ScopeRun, reason: unknown): void {
   applyGlobalCompatibility(run);
 }
 
-/** `homeBranchesLoaded` once every reference is known and none is unresolved. */
+/** The referenced-branch piece is loaded once every reference is known and none is unresolved. */
 function settleHomeBranches(run: ScopeRun): void {
   applyGlobalCompatibility(run);
   if (!isCurrent(run) || !run.referencesKnown) return;
   if (run.pending.size > 0 || run.failed.size > 0) return;
   if (missingReferences(agorStore.getState(), run).length > 0) return;
-  setScope(run, { homeBranchesLoaded: true });
+  settleReferencePiece(run);
 }
 
 /** Queue branch ids for id-list reads (deduplicated by `pending`). */
@@ -366,6 +450,7 @@ async function readBranchChunk(run: ScopeRun, chunk: string[]): Promise<void> {
     // continuation runs later, possibly after a cancellation or a new run.
     if (!rows || !isCurrent(run)) return;
     const returned = new Set((rows.branches ?? []).map((branch) => branch.branch_id as string));
+    addReferenceMembers(run, [...scopeMembers(rows).branches!]);
     const state = agorStore.getState();
     updateAbsent(
       run,
@@ -509,7 +594,13 @@ export async function startUserScope(
   };
   currentRun = run;
   const store = () => agorStore.getState();
-  if (options.gatedMineComplete) setScope(run, { mySessionsLoaded: true });
+  if (options.gatedMineComplete) {
+    commitPiece(run, USER_SCOPE_KEYS.sessions, {
+      status: 'loaded',
+      members: { sessions: mySessionIds(store(), run.userId) },
+      complete: true,
+    });
+  }
 
   // Subscribe before any read: a reference that appears while the reads below
   // are in flight is seen by the subscription, never lost between a scan and
@@ -541,7 +632,15 @@ export async function startUserScope(
       ),
     }),
     ({ branches }) => (branches ?? []).some((row) => row.created_by !== run.userId)
-  ).then(Boolean);
+  ).then((rows) => {
+    if (!rows || !isCurrent(run)) return false;
+    commitPiece(run, USER_SCOPE_KEYS.branches, {
+      status: 'loaded',
+      members: scopeMembers(rows),
+      complete: true,
+    });
+    return true;
+  });
   // The daemon reports the real total, so a capped read is never "all teammates".
   let teammateTotal = 0;
   const u3 = fillRead(run, async () => {
@@ -560,9 +659,10 @@ export async function startUserScope(
     // the keys are honoured.
     const keysHonoured = await u2.catch(() => false);
     if (!keysHonoured || run.degraded || !isCurrent(run)) return false;
-    setScope(run, {
-      teammatesLoaded: true,
-      teammatesTruncated: teammateTotal > (rows.branches?.length ?? 0),
+    commitPiece(run, USER_SCOPE_KEYS.teammates, {
+      status: 'loaded',
+      members: scopeMembers(rows),
+      complete: teammateTotal <= (rows.branches?.length ?? 0),
     });
     return true;
   });
@@ -591,9 +691,10 @@ export async function startUserScope(
       ).then((rows) => {
         // Recheck after the await (see `readBranchChunk`).
         if (!rows || !isCurrent(run)) return false;
-        setScope(run, {
-          mySessionsLoaded: true,
-          mySessionsTruncated: (rows.sessions?.length ?? 0) >= MY_SESSIONS_FULL_LIMIT,
+        commitPiece(run, USER_SCOPE_KEYS.sessions, {
+          status: 'loaded',
+          members: scopeMembers(rows),
+          complete: (rows.sessions?.length ?? 0) < MY_SESSIONS_FULL_LIMIT,
         });
         return true;
       });
@@ -620,7 +721,7 @@ export async function startUserScope(
   // references a read that did land added are queued now. Resolve only once
   // those follow-up id reads settle, so a caller holding the global snapshots
   // for the scope doesn't release them before the U1-only references are on
-  // the wire. Completeness (`homeBranchesLoaded`) still needs referencesKnown.
+  // the wire. Completeness (the referenced-branch piece) still needs referencesKnown.
   checkReferences(run);
   await idReadsDrained(run);
 }

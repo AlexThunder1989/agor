@@ -3,6 +3,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildSessionMaps } from '../../store/agorMaps';
 import { agorStore } from '../../store/agorStore';
+import { userScopeCoverage } from '../../test/userScopeCoverage';
 import {
   OPEN_BOARD_SWITCHER_EVENT,
   OPEN_GLOBAL_SEARCH_EVENT,
@@ -34,7 +35,9 @@ describe('HomePage', () => {
     expect(screen.queryByText(/caught up/i)).not.toBeInTheDocument();
     expect(screen.getByText('Session idle')).toBeInTheDocument();
 
-    act(() => agorStore.setState({ mySessionsLoaded: true, homeBranchesLoaded: true }));
+    act(() =>
+      agorStore.setState({ coverage: userScopeCoverage({ sessions: true, references: true }) })
+    );
     expect(screen.getByText('You’re all caught up.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /All caught up/ })).toBeInTheDocument();
   });
@@ -46,7 +49,11 @@ describe('HomePage', () => {
         session('run', { status: 'running' }),
       ],
     });
-    act(() => agorStore.setState({ mySessionsTruncated: true }));
+    act(() =>
+      agorStore.setState({
+        coverage: userScopeCoverage({ sessions: 'capped', references: true, teammates: true }),
+      })
+    );
     renderHome();
     expect(screen.getByRole('button', { name: '1+ need you' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '1+ running' })).toBeInTheDocument();
@@ -55,7 +62,9 @@ describe('HomePage', () => {
     // Nothing found in the capped read is not proof that nothing needs me.
     act(() => {
       seed({ sessions: [session('idle')] });
-      agorStore.setState({ mySessionsTruncated: true });
+      agorStore.setState({
+        coverage: userScopeCoverage({ sessions: 'capped', references: true, teammates: true }),
+      });
     });
     expect(screen.queryByText(/caught up/i)).not.toBeInTheDocument();
     expect(screen.getByText('Nothing needs you in your most recent sessions.')).toBeInTheDocument();

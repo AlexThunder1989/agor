@@ -21,15 +21,16 @@ import { EMPTY_MAPS } from './agorMaps';
 import { branchRemoved, cardCreated, cardRemoved, sessionPatched } from './agorRealtimeActions';
 import { agorStore } from './agorStore';
 import {
-  isPartitionStateCurrent,
+  isCoverageCurrent,
   loadBoardPartition,
   makeBoardReadySelector,
   markBoardPartitionLoaded,
-  otherLoadedScopes,
+  otherCommittedMembers,
   partitionLoadMark,
   partitionLoadSince,
   partitionsLoadedSince,
   retryBoardPartition,
+  selectBoardPartition,
 } from './boardPartitions';
 import { captureLoadLifetime } from './loadLifetime';
 import {
@@ -38,7 +39,12 @@ import {
   flushRealtimeNow,
   setRealtimeAuthorityScope,
 } from './realtimeBatch';
-import { applyPartitionSnapshot, type BoardPartitionSnapshot } from './scopeMerge';
+import {
+  applyPartitionSnapshot,
+  type BoardPartitionSnapshot,
+  boardScopeKey,
+  USER_SCOPE_KEYS,
+} from './scopeMerge';
 
 const AUTHORITY = 'user-a:member:1';
 const BOARD = 'board-1';
@@ -267,7 +273,7 @@ describe('loadBoardPartition', () => {
       sessions: [session('s-1', 'br-1')],
     });
     const load = loadBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true });
-    expect(agorStore.getState().boardPartitions.get(BOARD)?.status).toBe('loading');
+    expect(selectBoardPartition(agorStore.getState(), BOARD)?.status).toBe('loading');
     expect(ready()).toBe(false);
     release();
     await load;
@@ -306,8 +312,8 @@ describe('loadBoardPartition', () => {
       []
     );
     agorStore.getState().resetBoardPartitions(partitionsLoadedSince(lifetime, mark));
-    expect(agorStore.getState().boardPartitions.get(BOARD)?.status).toBe('loaded');
-    expect(agorStore.getState().boardPartitions.has('board-2')).toBe(false);
+    expect(selectBoardPartition(agorStore.getState(), BOARD)?.status).toBe('loaded');
+    expect(agorStore.getState().coverage.has(boardScopeKey('board-2'))).toBe(false);
   });
 
   it('dedupes in-flight loads of the same board', async () => {
@@ -354,7 +360,7 @@ describe('loadBoardPartition', () => {
     expect(agorStore.getState().sessionById.size).toBe(0);
     // The stale load never settles its entry under the new authority; it
     // releases it, so the board loads again instead of staying 'loading'.
-    expect(agorStore.getState().boardPartitions.has(BOARD)).toBe(false);
+    expect(agorStore.getState().coverage.has(boardScopeKey(BOARD))).toBe(false);
   });
 
   it('drops the apply when the load is cancelled, even under the same authority', async () => {
@@ -447,14 +453,14 @@ describe('loadBoardPartition', () => {
   it('releases its loading entry when cancelled, so the board counts as unloaded', async () => {
     const { client, release } = makePartitionClient({ sessions: [session('s-1', 'br-1')] });
     const load = loadBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true });
-    const entry = agorStore.getState().boardPartitions.get(BOARD);
+    const entry = selectBoardPartition(agorStore.getState(), BOARD);
     expect(entry?.status).toBe('loading');
     cancelAllHydrations();
     // Another lifetime's entry is not current even before the load settles.
-    expect(isPartitionStateCurrent(entry)).toBe(false);
+    expect(isCoverageCurrent(entry)).toBe(false);
     release();
     await load;
-    expect(agorStore.getState().boardPartitions.has(BOARD)).toBe(false);
+    expect(agorStore.getState().coverage.has(boardScopeKey(BOARD))).toBe(false);
     // A new load under the new lifetime starts instead of deduping into the old one.
     const again = makePartitionClient({ sessions: [session('s-2', 'br-1')] });
     const reload = loadBoardPartition(again.client, BOARD, { canUseMemberWorkspaceServices: true });
@@ -477,7 +483,7 @@ describe('loadBoardPartition', () => {
     });
     release();
     await load;
-    expect(agorStore.getState().boardPartitions.has(BOARD)).toBe(false);
+    expect(agorStore.getState().coverage.has(boardScopeKey(BOARD))).toBe(false);
     expect(ready()).toBe(false);
   });
 
@@ -494,14 +500,14 @@ describe('loadBoardPartition', () => {
     });
     first.release();
     await load;
-    const entry = agorStore.getState().boardPartitions.get(BOARD);
+    const entry = selectBoardPartition(agorStore.getState(), BOARD);
     expect(entry?.status).toBe('loading');
-    expect(isPartitionStateCurrent(entry)).toBe(true);
+    expect(isCoverageCurrent(entry)).toBe(true);
     second.release();
     await reload;
     expect(agorStore.getState().sessionById.has('s-2')).toBe(true);
     expect(ready()).toBe(true);
-    expect(isPartitionStateCurrent(agorStore.getState().boardPartitions.get(BOARD))).toBe(true);
+    expect(isCoverageCurrent(selectBoardPartition(agorStore.getState(), BOARD))).toBe(true);
   });
 
   it('never applies after the restart budget: records a retryable error instead', async () => {
@@ -524,9 +530,9 @@ describe('loadBoardPartition', () => {
     await loadBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true });
     expect(calls).toBe(4);
     expect(agorStore.getState().sessionById.size).toBe(0);
-    expect(agorStore.getState().boardPartitions.get(BOARD)?.status).toBe('error');
+    expect(selectBoardPartition(agorStore.getState(), BOARD)?.status).toBe('error');
     retryBoardPartition(BOARD);
-    expect(agorStore.getState().boardPartitions.has(BOARD)).toBe(false);
+    expect(agorStore.getState().coverage.has(boardScopeKey(BOARD))).toBe(false);
   });
 
   it('records a failure and lets retry clear it', async () => {
@@ -540,9 +546,9 @@ describe('loadBoardPartition', () => {
     } as unknown as AgorClient;
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     await loadBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true });
-    expect(agorStore.getState().boardPartitions.get(BOARD)?.status).toBe('error');
+    expect(selectBoardPartition(agorStore.getState(), BOARD)?.status).toBe('error');
     retryBoardPartition(BOARD);
-    expect(agorStore.getState().boardPartitions.has(BOARD)).toBe(false);
+    expect(agorStore.getState().coverage.has(boardScopeKey(BOARD))).toBe(false);
   });
 
   it('reloading a board reconciles its annotations: deleted, moved and hidden rows leave', async () => {
@@ -570,23 +576,42 @@ describe('loadBoardPartition', () => {
     expect([...state.boardObjectById.keys()]).toEqual(['o-kept']);
     expect([...state.cardById.keys()].sort()).toEqual(['k-kept', 'k-live']);
     expect(ready()).toBe(true);
+    // Its coverage commits the ids the read returned, not the rows present.
+    const members = selectBoardPartition(state, BOARD)?.members;
+    expect([...(members?.cards ?? [])]).toEqual(['k-kept']);
+    expect([...(members?.boardObjects ?? [])]).toEqual(['o-kept']);
   });
 
-  it('claims of other loaded scopes: partitions (not errored, not this one) and the global sets', () => {
+  it('only committed members of other current, loaded scopes (and the global sets) keep rows', () => {
     const lifetime = captureLoadLifetime()!;
-    markBoardPartitionLoaded('board-2', lifetime);
-    markBoardPartitionLoaded(BOARD, lifetime);
-    agorStore.getState().setBoardPartition('board-3', {
-      status: 'error',
+    const entry = (status: 'loading' | 'loaded' | 'error', id: string) => ({
+      status,
       authorityScope: lifetime.authorityScope,
       loadEpoch: lifetime.loadEpoch,
+      members: { sessions: new Set([id]) },
     });
+    const { setCoverage } = agorStore.getState();
+    setCoverage(boardScopeKey('board-2'), entry('loaded', 's-2'));
+    setCoverage(boardScopeKey(BOARD), entry('loaded', 's-1'));
+    setCoverage(boardScopeKey('board-3'), entry('loading', 's-3'));
+    setCoverage(boardScopeKey('board-4'), entry('error', 's-4'));
+    setCoverage(USER_SCOPE_KEYS.sessions, entry('loaded', 's-mine'));
+    // Committed under an earlier authority: stale.
+    setCoverage(USER_SCOPE_KEYS.teammates, {
+      ...entry('loaded', 's-stale'),
+      authorityScope: 'user-a:member:0',
+    });
+    const holds = (id: string, collection: 'sessions' | 'branches' = 'sessions') =>
+      otherCommittedMembers(agorStore.getState(), boardScopeKey(BOARD)).some((members) =>
+        members[collection]?.has(id)
+      );
+    expect(['s-1', 's-2', 's-3', 's-4', 's-mine', 's-stale'].filter((id) => holds(id))).toEqual([
+      's-2',
+      's-mine',
+    ]);
     agorStore.getState().markGloballyHydrated(['sessions']);
-    const keys = otherLoadedScopes(agorStore.getState(), BOARD).map((scope) => scope.key);
-    expect(keys).toEqual(['board:board-2', 'global']);
-    const global = otherLoadedScopes(agorStore.getState()).at(-1)!;
-    expect(global.claims.sessions).toBeDefined();
-    expect(global.claims.branches).toBeUndefined();
+    expect(holds('s-any')).toBe(true);
+    expect(holds('br-any', 'branches')).toBe(false);
   });
 });
 

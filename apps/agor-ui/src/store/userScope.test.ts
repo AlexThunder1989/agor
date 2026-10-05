@@ -1,6 +1,7 @@
 import type { AgorClient, BoardComment, Branch, Session } from '@agor-live/client';
 import { hasFullSessionDetails, toLeanSessionListRow } from '@agor-live/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { userScopeCoverage } from '../test/userScopeCoverage';
 import {
   bumpFirstPaintMergeRevisions,
   cancelAllHydrations,
@@ -10,9 +11,15 @@ import { sessionCreated } from './agorRealtimeActions';
 import { agorStore } from './agorStore';
 import { captureLoadLifetime } from './loadLifetime';
 import { discardRealtimeNow, setRealtimeAuthorityScope } from './realtimeBatch';
+import { USER_SCOPE_KEYS } from './scopeMerge';
 import {
   MY_SESSIONS_FULL_LIMIT,
   referencedBranchIds,
+  selectHomeBranchesLoaded,
+  selectMySessionsLoaded,
+  selectMySessionsTruncated,
+  selectTeammatesLoaded,
+  selectTeammatesTruncated,
   startUserScope,
   stopUserScope,
 } from './userScope';
@@ -84,10 +91,10 @@ function makeClient(handlers: {
 const flags = () => {
   const s = agorStore.getState();
   return {
-    mySessionsLoaded: s.mySessionsLoaded,
-    mySessionsTruncated: s.mySessionsTruncated,
-    teammatesLoaded: s.teammatesLoaded,
-    homeBranchesLoaded: s.homeBranchesLoaded,
+    mySessionsLoaded: selectMySessionsLoaded(s),
+    mySessionsTruncated: selectMySessionsTruncated(s),
+    teammatesLoaded: selectTeammatesLoaded(s),
+    homeBranchesLoaded: selectHomeBranchesLoaded(s),
   };
 };
 
@@ -116,6 +123,37 @@ describe('user scope', () => {
       teammatesLoaded: true,
       homeBranchesLoaded: true,
     });
+  });
+
+  it('commits each piece with the ids its read returned, under the run lifetime', async () => {
+    // br-present is already in the store, so the id read never asks for it.
+    agorStore.getState().applyMaps((maps) => ({
+      ...maps,
+      branchById: new Map([['br-present', branch('br-present')]]),
+    }));
+    const { client } = makeClient({
+      mine: () => [session('s-1', 'br-present'), session('s-2', 'br-ref')],
+      myBranches: () => [branch('br-mine', { created_by: ME } as Partial<Branch>)],
+      teammates: () => [branch('br-mate')],
+      byIds: (ids) => ids.filter((id) => id === 'br-ref').map((id) => branch(id)),
+    });
+    const current = lifetime();
+    await startUserScope(client, { userId: ME, lifetime: current, gatedMineComplete: false });
+    const piece = (key: string) => agorStore.getState().coverage.get(key);
+    const ids = (key: string, collection: 'sessions' | 'branches') => [
+      ...(piece(key)?.members?.[collection] ?? []),
+    ];
+    expect(ids(USER_SCOPE_KEYS.sessions, 'sessions')).toEqual(['s-1', 's-2']);
+    expect(ids(USER_SCOPE_KEYS.branches, 'branches')).toEqual(['br-mine']);
+    expect(ids(USER_SCOPE_KEYS.teammates, 'branches')).toEqual(['br-mate']);
+    expect(ids(USER_SCOPE_KEYS.references, 'branches')).toEqual(['br-ref']);
+    for (const key of Object.values(USER_SCOPE_KEYS)) {
+      expect(piece(key)).toMatchObject({
+        status: 'loaded',
+        authorityScope: current.authorityScope,
+        loadEpoch: current.loadEpoch,
+      });
+    }
   });
 
   it('reads all of my sessions in one capped read and flags truncation', async () => {
@@ -194,7 +232,7 @@ describe('user scope', () => {
     };
     await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: true });
     expect(flags().teammatesLoaded).toBe(true);
-    expect(agorStore.getState().teammatesTruncated).toBe(true);
+    expect(selectTeammatesTruncated(agorStore.getState())).toBe(true);
   });
 
   it('ensures referenced branches in chunks of 200 and records the absent ones', async () => {
@@ -352,7 +390,7 @@ describe('user scope', () => {
     expect(flags().mySessionsLoaded).toBe(false);
 
     setRealtimeAuthorityScope(AUTHORITY);
-    agorStore.getState().setUserScope({ mySessionsLoaded: true, teammatesLoaded: true });
+    agorStore.setState({ coverage: userScopeCoverage({ sessions: true, teammates: true }) });
     agorStore.getState().resetMaps();
     expect(flags()).toEqual({
       mySessionsLoaded: false,
@@ -521,7 +559,7 @@ describe('user scope', () => {
       lifetime: lifetime(),
       gatedMineComplete: false,
     });
-    for (let i = 0; i < 20 && !agorStore.getState().homeBranchesLoaded; i++) {
+    for (let i = 0; i < 20 && !flags().homeBranchesLoaded; i++) {
       await vi.waitFor(() => expect(releases.length).toBeGreaterThan(0));
       for (const release of releases.splice(0)) release();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -645,8 +683,8 @@ describe('user scope', () => {
       off();
     }
     expect(tornDown).toBe(true);
-    expect(agorStore.getState().mySessionsLoaded).toBe(false);
-    expect(agorStore.getState().homeBranchesLoaded).toBe(false);
+    expect(flags().mySessionsLoaded).toBe(false);
+    expect(flags().homeBranchesLoaded).toBe(false);
   });
 
   it("never lets a superseded run's id-read completion mark branches absent for the next user", async () => {

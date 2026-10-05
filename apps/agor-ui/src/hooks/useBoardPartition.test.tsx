@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cancelAllHydrations, resetHydrationRevisions } from '../store/agorHydration';
 import { agorStore } from '../store/agorStore';
-import { loadBoardPartition } from '../store/boardPartitions';
+import { loadBoardPartition, selectBoardPartition } from '../store/boardPartitions';
 import { discardRealtimeNow, setRealtimeAuthorityScope } from '../store/realtimeBatch';
 import { useBoardPartition } from './useBoardPartition';
 
@@ -60,7 +60,7 @@ describe('useBoardPartition', () => {
     // A load from the previous lifetime that never settles in this one.
     void loadBoardPartition(stale.client, BOARD, { canUseMemberWorkspaceServices: true });
     cancelAllHydrations();
-    expect(agorStore.getState().boardPartitions.get(BOARD)?.status).toBe('loading');
+    expect(selectBoardPartition(agorStore.getState(), BOARD)?.status).toBe('loading');
 
     const fresh = makeClient();
     const { result } = renderHook(() =>

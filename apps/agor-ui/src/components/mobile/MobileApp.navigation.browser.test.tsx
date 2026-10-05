@@ -4,6 +4,7 @@ import { BrowserRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import { agorStore } from '../../store/agorStore';
+import { boardScopeKey } from '../../store/scopeMerge';
 import { MobileApp } from './MobileApp';
 
 // Keep the real mobile shell/router/page/close callback. The heavy conversation
@@ -54,8 +55,8 @@ function mount(path = '/m/board/alpha') {
   agorStore.setState({
     boardById: boards,
     // Both boards' partitions are loaded (the page waits for them).
-    boardPartitions: new Map([
-      ['a', { status: 'loaded' as const, authorityScope: 'fixture', loadEpoch: 0 }],
+    coverage: new Map([
+      [boardScopeKey('a'), { status: 'loaded' as const, authorityScope: 'fixture', loadEpoch: 0 }],
       ['b', { status: 'loaded' as const, authorityScope: 'fixture', loadEpoch: 0 }],
     ]),
     branchById: branches,

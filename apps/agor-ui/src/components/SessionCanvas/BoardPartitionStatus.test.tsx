@@ -2,11 +2,14 @@ import type { BoardEntityObject } from '@agor-live/client';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { agorStore } from '../../store/agorStore';
+import { boardScopeKey } from '../../store/scopeMerge';
 import { BoardPartitionStatus } from './BoardPartitionStatus';
 
 const BOARD = 'board-1';
 const setPartition = (status: 'loading' | 'loaded' | 'error') =>
-  agorStore.getState().setBoardPartition(BOARD, { status, authorityScope: 'a', loadEpoch: 0 });
+  agorStore
+    .getState()
+    .setCoverage(boardScopeKey(BOARD), { status, authorityScope: 'a', loadEpoch: 0 });
 
 describe('BoardPartitionStatus', () => {
   beforeEach(() => agorStore.getState().reset());
@@ -36,6 +39,6 @@ describe('BoardPartitionStatus', () => {
     setPartition('error');
     render(<BoardPartitionStatus boardId={BOARD} />);
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(agorStore.getState().boardPartitions.has(BOARD)).toBe(false);
+    expect(agorStore.getState().coverage.has(boardScopeKey(BOARD))).toBe(false);
   });
 });

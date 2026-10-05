@@ -335,7 +335,9 @@ describe('workspace authority generation ordering', () => {
     // On Home the resync reads no board objects: they load with a board's
     // partition, which the promotion unloaded (and which may read them now).
     expect(seam.boardObjectsFindAll).not.toHaveBeenCalled();
-    expect(agorStore.getState().boardPartitions.size).toBe(0);
+    expect(
+      [...agorStore.getState().coverage.keys()].filter((key) => key.startsWith('board:'))
+    ).toEqual([]);
     expect(result.current.error).toBeNull();
   });
 

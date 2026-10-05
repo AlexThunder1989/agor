@@ -4,9 +4,10 @@ import { type DataMaps, EMPTY_MAPS } from './agorMaps';
 import {
   boardPartitionScope,
   fillScope,
-  globalSetsClaims,
+  globalSetsMembers,
   type LoadScope,
   replaceScope,
+  scopeMembers,
   userScopeClaims,
 } from './scopeMerge';
 
@@ -210,26 +211,74 @@ describe('replaceScope', () => {
 });
 
 describe('replaceScope with overlapping scopes', () => {
-  const user = (maps: DataMaps): LoadScope =>
+  const userScope = (maps: DataMaps): LoadScope =>
     userScopeClaims(ME, () => new Set([...maps.sessionById.values()].map((s) => s.branch_id)));
 
-  it("keeps my session missing from a board's snapshot while the user scope claims it", () => {
+  it("keeps a row another scope's committed read returned", () => {
     // Both of these moved off board A while disconnected (their stale rows still say A).
     const prev = storeWith({
       branches: [branch('br-mine'), branch('br-bob')],
       sessions: [session('s-mine', 'br-mine', { created_by: ME }), session('s-bob', 'br-bob')],
     });
-    const next = replaceScope(prev, scopeA, { sessions: [] }, never, [user(prev)]);
+    const user = scopeMembers({ sessions: [prev.sessionById.get('s-mine')!] });
+    const next = replaceScope(prev, scopeA, { sessions: [] }, never, [user]);
     expect(ids(next.sessionById)).toEqual(['s-mine']);
     expect(next.sessionsByBranch.has('br-bob')).toBe(false);
     expect(next.sessionsByBranch.get('br-mine')?.map((s) => s.session_id)).toEqual(['s-mine']);
 
-    // Without the user scope nothing claims it, so the partition's replace removes it.
+    // Without a committed read returning it nothing keeps it, so the replace removes it.
     const alone = replaceScope(prev, scopeA, { sessions: [] }, never, []);
     expect(alone.sessionById.size).toBe(0);
   });
 
-  it('keeps a branch another loaded scope references, and removes an unclaimed one', () => {
+  it('two scopes whose reads both omit a row converge: the second replace removes it', () => {
+    // My session moved off board A while disconnected; the user scope's
+    // earlier read returned it, and both scopes' predicates still claim it.
+    const prev = storeWith({
+      branches: [branch('br-1')],
+      sessions: [session('s-mine', 'br-1', { created_by: ME })],
+    });
+    const userBefore = scopeMembers({ sessions: [prev.sessionById.get('s-mine')!] });
+    const partitionRows = { sessions: [] };
+    const afterPartition = replaceScope(prev, scopeA, partitionRows, never, [userBefore]);
+    expect(afterPartition.sessionById.has('s-mine')).toBe(true);
+
+    // The user scope reads again and omits it too: board A's committed read
+    // didn't return it, so nothing keeps it.
+    const afterUser = replaceScope(
+      afterPartition,
+      userScope(afterPartition),
+      { sessions: [] },
+      never,
+      [scopeMembers(partitionRows)]
+    );
+    expect(afterUser.sessionById.has('s-mine')).toBe(false);
+  });
+
+  it('a capped read overwrites the rows it returned but removes none', () => {
+    const prev = storeWith({
+      branches: [branch('br-1')],
+      sessions: [
+        session('s-1', 'br-1', { created_by: ME, title: 'stale' }),
+        session('s-2', 'br-1', { created_by: ME }),
+      ],
+    });
+    const rows = [session('s-1', 'br-1', { created_by: ME, title: 'fresh' })];
+    const capped = replaceScope(
+      prev,
+      userScope(prev),
+      { sessions: rows, complete: false },
+      never,
+      []
+    );
+    expect(ids(capped.sessionById)).toEqual(['s-1', 's-2']);
+    expect(capped.sessionById.get('s-1')?.title).toBe('fresh');
+    // The same read, complete, removes what it omitted.
+    const complete = replaceScope(prev, userScope(prev), { sessions: rows }, never, []);
+    expect(ids(complete.sessionById)).toEqual(['s-1']);
+  });
+
+  it('keeps a branch another committed read returned, and removes the rest', () => {
     const prev = storeWith({
       branches: [
         branch('br-referenced'),
@@ -240,32 +289,42 @@ describe('replaceScope with overlapping scopes', () => {
       ],
       sessions: [session('s-mine', 'br-referenced', { created_by: ME, branch_board_id: B })],
     });
-    const next = replaceScope(prev, scopeA, { branches: [] }, never, [user(prev)]);
+    const user = scopeMembers({
+      branches: [prev.branchById.get('br-referenced')!, prev.branchById.get('br-teammate')!],
+    });
+    const next = replaceScope(prev, scopeA, { branches: [] }, never, [user]);
     expect(ids(next.branchById)).toEqual(['br-referenced', 'br-teammate']);
   });
 
-  it('a loaded partition of another board claims its own rows', () => {
-    // A row whose CURRENT store value says board B is B's, never A's.
+  it("a row whose current value says another board is not this scope's to remove", () => {
     const prev = storeWith({
       branches: [branch('br-b', { board_id: B })],
       sessions: [session('s-b', 'br-b', { branch_board_id: B })],
     });
-    const next = replaceScope(prev, scopeA, { sessions: [], branches: [] }, never, [
-      boardPartitionScope(B),
-    ]);
-    expect(next).toBe(prev);
+    expect(replaceScope(prev, scopeA, { sessions: [], branches: [] }, never, [])).toBe(prev);
   });
 
-  it('the global sets (Steps 1–2) claim every session and branch once hydrated', () => {
+  it('commits only rows that are not archived', () => {
+    const members = scopeMembers({
+      sessions: [session('s-live', 'br-1'), session('s-gone', 'br-1', { archived: true })],
+      branches: [branch('br-gone', { archived: true })],
+      boardObjects: null,
+    });
+    expect([...(members.sessions as Set<string>)]).toEqual(['s-live']);
+    expect(members.branches?.has('br-gone')).toBe(false);
+    expect(members.boardObjects).toBeUndefined();
+  });
+
+  it('the global sets (Steps 1–2) keep every session and branch once hydrated', () => {
     const prev = storeWith({ branches: [branch('br-1')], sessions: [session('s-1', 'br-1')] });
-    const global = globalSetsClaims(new Set(['sessions', 'branches']));
+    const global = globalSetsMembers(new Set(['sessions', 'branches']));
     expect(replaceScope(prev, scopeA, { sessions: [], branches: [] }, never, [global])).toBe(prev);
     // Annotations have no global claim.
     const withCard = storeWith({ cards: [card('k-1')] });
     expect(replaceScope(withCard, scopeA, { cards: [] }, never, [global]).cardById.size).toBe(0);
   });
 
-  it('overwrites a stale session row claimed by both scopes without removing it', () => {
+  it('overwrites a stale session row another scope also holds without removing it', () => {
     const prev = storeWith({
       branches: [branch('br-1')],
       sessions: [session('s-mine', 'br-1', { created_by: ME, title: 'stale' })],
@@ -275,7 +334,7 @@ describe('replaceScope with overlapping scopes', () => {
       scopeA,
       { sessions: [session('s-mine', 'br-1', { created_by: ME, title: 'fresh' })] },
       never,
-      [user(prev)]
+      [scopeMembers({ sessions: [prev.sessionById.get('s-mine')!] })]
     );
     expect(next.sessionById.get('s-mine')?.title).toBe('fresh');
     expect(next.sessionsByBranch.get('br-1')?.[0].title).toBe('fresh');

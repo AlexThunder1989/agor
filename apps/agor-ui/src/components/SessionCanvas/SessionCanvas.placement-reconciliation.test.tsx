@@ -16,6 +16,7 @@ import { ConnectionProvider } from '../../contexts/ConnectionContext';
 import { EMPTY_MAPS } from '../../store/agorMaps';
 import { boardObjectPatched, sessionPatched } from '../../store/agorRealtimeActions';
 import { agorStore } from '../../store/agorStore';
+import { boardScopeKey } from '../../store/scopeMerge';
 import { ZoneNode } from './canvas/BoardObjectNodes';
 import { MarkdownNode } from './canvas/MarkdownNode';
 import SessionCanvas from './SessionCanvas';
@@ -204,7 +205,7 @@ const connected = {
 
 /** A (re)load of the fixture board's partition: a new partition lifetime. */
 function markFixtureLoaded() {
-  agorStore.getState().setBoardPartition(BOARD_ID, {
+  agorStore.getState().setCoverage(boardScopeKey(BOARD_ID), {
     status: 'loaded',
     authorityScope: 'fixture',
     loadEpoch: 0,
@@ -228,8 +229,8 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
       userById: new Map([[adminUser.user_id, adminUser]]),
       boardObjectsByBoardId: new Map([[BOARD_ID, [implementingPlacement, reviewingCardPlacement]]]),
       // Structural edits need the board's partition loaded (see `boardReady`).
-      boardPartitions: new Map([
-        [BOARD_ID, { status: 'loaded', authorityScope: 'fixture', loadEpoch: 0 }],
+      coverage: new Map([
+        [boardScopeKey(BOARD_ID), { status: 'loaded', authorityScope: 'fixture', loadEpoch: 0 }],
       ]),
     });
   });
@@ -238,7 +239,7 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
     vi.useFakeTimers();
     // A reconnect unloaded this board; its cached placement is pinned to a
     // zone, but the lean record has no zone geometry to drop it into.
-    agorStore.setState({ boardPartitions: new Map() });
+    agorStore.setState({ coverage: new Map() });
     const leanBoard = { ...board, objects: undefined } as unknown as Board;
     const patch = vi.fn(async () => implementingPlacement);
     const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
@@ -270,7 +271,7 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
   it('sends no zone, annotation or unpin write while the board is not loaded (cached full record)', async () => {
     vi.useFakeTimers();
     // Reauth: every partition was reset, but the full record is still cached.
-    agorStore.setState({ boardPartitions: new Map() });
+    agorStore.setState({ coverage: new Map() });
     const patch = vi.fn(async () => ({}));
     const client = { service: vi.fn(() => ({ patch })) } as unknown as AgorClient;
     render(
