@@ -26,8 +26,8 @@
  * and two scopes whose reads both omit a row converge instead of each
  * deferring to the other's predicate.
  */
+import { isTeammate } from '@agor/core/types';
 import type { Board, BoardEntityObject, Branch, CardWithType, Session } from '@agor-live/client';
-import { isTeammate } from '@agor-live/client';
 import { boardIdForSession } from '../utils/boardIdForSession';
 import { shallowEqualEntity } from '../utils/shallowEqual';
 import {
