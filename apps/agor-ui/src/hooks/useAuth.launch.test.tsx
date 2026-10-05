@@ -649,4 +649,81 @@ describe('same-authority network revalidation', () => {
     expect(result.current.authenticationGeneration).toBe(generation);
     expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBe('token');
   });
+  async function startRevalidation(token: string) {
+    window.history.replaceState({}, '', '/');
+    authenticate.mockReset();
+    localStorage.clear();
+    localStorage.setItem(ACCESS_TOKEN_KEY, token);
+    localStorage.setItem(REFRESH_TOKEN_KEY, 'refresh-a');
+    const userA = { user_id: 'user-a', role: 'member', email: 'a@example.test' };
+    authenticate.mockResolvedValueOnce({ accessToken: token, user: userA });
+    const hook = renderHook(() => useAuth());
+    await waitFor(() => expect(hook.result.current.authenticated).toBe(true));
+    const probe = deferred<{ accessToken: string; user: typeof userA }>();
+    authenticate.mockReturnValueOnce(probe.promise);
+    let pending!: Promise<void>;
+    act(() => {
+      pending = hook.result.current.reAuthenticate();
+    });
+    expect(hook.result.current.loading).toBe(false);
+    return { ...hook, userA, probe, pending };
+  }
+
+  it('does not let a stale revalidation undo a logout', async () => {
+    const { result, probe, pending, userA } = await startRevalidation('token-a');
+    await act(async () => {
+      await result.current.logout();
+    });
+    expect(result.current.authenticated).toBe(false);
+    await act(async () => {
+      probe.resolve({ accessToken: 'token-a', user: userA });
+      await pending;
+    });
+    expect(result.current.authenticated).toBe(false);
+    expect(result.current.user).toBeNull();
+    expect(result.current.accessToken).toBeNull();
+    expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBeNull();
+  });
+
+  it('does not let a stale revalidation overwrite a newly signed-in identity', async () => {
+    const { result, probe, pending, userA } = await startRevalidation('token-a');
+    const userB = { user_id: 'user-b', role: 'member', email: 'b@example.test' };
+    authenticate.mockResolvedValueOnce({
+      accessToken: 'token-b',
+      refreshToken: 'refresh-b',
+      user: userB,
+    });
+    await act(async () => {
+      await result.current.login('b@example.test', 'pw');
+    });
+    expect(result.current.user).toEqual(userB);
+    await act(async () => {
+      probe.resolve({ accessToken: 'token-a', user: userA });
+      await pending;
+    });
+    expect(result.current.user).toEqual(userB);
+    expect(result.current.accessToken).toBe('token-b');
+    expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBe('token-b');
+  });
+
+  it('does not let a stale failed revalidation clear a newly signed-in identity', async () => {
+    const { result, probe, pending } = await startRevalidation('token-a');
+    const userB = { user_id: 'user-b', role: 'member', email: 'b@example.test' };
+    authenticate.mockResolvedValueOnce({
+      accessToken: 'token-b',
+      refreshToken: 'refresh-b',
+      user: userB,
+    });
+    await act(async () => {
+      await result.current.login('b@example.test', 'pw');
+    });
+    await act(async () => {
+      probe.reject(
+        Object.assign(new Error('jwt expired'), { code: 401, name: 'NotAuthenticated' })
+      );
+      await pending;
+    });
+    expect(result.current.user).toEqual(userB);
+    expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBe('token-b');
+  });
 });

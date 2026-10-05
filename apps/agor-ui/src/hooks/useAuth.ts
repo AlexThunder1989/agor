@@ -133,6 +133,12 @@ export function useAuth(): UseAuthReturn {
   // global loading bit. Other auth establishments explicitly supersede it.
   const localLoginAttemptRef = useRef<object | null>(null);
   const authenticationGenerationRef = useRef(0);
+  // Fences reAuthenticate() continuations. Every explicit credential/identity
+  // writer (logout, login, a newer reAuthenticate) advances it, so a stale
+  // revalidation can neither commit its result nor retry/clear tokens. Unlike
+  // the auth generation it also advances when the same user signs out and back
+  // in, and it is not touched by routine token refresh.
+  const revalidationEpochRef = useRef(0);
   const [authenticationGeneration, setAuthenticationGeneration] = useState(0);
   const activeAuthorityRef = useRef<{ userId: UserID; role: User['role'] } | null>(null);
 
@@ -190,123 +196,154 @@ export function useAuth(): UseAuthReturn {
    * Retries up to 3 times to handle daemon restarts gracefully
    */
   // biome-ignore lint/correctness/useExhaustiveDependencies: auth-generation helpers are stable for the hook lifetime; reAuthenticate must remain stable for retry/effect callers
-  const reAuthenticate = useCallback(async (retryCount = 0, pendingLaunchCode?: string) => {
-    const MAX_RETRIES = 5;
-    localLoginAttemptRef.current = null;
-    // Revalidation is not a new login. Keep the authenticated surface mounted
-    // while checking the same credentials; login/authority replacement still
-    // uses its own blocking lifecycle below.
-    setState((prev) => ({ ...prev, loading: !prev.authenticated, error: null }));
+  const reAuthenticate = useCallback(
+    async (retryCount = 0, pendingLaunchCode?: string, ownEpoch?: number): Promise<void> => {
+      const MAX_RETRIES = 5;
+      // A fresh call supersedes any in-flight revalidation; internal retries
+      // keep the epoch of the run that scheduled them.
+      const epoch = ownEpoch ?? ++revalidationEpochRef.current;
+      const isStale = () => revalidationEpochRef.current !== epoch;
+      localLoginAttemptRef.current = null;
+      // Revalidation is not a new login. Keep the authenticated surface mounted
+      // while checking the same credentials; login/authority replacement still
+      // uses its own blocking lifecycle below.
+      setState((prev) => ({ ...prev, loading: !prev.authenticated, error: null }));
 
-    const storedAccessToken = getStoredAccessToken();
-    const storedRefreshToken = getStoredRefreshToken();
-    const hasStoredTokens = !!storedAccessToken || !!storedRefreshToken;
-    const activeLaunchCode =
-      pendingLaunchCode ||
-      (typeof window !== 'undefined' ? getLaunchCodeFromSearch(window.location.search) : null);
-    let attemptedLaunch = false;
-    let launchFailed = false;
+      const storedAccessToken = getStoredAccessToken();
+      const storedRefreshToken = getStoredRefreshToken();
+      const hasStoredTokens = !!storedAccessToken || !!storedRefreshToken;
+      const activeLaunchCode =
+        pendingLaunchCode ||
+        (typeof window !== 'undefined' ? getLaunchCodeFromSearch(window.location.search) : null);
+      let attemptedLaunch = false;
+      let launchFailed = false;
 
-    async function authenticateWithStoredTokens(
-      client: Awaited<ReturnType<typeof createRestClient>>
-    ) {
-      if (!storedAccessToken && !storedRefreshToken) return false;
+      async function authenticateWithStoredTokens(
+        client: Awaited<ReturnType<typeof createRestClient>>
+      ) {
+        if (!storedAccessToken && !storedRefreshToken) return false;
 
-      // Try to authenticate with stored access token first
-      if (storedAccessToken) {
-        try {
-          const result = await client.authenticate({
-            strategy: 'jwt',
-            accessToken: storedAccessToken,
-          });
+        // Try to authenticate with stored access token first
+        if (storedAccessToken) {
+          try {
+            const result = await client.authenticate({
+              strategy: 'jwt',
+              accessToken: storedAccessToken,
+            });
+            if (isStale()) return true;
 
-          noteAuthenticatedUser(result.user);
-          setState({
-            user: result.user,
-            accessToken: result.accessToken,
-            authenticated: true,
-            loading: false,
-            error: null,
-          });
+            noteAuthenticatedUser(result.user);
+            setState({
+              user: result.user,
+              accessToken: result.accessToken,
+              authenticated: true,
+              loading: false,
+              error: null,
+            });
 
-          return true;
-        } catch (accessTokenError) {
-          // Access token expired or invalid, try refresh token
-          if (!isDefiniteAuthFailure(accessTokenError)) throw accessTokenError;
-        }
-      }
-
-      // Access token expired or missing, try refresh token
-      if (storedRefreshToken) {
-        try {
-          const refreshResult = await refreshTokensSingleFlight(client, storedRefreshToken);
-
-          noteAuthenticatedUser(refreshResult.user);
-          setState({
-            user: refreshResult.user,
-            accessToken: refreshResult.accessToken,
-            authenticated: true,
-            loading: false,
-            error: null,
-          });
-
-          return true;
-        } catch (refreshError) {
-          // Refresh token also expired or invalid
-          if (
-            !isDefiniteAuthFailure(refreshError) &&
-            !(refreshError instanceof RefreshUnrecoverableError)
-          ) {
-            throw refreshError;
+            return true;
+          } catch (accessTokenError) {
+            if (isStale()) return true;
+            // Access token expired or invalid, try refresh token
+            if (!isDefiniteAuthFailure(accessTokenError)) throw accessTokenError;
           }
         }
+
+        // Access token expired or missing, try refresh token
+        if (storedRefreshToken) {
+          try {
+            const refreshResult = await refreshTokensSingleFlight(client, storedRefreshToken);
+            if (isStale()) return true;
+
+            noteAuthenticatedUser(refreshResult.user);
+            setState({
+              user: refreshResult.user,
+              accessToken: refreshResult.accessToken,
+              authenticated: true,
+              loading: false,
+              error: null,
+            });
+
+            return true;
+          } catch (refreshError) {
+            if (isStale()) return true;
+            // Refresh token also expired or invalid
+            if (
+              !isDefiniteAuthFailure(refreshError) &&
+              !(refreshError instanceof RefreshUnrecoverableError)
+            ) {
+              throw refreshError;
+            }
+          }
+        }
+
+        return false;
       }
 
-      return false;
-    }
+      try {
+        const client = await createRestClient(getDaemonUrl());
+        if (isStale()) return;
 
-    try {
-      const client = await createRestClient(getDaemonUrl());
+        if (activeLaunchCode) {
+          attemptedLaunch = true;
+          // Remove the opaque one-time code before the network round-trip so a
+          // refresh, copy/paste, or dev-mode double effect does not replay it.
+          removeLaunchCodeFromCurrentUrl();
 
-      if (activeLaunchCode) {
-        attemptedLaunch = true;
-        // Remove the opaque one-time code before the network round-trip so a
-        // refresh, copy/paste, or dev-mode double effect does not replay it.
-        removeLaunchCodeFromCurrentUrl();
+          try {
+            const result = await exchangeLaunchCode(client, activeLaunchCode);
+            if (isStale()) return;
+            resetRefreshFailureState();
+            noteAuthenticatedUser(result.user);
 
-        try {
-          const result = await exchangeLaunchCode(client, activeLaunchCode);
-          resetRefreshFailureState();
-          noteAuthenticatedUser(result.user);
+            setState({
+              user: result.user,
+              accessToken: result.accessToken,
+              authenticated: true,
+              loading: false,
+              error: null,
+            });
+            dispatchTokensRefreshed(result);
 
+            return;
+          } catch (launchError) {
+            if (isStale()) return;
+            const isConnectionError = isTransientConnectionError(launchError);
+            if (isConnectionError && retryCount < MAX_RETRIES) {
+              const delay = Math.min(2000 * 1.5 ** retryCount, 10000);
+              await new Promise((resolve) => setTimeout(resolve, delay));
+              if (isStale()) return;
+              return reAuthenticate(retryCount + 1, activeLaunchCode, epoch);
+            }
+
+            launchFailed = true;
+            if (!hasStoredTokens) {
+              throw launchError;
+            }
+
+            console.warn('Launch sign-in failed; falling back to stored auth tokens:', launchError);
+          }
+        }
+
+        if (!hasStoredTokens) {
+          noteUnauthenticated();
           setState({
-            user: result.user,
-            accessToken: result.accessToken,
-            authenticated: true,
+            user: null,
+            accessToken: null,
+            authenticated: false,
             loading: false,
-            error: null,
+            error: launchFailed
+              ? 'Launch sign-in failed. The one-time launch code may have expired or already been used.'
+              : null,
           });
-          dispatchTokensRefreshed(result);
-
           return;
-        } catch (launchError) {
-          const isConnectionError = isTransientConnectionError(launchError);
-          if (isConnectionError && retryCount < MAX_RETRIES) {
-            const delay = Math.min(2000 * 1.5 ** retryCount, 10000);
-            await new Promise((resolve) => setTimeout(resolve, delay));
-            return reAuthenticate(retryCount + 1, activeLaunchCode);
-          }
-
-          launchFailed = true;
-          if (!hasStoredTokens) {
-            throw launchError;
-          }
-
-          console.warn('Launch sign-in failed; falling back to stored auth tokens:', launchError);
         }
-      }
 
-      if (!hasStoredTokens) {
+        if (await authenticateWithStoredTokens(client)) return;
+        if (isStale()) return;
+
+        // Both tokens invalid or expired — expected when refresh token hits its TTL.
+        clearTokens();
         noteUnauthenticated();
         setState({
           user: null,
@@ -317,85 +354,76 @@ export function useAuth(): UseAuthReturn {
             ? 'Launch sign-in failed. The one-time launch code may have expired or already been used.'
             : null,
         });
-        return;
-      }
+      } catch (error) {
+        if (isStale()) return;
+        // Connection or authentication error - retry if daemon just restarted
+        const isConnectionError = isTransientConnectionError(error);
 
-      if (await authenticateWithStoredTokens(client)) return;
-
-      // Both tokens invalid or expired — expected when refresh token hits its TTL.
-      clearTokens();
-      noteUnauthenticated();
-      setState({
-        user: null,
-        accessToken: null,
-        authenticated: false,
-        loading: false,
-        error: launchFailed
-          ? 'Launch sign-in failed. The one-time launch code may have expired or already been used.'
-          : null,
-      });
-    } catch (error) {
-      // Connection or authentication error - retry if daemon just restarted
-      const isConnectionError = isTransientConnectionError(error);
-
-      if (isConnectionError && retryCount < MAX_RETRIES) {
-        const delay = Math.min(2000 * 1.5 ** retryCount, 10000); // Exponential backoff: 2s, 3s, 4.5s, 6.75s, 10s (capped)
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        return reAuthenticate(
-          retryCount + 1,
-          attemptedLaunch ? activeLaunchCode || undefined : undefined
-        );
-      }
-
-      // IMPORTANT: Don't clear tokens for connection errors or for failed
-      // launch-code attempts when stored tokens exist. A stale/consumed URL
-      // code must not log out a user with an otherwise valid local session.
-      if (
-        isDefiniteAuthFailure(error) &&
-        !isConnectionError &&
-        !(attemptedLaunch && hasStoredTokens)
-      ) {
-        console.error('Authentication failure, clearing tokens:', error);
-        clearTokens();
-      }
-
-      if (attemptedLaunch && hasStoredTokens) {
-        try {
-          const client = await createRestClient(getDaemonUrl());
-          if (await authenticateWithStoredTokens(client)) return;
-        } catch (fallbackError) {
-          console.warn(
-            'Stored-token fallback after launch sign-in failure also failed:',
-            fallbackError
+        if (isConnectionError && retryCount < MAX_RETRIES) {
+          const delay = Math.min(2000 * 1.5 ** retryCount, 10000); // Exponential backoff: 2s, 3s, 4.5s, 6.75s, 10s (capped)
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          if (isStale()) return;
+          return reAuthenticate(
+            retryCount + 1,
+            attemptedLaunch ? activeLaunchCode || undefined : undefined,
+            epoch
           );
         }
-      }
 
-      // A failed network probe is not proof that the current identity expired.
-      // Preserve usable state; a definitive credential rejection still clears it.
-      if (isConnectionError && authStateRef.current.authenticated && !attemptedLaunch) {
-        setState((prev) => ({
-          ...prev,
+        // IMPORTANT: Don't clear tokens for connection errors or for failed
+        // launch-code attempts when stored tokens exist. A stale/consumed URL
+        // code must not log out a user with an otherwise valid local session.
+        if (
+          isDefiniteAuthFailure(error) &&
+          !isConnectionError &&
+          !(attemptedLaunch && hasStoredTokens)
+        ) {
+          console.error('Authentication failure, clearing tokens:', error);
+          clearTokens();
+        }
+
+        if (attemptedLaunch && hasStoredTokens) {
+          try {
+            const client = await createRestClient(getDaemonUrl());
+            if (isStale()) return;
+            if (await authenticateWithStoredTokens(client)) return;
+          } catch (fallbackError) {
+            console.warn(
+              'Stored-token fallback after launch sign-in failure also failed:',
+              fallbackError
+            );
+          }
+        }
+
+        if (isStale()) return;
+
+        // A failed network probe is not proof that the current identity expired.
+        // Preserve usable state; a definitive credential rejection still clears it.
+        if (isConnectionError && authStateRef.current.authenticated && !attemptedLaunch) {
+          setState((prev) => ({
+            ...prev,
+            loading: false,
+            error: 'Connection lost - waiting for daemon...',
+          }));
+          return;
+        }
+
+        noteUnauthenticated();
+        setState({
+          user: null,
+          accessToken: null,
+          authenticated: false,
           loading: false,
-          error: 'Connection lost - waiting for daemon...',
-        }));
-        return;
+          error: isConnectionError
+            ? 'Connection lost - waiting for daemon...'
+            : attemptedLaunch
+              ? 'Launch sign-in failed. The one-time launch code may have expired or already been used.'
+              : null,
+        });
       }
-
-      noteUnauthenticated();
-      setState({
-        user: null,
-        accessToken: null,
-        authenticated: false,
-        loading: false,
-        error: isConnectionError
-          ? 'Connection lost - waiting for daemon...'
-          : attemptedLaunch
-            ? 'Launch sign-in failed. The one-time launch code may have expired or already been used.'
-            : null,
-      });
-    }
-  }, []);
+    },
+    []
+  );
 
   // Try to re-authenticate on mount (using stored token)
   useEffect(() => {
@@ -567,6 +595,7 @@ export function useAuth(): UseAuthReturn {
   useEffect(() => {
     const handleUnrecoverable = () => {
       localLoginAttemptRef.current = null;
+      revalidationEpochRef.current += 1;
       clearTokens();
       noteUnauthenticated();
       setState({
@@ -692,6 +721,7 @@ export function useAuth(): UseAuthReturn {
       // Store both access and refresh tokens. This is an explicit credential
       // replacement, so advance authority even when user id and role are unchanged.
       localLoginAttemptRef.current = null;
+      revalidationEpochRef.current += 1;
       invalidateAuthentication();
       storeTokens(result.accessToken, result.refreshToken);
       noteAuthenticatedUser(result.user);
@@ -752,6 +782,7 @@ export function useAuth(): UseAuthReturn {
   };
 
   const login = async (email: string, password: string): Promise<boolean> => {
+    revalidationEpochRef.current += 1;
     invalidateAuthentication();
     // Ordinary login begins without an existing authenticated authority. Use a
     // dedicated path rather than fabricating a captured cycle.
@@ -794,6 +825,7 @@ export function useAuth(): UseAuthReturn {
       discardPromptDraftSeed(currentUser.user_id);
     }
     localLoginAttemptRef.current = null;
+    revalidationEpochRef.current += 1;
     invalidateAuthentication();
     clearTokens();
     const nextState: AuthState = {
@@ -811,6 +843,7 @@ export function useAuth(): UseAuthReturn {
     authorityCycle: CapturedAuthAuthorityCycle
   ): Promise<boolean> => {
     if (!authorityCycle.isCurrent()) return false;
+    revalidationEpochRef.current += 1;
     invalidateAuthentication();
     // Token clearing and the React authority update are synchronous together;
     // no await boundary exists where a replacement identity can slip between
