@@ -2031,7 +2031,7 @@ export class BranchesService extends DrizzleService<Branch, Partial<Branch>, Bra
           new BranchWorkspaceOperationRepository(this.db).finishPreserve(admission.claim)
         );
         this.closeBranchTerminals(id, String(tenantId));
-        const current = await this.withTenantDatabase(params, () => this.get(id, params));
+        const current = await this.readCommittedBranch(id, params);
         emitServiceEvent(this.app, {
           path: 'branches',
           event: 'patched',
@@ -2100,7 +2100,7 @@ export class BranchesService extends DrizzleService<Branch, Partial<Branch>, Bra
         );
       };
       if (!enqueueAfterTenantDatabaseCommit(dispatch)) dispatch();
-      const current = await this.withTenantDatabase(params, () => this.get(id, params));
+      const current = await this.readCommittedBranch(id, params);
       emitServiceEvent(this.app, { path: 'branches', event: 'patched', data: current, params, id });
       return { branch_id: id, operation_id: admission.claim.operation_id, status: 'accepted' };
     } catch (error) {
@@ -2111,6 +2111,13 @@ export class BranchesService extends DrizzleService<Branch, Partial<Branch>, Bra
         );
       throw error;
     }
+  }
+
+  /** Post-write read that skips the request's pre-write authorization prefetch. */
+  private readCommittedBranch(id: BranchID, params?: BranchParams) {
+    return this.withTenantDatabase(params, () =>
+      this.getCanonicalBranch(id, withoutPrefetchedRecord(params))
+    );
   }
 
   /** Best-effort attachment closure shared by archive and permanent deletion. */
@@ -2287,8 +2294,12 @@ export class BranchesService extends DrizzleService<Branch, Partial<Branch>, Bra
       return this.requestPermanentDeletion(id, params);
     }
 
-    await this.requestWorkspaceOperation(id, { action: 'archive', filesystemAction }, params);
-    return this.withTenantDatabase(params, () => this.get(id, params));
+    const accepted = await this.requestWorkspaceOperation(
+      id,
+      { action: 'archive', filesystemAction },
+      params
+    );
+    return this.readCommittedBranch(accepted.branch_id, params);
   }
 
   /**

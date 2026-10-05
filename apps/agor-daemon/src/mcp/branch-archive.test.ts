@@ -297,3 +297,54 @@ dbTest('archive cannot bypass active-work admission even when preserving files',
     await fixture.close();
   }
 });
+
+for (const filesystemAction of ['preserved', 'deleted'] as const) {
+  dbTest(
+    `MCP ${filesystemAction} archive publishes and returns the archived branch`,
+    async ({ db }) => {
+      const { branch, user } = await seedEnvironmentCommandBranch(db);
+      const { rawKey } = await new UserApiKeysRepository(db).create(
+        user.user_id,
+        'archive fixture'
+      );
+      const fixture = await archiveMcpFixture(db);
+      try {
+        Object.assign(fixture.app, {
+          sessionTokenService: {
+            generateCommandToken: vi.fn().mockResolvedValue('disposable-unused-token'),
+          },
+        });
+        vi.spyOn(
+          fixture.service as unknown as {
+            resolveEnvironmentExecutorContext: (typeof fixture.service)['resolveEnvironmentExecutorContext'];
+          },
+          'resolveEnvironmentExecutorContext'
+        ).mockResolvedValue({
+          env: {},
+          sandboxMounts: {},
+          executionUserId: user.user_id,
+          branchFsAccess: 'write',
+        });
+        const patched = vi.fn();
+        fixture.app.service('branches').on('patched', patched);
+        const response = await fixture.call(rawKey, 'agor_branches_archive', {
+          branchId: branch.branch_id,
+          filesystemAction,
+        });
+        expect(response.result?.isError, JSON.stringify(response)).not.toBe(true);
+        expect((await new BranchRepository(db).findById(branch.branch_id))?.archived).toBe(true);
+        // Clients evict a branch only when the realtime patch says it is archived.
+        expect(patched).toHaveBeenCalledOnce();
+        expect(patched).toHaveBeenCalledWith(
+          expect.objectContaining({ branch_id: branch.branch_id, archived: true }),
+          expect.anything()
+        );
+        expect(JSON.parse(response.result!.content[0]!.text).branch).toMatchObject({
+          archived: true,
+        });
+      } finally {
+        await fixture.close();
+      }
+    }
+  );
+}
