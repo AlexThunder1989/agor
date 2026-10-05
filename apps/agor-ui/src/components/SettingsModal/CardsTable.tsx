@@ -1,5 +1,4 @@
 import type { AgorClient, Board, CardType, CardWithType } from '@agor-live/client';
-import { ROLES } from '@agor-live/client';
 import { DeleteOutlined, EditOutlined, PlusOutlined, PushpinFilled } from '@ant-design/icons';
 import {
   Button,
@@ -15,7 +14,6 @@ import {
   theme,
 } from 'antd';
 import { useMemo, useState } from 'react';
-import { usePermissions } from '@/hooks/usePermissions';
 import { useAgorStore } from '@/store/agorStore';
 import { selectBranchById } from '@/store/selectors';
 import { mapToArray } from '@/utils/mapHelpers';
@@ -39,19 +37,23 @@ interface CardsTableProps {
   client: AgorClient | null;
   cardTypeById: Map<string, CardType>;
   boardById: Map<string, Board>;
+  /** The caller may read card placements (MEMBER floor), from the resolved user. */
+  canReadPlacements: boolean;
 }
 
 const NO_CARDS: CardWithType[] = [];
 
-export const CardsTable: React.FC<CardsTableProps> = ({ client, cardTypeById, boardById }) => {
+export const CardsTable: React.FC<CardsTableProps> = ({
+  client,
+  cardTypeById,
+  boardById,
+  canReadPlacements,
+}) => {
   const { token } = theme.useToken();
   const { showSuccess, showError } = useThemedMessage();
   const branchById = useAgorStore(selectBranchById);
-  const { hasRole } = usePermissions();
   // The store holds only loaded boards' cards; this table reads every card.
-  const { data: cardsData, error: cardsError } = useSettingsCards(client, {
-    canReadPlacements: hasRole(ROLES.MEMBER),
-  });
+  const { data: cardsData, error: cardsError } = useSettingsCards(client, { canReadPlacements });
   const allCards = cardsData?.cards ?? NO_CARDS;
 
   // State

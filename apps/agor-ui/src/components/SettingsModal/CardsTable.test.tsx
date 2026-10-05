@@ -12,9 +12,6 @@ import { setRealtimeAuthorityScope } from '../../store/realtimeBatch';
 import { CardsTable } from './CardsTable';
 import { RECONCILE_MAX_WAIT_MS } from './useSettingsCards';
 
-vi.mock('@/hooks/usePermissions', () => ({
-  usePermissions: () => ({ hasRole: () => true, isAdmin: true, role: 'admin' }),
-}));
 vi.mock('@/utils/message', () => ({
   useThemedMessage: () => ({ showSuccess: vi.fn(), showError: vi.fn() }),
 }));
@@ -80,6 +77,7 @@ function renderTable(client: AgorClient) {
       client={client}
       cardTypeById={new Map([['type-1', cardType]])}
       boardById={new Map([['board-unloaded', leanBoard]])}
+      canReadPlacements
     />
   );
   fireEvent.click(screen.getByText('Ticket'));
@@ -105,6 +103,17 @@ describe('CardsTable', () => {
       query: expect.objectContaining({ entity_type: 'card' }),
     });
     expect(boardsGet).toHaveBeenCalledWith('board-unloaded');
+  });
+
+  it('reads every card once on open', async () => {
+    const { client, cardsFindAll, placementsFindAll } = makeClient([card('k-1', 'Fix login')]);
+    renderTable(client);
+    expect(await screen.findByText('Review')).toBeVisible();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(cardsFindAll).toHaveBeenCalledTimes(1);
+    expect(placementsFindAll).toHaveBeenCalledTimes(1);
   });
 
   it('patches the dataset from card events without reading again', async () => {

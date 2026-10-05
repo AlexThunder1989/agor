@@ -421,7 +421,16 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
           />
         );
       case 'cards':
-        return <CardsTable client={client} cardTypeById={cardTypeById} boardById={boardById} />;
+        return (
+          <CardsTable
+            client={client}
+            cardTypeById={cardTypeById}
+            boardById={boardById}
+            // The resolved user's role: the table's dataset reads (with or
+            // without placements) start once, at open.
+            canReadPlacements={hasMinimumRole(currentUser?.role, ROLES.MEMBER)}
+          />
+        );
       case 'artifacts':
         return (
           <ArtifactsTable
