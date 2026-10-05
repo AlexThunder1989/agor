@@ -5,6 +5,7 @@
  * Uses the repository pattern from @agor/core/db for type-safe database operations.
  */
 
+import { matchSearchTokens, type SearchFieldExtractor, tokenizeSearchQuery } from '@agor/core';
 import { NotFound } from '@agor/core/feathers';
 import type { Id, NullableId, Paginated, Params, TenantContext } from '@agor/core/types';
 
@@ -100,6 +101,9 @@ export class DrizzleService<
   // biome-ignore lint/suspicious/noExplicitAny: FeathersJS event system
   emit?: (event: string, ...args: any[]) => boolean;
 
+  /** With this, `search` is virtual: every token must appear in these fields. */
+  protected searchFields?: SearchFieldExtractor<T>;
+
   /** Extract resolved tenant context from Feathers params. */
   protected getTenant(params?: P): TenantContext | undefined {
     return (params as (P & { tenant?: TenantContext }) | undefined)?.tenant;
@@ -154,10 +158,16 @@ export class DrizzleService<
    */
   protected filterData(data: T[], query: Query): T[] {
     let filtered = [...data];
+    const { searchFields } = this;
+    if (searchFields && typeof query.search === 'string') {
+      const tokens = tokenizeSearchQuery(query.search);
+      filtered = filtered.filter((item) => matchSearchTokens(tokens, searchFields(item)));
+    }
 
     // Filter by field values
     for (const [key, value] of Object.entries(query)) {
       if (key.startsWith('$')) continue; // Skip operators
+      if (searchFields && key === 'search') continue;
 
       // biome-ignore lint/suspicious/noExplicitAny: Generic filtering requires dynamic property access
       filtered = filtered.filter((item: any) => {

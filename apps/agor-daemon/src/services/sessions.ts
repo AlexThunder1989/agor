@@ -10,6 +10,7 @@ import {
   isResolvedAgenticToolModelConfiguration,
   materializeAgenticToolConfiguration,
 } from '@agor/agentic-tools/config';
+import { SEARCHABLE_FIELDS } from '@agor/core';
 import {
   isTenantAgenticToolEnabled,
   PAGINATION,
@@ -370,6 +371,7 @@ export type SessionBulkArchiveResult = SessionArchiveBatchResult & {
  * Extended sessions service with custom methods
  */
 export class SessionsService extends DrizzleService<Session, SessionUpdate, SessionParams> {
+  protected searchFields = SEARCHABLE_FIELDS.session;
   private sessionRepo: SessionRepository;
   private app: Application;
   private sessionMCPRepo: SessionMCPServerRepository;

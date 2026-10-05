@@ -8,6 +8,7 @@ import type { ReposService } from './repos.js';
 
 import type { ChildProcess } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
+import { SEARCHABLE_FIELDS } from '@agor/core';
 import { analyticsLogger } from '@agor/core/analytics';
 import {
   assertAsyncEnvironmentCommandConfig,
@@ -294,6 +295,7 @@ export type EnvironmentHealthCheckOptions =
  * Extended branches service with custom methods
  */
 export class BranchesService extends DrizzleService<Branch, Partial<Branch>, BranchParams> {
+  protected searchFields = SEARCHABLE_FIELDS.branch;
   private branchRepo: BranchRepository;
   private boardRepo: BoardRepository;
   private db: TenantScopeAwareDatabase;

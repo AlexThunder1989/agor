@@ -194,6 +194,32 @@ describe('user-scope reads through transport hooks', () => {
       } as never)
     ).map((b) => b.branch_id);
     expect(branches).toEqual([fixture.branchIds[2]]);
+    // A shape the SQL page doesn't model (`$select`) falls back to the generic
+    // path, which matches `search` the same way, before counting and paging.
+    for (const [service, query, idKey, expected] of [
+      ['sessions', { search: 'login FIX' }, 'session_id', [fixture.titledSessionIds[0]]],
+      [
+        'sessions',
+        { search: 'login', board_id: fixture.boardIds[0] },
+        'session_id',
+        [fixture.titledSessionIds[0]],
+      ],
+      [
+        'sessions',
+        { search: 'login', branch_id: fixture.branchIds[0] },
+        'session_id',
+        [fixture.titledSessionIds[0]],
+      ],
+      ['branches', { search: 'mate' }, 'branch_id', [fixture.branchIds[2]]],
+    ] as const) {
+      const found = (await app.service(service).find({
+        provider: 'rest',
+        user: viewer,
+        query: { ...query, archived: false, $select: [idKey] },
+      } as never)) as { total: number; data: Array<Record<string, string>> };
+      expect(found.data.map((row) => row[idKey])).toEqual(expected);
+      expect(found.total).toBe(expected.length);
+    }
     await expect(
       app.service('sessions').find({
         provider: 'rest',
