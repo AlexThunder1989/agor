@@ -57,7 +57,7 @@ import { bumpRevision, getLastAppliedRevision, getRevision, markTouched } from '
 import { applySessionPatchToMaps } from './agorMaps';
 import { agorStore } from './agorStore';
 import { isLoadLifetimeCurrent } from './loadLifetime';
-import { admitHeld } from './retention';
+import { admitHeld, forgetAbsentSessions } from './retention';
 import { liveMembership } from './scopeMerge';
 
 interface PendingPatch {
@@ -227,7 +227,8 @@ function flush(): void {
   // calls each doing two `set()`s. Load-scope membership follows in the same
   // write (a patch can insert, archive or move a session); value-only patches
   // leave coverage untouched.
-  // A patch inserts a missing row: one nothing holds stays out (`admitHeld`).
+  // A patch inserts a missing row or moves one: one nothing holds stays out
+  // (`admitHeld`), with its MCP state.
   const written = { sessions: sessions.map((session) => session.session_id) };
   agorStore.getState().applyMaps(
     (prev) =>
@@ -241,6 +242,7 @@ function flush(): void {
         isLoadLifetimeCurrent(entry, flushAuthorityScope)
       )
   );
+  forgetAbsentSessions(written.sessions);
 }
 
 function handleVisibilityChange(): void {

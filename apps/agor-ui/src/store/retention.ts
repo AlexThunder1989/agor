@@ -63,8 +63,8 @@ const without = (coverage: Coverage, keys: readonly ScopeKey[]) =>
 
 /**
  * Drop `dropKeys`' coverage and remove every row `claims` names that no
- * remaining scope holds, in one store update. A removed session's MCP links
- * and loaded mark go with it.
+ * remaining scope holds, in one store update; a removed session's MCP links
+ * and loaded mark follow it (`forgetAbsentSessions`).
  */
 export function evictRows(claims: Claims, dropKeys: readonly ScopeKey[] = []): void {
   const state = agorStore.getState();
@@ -73,27 +73,13 @@ export function evictRows(claims: Claims, dropKeys: readonly ScopeKey[] = []): v
     undefined,
     { stale: true }
   );
-  let removedSessions: string[] = [];
+  const before = state.sessionById;
   state.applyMaps(
-    (prev) => {
-      const maps = replaceScope(prev, { claims }, NOTHING, never, holders, { evict: true });
-      if (maps.sessionById === prev.sessionById) return maps;
-      removedSessions = [...prev.sessionById.keys()].filter((id) => !maps.sessionById.has(id));
-      const linked = removedSessions.filter((id) => maps.sessionMcpServerIds.has(id));
-      if (linked.length === 0) return maps;
-      const sessionMcpServerIds = new Map(maps.sessionMcpServerIds);
-      for (const id of linked) sessionMcpServerIds.delete(id);
-      return { ...maps, sessionMcpServerIds };
-    },
-    (_maps, coverage) => without(coverage, dropKeys),
-    (_maps, current) => {
-      const loaded = removedSessions.filter((id) => current.sessionMcpLoaded.has(id));
-      if (loaded.length === 0) return {};
-      const sessionMcpLoaded = new Set(current.sessionMcpLoaded);
-      for (const id of loaded) sessionMcpLoaded.delete(id);
-      return { sessionMcpLoaded };
-    }
+    (prev) => replaceScope(prev, { claims }, NOTHING, never, holders, { evict: true }),
+    (_maps, coverage) => without(coverage, dropKeys)
   );
+  const after = agorStore.getState().sessionById;
+  if (after !== before) forgetAbsentSessions([...before.keys()].filter((id) => !after.has(id)));
 }
 
 /**
@@ -175,10 +161,13 @@ export function holdRows(): RowHold {
 }
 
 /**
- * `next` without the `written` rows it inserted over `prev` that nothing
- * holds: no pin, and no scope loading or loaded under the current lifetime
- * that claims them (`joinableScopes`). While the global sets exist (Steps
- * 1–2) they hold every row, so everything is admitted.
+ * `next` without the `written` rows that nothing holds after the write: no
+ * pin, and no scope loading or loaded under the current lifetime that claims
+ * them (`joinableScopes`). That is a row the write inserted, and a present
+ * row it moved out of every scope (pass a moved branch's sessions too,
+ * `withBranchSessions`). While the global sets exist (Steps 1–2) they hold
+ * every row, so everything is admitted. Drop the MCP state of the sessions
+ * it removed with `forgetAbsentSessions`.
  */
 export function admitHeld(prev: DataMaps, next: DataMaps, written: WrittenIds): DataMaps {
   if (next === prev || globalHydrationEnabled()) return next;
@@ -188,36 +177,37 @@ export function admitHeld(prev: DataMaps, next: DataMaps, written: WrittenIds): 
     scopes ??= joinableScopes(agorStore.getState().coverage);
     return scopes.some((scope) => belongs(scope, collection, id, next));
   };
-  const inserted = <T>(
-    collection: CoverageCollection,
-    before: Map<string, T>,
-    after: Map<string, T>
-  ) =>
-    before === after
-      ? []
-      : [...new Set(written[collection] ?? [])].flatMap((id) => {
-          const row = after.get(id);
-          return row && !before.has(id) && !held(collection, id) ? [row] : [];
-        });
+  const unheld = <T>(collection: CoverageCollection, rows: Map<string, T>) =>
+    [...new Set(written[collection] ?? [])].flatMap((id) => {
+      const row = rows.get(id);
+      return row && !held(collection, id) ? [row] : [];
+    });
 
   let maps = next;
-  const branches = inserted('branches', prev.branchById, next.branchById);
+  const branches = unheld('branches', next.branchById);
   if (branches.length > 0) {
     const branchById = new Map(maps.branchById);
     for (const branch of branches) branchById.delete(branch.branch_id);
     maps = { ...maps, branchById };
   }
-  for (const session of inserted('sessions', prev.sessionById, next.sessionById)) {
+  for (const session of unheld('sessions', next.sessionById)) {
     maps = applySessionPatchToMaps(maps, { ...session, archived: true });
   }
-  for (const boardObject of inserted('boardObjects', prev.boardObjectById, next.boardObjectById)) {
+  for (const boardObject of unheld('boardObjects', next.boardObjectById)) {
     maps = removeBoardObjectFromMaps(maps, boardObject);
   }
-  const cards = inserted('cards', prev.cardById, next.cardById);
+  const cards = unheld('cards', next.cardById);
   if (cards.length > 0) {
     const cardById = new Map(maps.cardById);
     for (const card of cards) cardById.delete(card.card_id);
     maps = { ...maps, cardById };
   }
   return maps;
+}
+
+/** Drop the MCP links and loaded marks of `sessionIds` the store no longer holds. */
+export function forgetAbsentSessions(sessionIds: Iterable<string>): void {
+  const { sessionById, forgetSessionMcp } = agorStore.getState();
+  const absent = [...new Set(sessionIds)].filter((id) => !sessionById.has(id));
+  if (absent.length > 0) forgetSessionMcp(absent);
 }

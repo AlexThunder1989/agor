@@ -58,7 +58,7 @@ import {
 } from './agorMaps';
 import { type AgorState, agorStore } from './agorStore';
 import { isLoadLifetimeCurrent } from './loadLifetime';
-import { admitHeld } from './retention';
+import { admitHeld, forgetAbsentSessions } from './retention';
 import {
   type CoverageUpdate,
   liveMembership,
@@ -97,18 +97,26 @@ export const liveCoverage =
     );
 
 /**
- * Apply a live write of `written`: the rows it inserts that nothing holds stay
- * out (`admitHeld`), and membership follows (`liveCoverage`).
+ * Apply a live write of `written`: the rows it inserts or moves out of every
+ * scope that nothing holds leave (`admitHeld`; a moved branch's sessions are
+ * judged too), with their sessions' MCP state, and membership follows
+ * (`liveCoverage`).
  */
 function applyLive(
   update: (prev: DataMaps) => DataMaps,
   written: WrittenIds,
   branchSessions = false
 ): void {
+  let judged = written;
   applyMaps(
-    (prev) => admitHeld(prev, update(prev), written),
+    (prev) => {
+      const next = update(prev);
+      judged = branchSessions ? withBranchSessions(written, next) : written;
+      return admitHeld(prev, next, judged);
+    },
     liveCoverage(written, branchSessions)
   );
+  forgetAbsentSessions(judged.sessions ?? []);
 }
 
 /** The ids a branch eviction cascade removes with it. */

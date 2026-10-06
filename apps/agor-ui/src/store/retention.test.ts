@@ -10,6 +10,7 @@ import {
 import {
   boardObjectCreated,
   branchCreated,
+  branchPatched,
   cardCreated,
   sessionCreated,
   sessionPatched,
@@ -285,6 +286,28 @@ describe('realtime admission (global hydration off)', () => {
     expect(touchedSince('sessions', 's-0', fence.startRevisions.sessions)).toBe(true);
     expect(touchedSince('cards', 'k-0', fence.startRevisions.cards)).toBe(true);
     endPartitionLoad();
+  });
+
+  it('a written row that moves out of every scope leaves, with its sessions and their MCP state', () => {
+    seedBoard('b1', {
+      branches: [branch('br-1', 'b1'), branch('br-2', 'b1')],
+      sessions: [other(session('s-1', 'br-1', 'b1')), other(session('s-2', 'br-2', 'b1'))],
+    });
+    seedBoard('b2', { branches: [], sessions: [] });
+    agorStore.getState().replaceMaps({ sessionMcpServerIds: new Map([['s-1', ['mcp-1']]]) });
+    agorStore.getState().markSessionMcpLoaded('s-1');
+    // Moved to a board no scope loaded: nothing holds it or its session now.
+    branchPatched(branch('br-1', 'b9'));
+    // Moved to another loaded board: that board holds it.
+    branchPatched(branch('br-2', 'b2'));
+    const state = agorStore.getState();
+    expect(state.branchById.has('br-1')).toBe(false);
+    expect(state.sessionById.has('s-1')).toBe(false);
+    expect(state.sessionsByBranch.has('br-1')).toBe(false);
+    expect(state.sessionMcpServerIds.has('s-1')).toBe(false);
+    expect(state.sessionMcpLoaded.has('s-1')).toBe(false);
+    expect(state.branchById.has('br-2')).toBe(true);
+    expect(state.sessionById.has('s-2')).toBe(true);
   });
 
   it('admits what a loading board, my user scope or a pin will hold', () => {
