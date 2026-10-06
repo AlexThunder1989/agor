@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { AgorClient, Board, CardType, CardWithType } from '@agor-live/client';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SERVER_READ_MAX_WAIT_MS } from '../../hooks/useServerRead';
 import {
   boardObjectCreated,
   boardObjectPatched,
@@ -10,7 +11,6 @@ import {
 import { agorStore } from '../../store/agorStore';
 import { setRealtimeAuthorityScope } from '../../store/realtimeBatch';
 import { CardsTable } from './CardsTable';
-import { RECONCILE_MAX_WAIT_MS } from './useSettingsCards';
 
 vi.mock('@/utils/message', () => ({
   useThemedMessage: () => ({ showSuccess: vi.fn(), showError: vi.fn() }),
@@ -206,14 +206,14 @@ describe('CardsTable', () => {
     await screen.findByText('Fix login');
     const started = Date.now();
     while (
-      Date.now() - started < RECONCILE_MAX_WAIT_MS + 400 &&
+      Date.now() - started < SERVER_READ_MAX_WAIT_MS + 400 &&
       cardsFindAll.mock.calls.length < 2
     ) {
       emit('io', 'connect');
       await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
     }
     expect(cardsFindAll).toHaveBeenCalledTimes(2);
-    expect(Date.now() - started).toBeLessThan(RECONCILE_MAX_WAIT_MS + 400);
+    expect(Date.now() - started).toBeLessThan(SERVER_READ_MAX_WAIT_MS + 400);
   });
 
   it('updates a zone label when the board record changes', async () => {

@@ -49,3 +49,6 @@ export function isLoadLifetimeCurrent(
     currentAuthority === lifetime.authorityScope
   );
 }
+
+/** The user part of an authority scope (`user:role:generation`). */
+export const authorityIdentity = (authorityScope: string) => authorityScope.split(':')[0];

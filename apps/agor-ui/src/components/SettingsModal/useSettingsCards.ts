@@ -2,11 +2,8 @@ import type { AgorClient, Board, BoardEntityObject, CardWithType } from '@agor-l
 import { PAGINATION } from '@agor-live/client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAgorStore } from '@/store/agorStore';
-
-/** Trailing delay that coalesces a burst of reconcile requests (reconnects, reauth). */
-export const RECONCILE_DEBOUNCE_MS = 300;
-/** A sustained burst still reconciles within this bound. */
-export const RECONCILE_MAX_WAIT_MS = 2000;
+import { authorityIdentity } from '@/store/loadLifetime';
+import { debounceWithMaxWait } from '../../hooks/useServerRead';
 
 export interface SettingsCards {
   cards: CardWithType[];
@@ -27,9 +24,6 @@ const withoutPlacements = (data: SettingsCards): SettingsCards =>
   data.placements.length === 0 && data.zoneBoards.size === 0
     ? data
     : { cards: data.cards, placements: [], zoneBoards: new Map() };
-
-/** The user part of an authority scope (`user:role:generation`). */
-const identityOf = (authority: string) => authority.split(':')[0];
 
 /**
  * One table's dataset and its read coordinator. It outlives authority
@@ -57,8 +51,8 @@ function createCardsCoordinator(
   let inflight = false;
   let superseded = false;
   let disposed = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let firstRequestAt = 0;
+  /** Debounced reconcile; a sustained burst still runs within the max wait. */
+  const reconcileTimer = debounceWithMaxWait(() => void read());
 
   const publish = () => {
     if (disposed || !loaded) return;
@@ -104,10 +98,7 @@ function createCardsCoordinator(
     superseded = false;
     // This read covers any reconcile still waiting in its debounce (it was
     // requested before now), so the trailing read consumes it.
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-    }
+    reconcileTimer.cancel();
     touched.clear();
     const readAuthority = authority;
     // Every read after the first is a reconcile (reconnect, re-authentication):
@@ -174,27 +165,15 @@ function createCardsCoordinator(
     }
   };
 
-  /** Debounced reconcile; a sustained burst still runs within the max wait. */
   const requestReconcile = () => {
-    if (disposed) return;
-    const now = Date.now();
-    if (timer === null) firstRequestAt = now;
-    else clearTimeout(timer);
-    const delay = Math.max(
-      0,
-      Math.min(RECONCILE_DEBOUNCE_MS, firstRequestAt + RECONCILE_MAX_WAIT_MS - now)
-    );
-    timer = setTimeout(() => {
-      timer = null;
-      void read();
-    }, delay);
+    if (!disposed) reconcileTimer.request();
   };
 
   const setAuthority = (next: string | null) => {
     const previous = authority;
     authority = next;
     if (!next || next === previous) return; // reads wait for a valid authority
-    if (!loaded || (previous && identityOf(previous) !== identityOf(next))) {
+    if (!loaded || (previous && authorityIdentity(previous) !== authorityIdentity(next))) {
       if (loaded) {
         // Another user's rows are never shown, even briefly.
         loaded = false;
@@ -270,7 +249,7 @@ function createCardsCoordinator(
     setAuthority,
     dispose: () => {
       disposed = true;
-      if (timer) clearTimeout(timer);
+      reconcileTimer.cancel();
       for (const [source, event, listener] of subscriptions) {
         source.removeListener?.(event, listener);
       }

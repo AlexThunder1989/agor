@@ -80,6 +80,9 @@ export const MAX_CONCURRENT_ID_READS = 3;
 const RETRY_BASE_MS = 500;
 const RETRY_MAX_MS = 30_000;
 export const MAX_REFERENCE_READ_ATTEMPTS = 6;
+/** Delay before retry `attempt` (1-based) of a failed read: capped exponential backoff. */
+export const referenceRetryDelayMs = (attempt: number) =>
+  Math.min(RETRY_BASE_MS * 2 ** (attempt - 1), RETRY_MAX_MS);
 
 /** The newest-first query for my active sessions. */
 export function mySessionsQuery(userId: string, limit: number) {
@@ -553,19 +556,16 @@ function scheduleRetry(run: ScopeRun, ids: string[]): void {
     run.compat = true;
     return;
   }
-  const timer = setTimeout(
-    () => {
-      run.retryTimers.delete(timer);
-      if (!isCurrent(run)) return;
-      for (const id of ids) run.pending.delete(id);
-      queueBranches(
-        run,
-        ids.filter((id) => !agorStore.getState().branchById.has(id))
-      );
-      settleHomeBranches(run);
-    },
-    Math.min(RETRY_BASE_MS * 2 ** (attempt - 1), RETRY_MAX_MS)
-  );
+  const timer = setTimeout(() => {
+    run.retryTimers.delete(timer);
+    if (!isCurrent(run)) return;
+    for (const id of ids) run.pending.delete(id);
+    queueBranches(
+      run,
+      ids.filter((id) => !agorStore.getState().branchById.has(id))
+    );
+    settleHomeBranches(run);
+  }, referenceRetryDelayMs(attempt));
   run.retryTimers.add(timer);
 }
 

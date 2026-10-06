@@ -8,7 +8,8 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { agorStore } from '../store/agorStore';
 import { setRealtimeAuthorityScope } from '../store/realtimeBatch';
-import { BRANCH_COUNTS_DEBOUNCE_MS, useBranchCounts } from './useBranchCounts';
+import { useBranchCounts } from './useBranchCounts';
+import { SERVER_READ_DEBOUNCE_MS } from './useServerRead';
 
 function makeClient() {
   const listeners = new Map<string, Set<() => void>>();
@@ -59,7 +60,7 @@ it('re-reads once, debounced, after a burst of branch events', async () => {
   emit('removed');
   expect(find).toHaveBeenCalledTimes(1);
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(BRANCH_COUNTS_DEBOUNCE_MS);
+    await vi.advanceTimersByTimeAsync(SERVER_READ_DEBOUNCE_MS);
   });
   expect(find).toHaveBeenCalledTimes(2);
   expect(result.current.get('board-1')).toBe(3);
@@ -74,4 +75,51 @@ it('reads nothing without a realtime authority, and unsubscribes on unmount', as
   await waitFor(() => expect(find).toHaveBeenCalledTimes(1));
   unmount();
   expect([...listeners.values()].every((set) => set.size === 0)).toBe(true);
+});
+
+it('never lets an older reply overwrite a newer one', async () => {
+  const { client, find, emit } = makeClient();
+  const { result } = renderHook(() => useBranchCounts(client));
+  await waitFor(() => expect(result.current.get('board-1')).toBe(2));
+  vi.useFakeTimers();
+  // Each read captures the server count when it starts; replies land newest first.
+  let server = 2;
+  const pending: Array<() => void> = [];
+  find.mockImplementation(() => {
+    const snapshot = server;
+    return new Promise((resolve) =>
+      pending.push(() => resolve([{ board_id: 'board-1', branch_count: snapshot }]))
+    );
+  });
+  server = 4;
+  emit('patched');
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  server = 5;
+  emit('patched');
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  while (pending.length > 0) {
+    await act(async () => {
+      for (const resolve of pending.splice(0).reverse()) resolve();
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+  }
+  expect(result.current.get('board-1')).toBe(5);
+});
+
+it('re-reads within a bounded wait while branch events keep arriving', async () => {
+  const { client, find, emit } = makeClient();
+  const { result } = renderHook(() => useBranchCounts(client));
+  await waitFor(() => expect(result.current.get('board-1')).toBe(2));
+  vi.useFakeTimers();
+  for (let elapsed = 0; elapsed < 3000; elapsed += 250) {
+    emit('patched');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+  }
+  expect(find.mock.calls.length).toBeGreaterThan(1);
 });
