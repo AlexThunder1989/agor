@@ -6,8 +6,8 @@ import fixtures from './describeTurnOutcome.production.fixtures.json';
 import { turnOutcomeDetails } from './turnOutcomeDetails';
 
 /**
- * 1,283 real failed/stopped/timed-out tasks (2026-09-07 to 2026-10-06), deduped
- * into verbatim error_message + task-field combinations. `count` is informational.
+ * Real failed, stopped and timed-out tasks, reduced to one example per distinct
+ * shape: verbatim error_message plus the task fields the banner reads.
  */
 interface ProductionFixture {
   example: string | null;
@@ -18,7 +18,6 @@ interface ProductionFixture {
   cause: string | null;
   executor_connected: boolean;
   recorded_tool_count: number | null;
-  count: number;
 }
 
 function toTask(fixture: ProductionFixture, index: number): Task {
@@ -99,8 +98,6 @@ const EXPECTED: Expected[] = [
   lost(),
   lost(),
   lost(),
-  neverStarted,
-  lost(),
   lost(),
   lost(),
   stopped,
@@ -110,9 +107,6 @@ const EXPECTED: Expected[] = [
     message: 'The agent stopped early. Any edits are kept.',
     action: 'resume',
   },
-  lost(),
-  lost(),
-  lost(),
   codexRejected,
   unknown('Any edits are kept.'),
   stopped,
@@ -122,7 +116,6 @@ const EXPECTED: Expected[] = [
     message: "Claude Code isn't connected, so nothing ran.",
     action: 'settings',
   },
-  lost(),
   stopped,
   lost(),
   lost(),
@@ -139,7 +132,6 @@ const EXPECTED: Expected[] = [
     message: 'The agent stopped waiting for approval.',
     action: 'resume',
   },
-  stopped,
 ];
 
 describe('describeTurnOutcome on production error data', () => {

@@ -7,8 +7,7 @@
     "termination": null,
     "cause": null,
     "executor_connected": true,
-    "recorded_tool_count": null,
-    "count": 850
+    "recorded_tool_count": null
   },
   {
     "example": "Agor could not confirm a successful response. Review any output and tool activity before retrying.",
@@ -18,8 +17,7 @@
     "termination": null,
     "cause": null,
     "executor_connected": true,
-    "recorded_tool_count": 0,
-    "count": 190
+    "recorded_tool_count": 0
   },
   {
     "example": "Executor exited unexpectedly with code 1.",
@@ -29,8 +27,7 @@
     "termination": "verified",
     "cause": "heartbeat_lost",
     "executor_connected": false,
-    "recorded_tool_count": null,
-    "count": 43
+    "recorded_tool_count": null
   },
   {
     "example": "socket has been disconnected",
@@ -40,8 +37,7 @@
     "termination": null,
     "cause": null,
     "executor_connected": true,
-    "recorded_tool_count": 25,
-    "count": 24
+    "recorded_tool_count": 25
   },
   {
     "example": "Executor exited unexpectedly with code unknown.",
@@ -51,30 +47,7 @@
     "termination": "verified",
     "cause": "heartbeat_lost",
     "executor_connected": true,
-    "recorded_tool_count": null,
-    "count": 21
-  },
-  {
-    "example": "socket has been disconnected",
-    "status": "failed",
-    "tool": "codex",
-    "sdk_failure_reason": null,
-    "termination": null,
-    "cause": null,
-    "executor_connected": true,
-    "recorded_tool_count": 7,
-    "count": 20
-  },
-  {
-    "example": "Executor exited unexpectedly with code 1.",
-    "status": "failed",
-    "tool": "codex",
-    "sdk_failure_reason": "heartbeat_lost",
-    "termination": "verified",
-    "cause": "heartbeat_lost",
-    "executor_connected": false,
-    "recorded_tool_count": null,
-    "count": 17
+    "recorded_tool_count": null
   },
   {
     "example": "socket has been disconnected",
@@ -84,8 +57,7 @@
     "termination": null,
     "cause": null,
     "executor_connected": true,
-    "recorded_tool_count": null,
-    "count": 14
+    "recorded_tool_count": null
   },
   {
     "example": "Executor exited unexpectedly with code unknown.",
@@ -95,8 +67,7 @@
     "termination": "verified",
     "cause": "heartbeat_lost",
     "executor_connected": true,
-    "recorded_tool_count": 9,
-    "count": 13
+    "recorded_tool_count": 9
   },
   {
     "example": "operation has timed out",
@@ -106,8 +77,7 @@
     "termination": null,
     "cause": null,
     "executor_connected": true,
-    "recorded_tool_count": 6,
-    "count": 11
+    "recorded_tool_count": 6
   },
   {
     "example": null,
@@ -117,8 +87,7 @@
     "termination": null,
     "cause": "user_stop",
     "executor_connected": true,
-    "recorded_tool_count": 4,
-    "count": 10
+    "recorded_tool_count": 4
   },
   {
     "example": "Agor could not confirm a successful response. Review any output and tool activity before retrying.",
@@ -128,41 +97,7 @@
     "termination": null,
     "cause": null,
     "executor_connected": true,
-    "recorded_tool_count": 36,
-    "count": 9
-  },
-  {
-    "example": "Executor exited unexpectedly with code unknown.",
-    "status": "failed",
-    "tool": "codex",
-    "sdk_failure_reason": "heartbeat_lost",
-    "termination": "verified",
-    "cause": "heartbeat_lost",
-    "executor_connected": true,
-    "recorded_tool_count": 6,
-    "count": 9
-  },
-  {
-    "example": "Executor exited unexpectedly with code unknown.",
-    "status": "failed",
-    "tool": "codex",
-    "sdk_failure_reason": "heartbeat_lost",
-    "termination": "verified",
-    "cause": "heartbeat_lost",
-    "executor_connected": true,
-    "recorded_tool_count": null,
-    "count": 7
-  },
-  {
-    "example": "socket has been disconnected",
-    "status": "failed",
-    "tool": "codex",
-    "sdk_failure_reason": null,
-    "termination": null,
-    "cause": null,
-    "executor_connected": true,
-    "recorded_tool_count": null,
-    "count": 7
+    "recorded_tool_count": 36
   },
   {
     "example": "Codex failed the turn. Retry the prompt; review Codex authentication or runtime status if it continues.",
@@ -172,8 +107,7 @@
     "termination": null,
     "cause": null,
     "executor_connected": true,
-    "recorded_tool_count": 8,
-    "count": 7
+    "recorded_tool_count": 8
   },
   {
     "example": "The MCP operation failed. Retry, then ask an administrator to review the secure operational event if it continues.",
@@ -183,8 +117,7 @@
     "termination": null,
     "cause": null,
     "executor_connected": true,
-    "recorded_tool_count": null,
-    "count": 6
+    "recorded_tool_count": null
   },
   {
     "example": null,
@@ -194,8 +127,7 @@
     "termination": null,
     "cause": "user_stop",
     "executor_connected": true,
-    "recorded_tool_count": 0,
-    "count": 4
+    "recorded_tool_count": 0
   },
   {
     "example": "No scoped claude-code credential is configured for this workspace or user.",
@@ -205,19 +137,7 @@
     "termination": null,
     "cause": null,
     "executor_connected": true,
-    "recorded_tool_count": 0,
-    "count": 3
-  },
-  {
-    "example": "operation has timed out",
-    "status": "failed",
-    "tool": "codex",
-    "sdk_failure_reason": null,
-    "termination": null,
-    "cause": null,
-    "executor_connected": true,
-    "recorded_tool_count": 34,
-    "count": 3
+    "recorded_tool_count": 0
   },
   {
     "example": null,
@@ -227,8 +147,7 @@
     "termination": null,
     "cause": "user_stop",
     "executor_connected": true,
-    "recorded_tool_count": null,
-    "count": 2
+    "recorded_tool_count": null
   },
   {
     "example": "Executor heartbeat lost; the executor may have crashed or disconnected.",
@@ -238,8 +157,7 @@
     "termination": "verified",
     "cause": "heartbeat_lost",
     "executor_connected": true,
-    "recorded_tool_count": null,
-    "count": 2
+    "recorded_tool_count": null
   },
   {
     "example": "Executor heartbeat lost; the executor may have crashed or disconnected.",
@@ -249,8 +167,7 @@
     "termination": "verified",
     "cause": "heartbeat_lost",
     "executor_connected": true,
-    "recorded_tool_count": 27,
-    "count": 2
+    "recorded_tool_count": 27
   },
   {
     "example": "Daemon restart released this Task without verifying executor termination.",
@@ -260,8 +177,7 @@
     "termination": "unverified",
     "cause": null,
     "executor_connected": false,
-    "recorded_tool_count": null,
-    "count": 1
+    "recorded_tool_count": null
   },
   {
     "example": "Daemon restart released this Task without verifying executor termination.",
@@ -271,8 +187,7 @@
     "termination": "unverified",
     "cause": null,
     "executor_connected": true,
-    "recorded_tool_count": null,
-    "count": 1
+    "recorded_tool_count": null
   },
   {
     "example": null,
@@ -282,8 +197,7 @@
     "termination": null,
     "cause": "user_stop",
     "executor_connected": false,
-    "recorded_tool_count": 0,
-    "count": 1
+    "recorded_tool_count": 0
   },
   {
     "example": "Database operation failed (25P01)",
@@ -293,8 +207,7 @@
     "termination": null,
     "cause": null,
     "executor_connected": true,
-    "recorded_tool_count": 0,
-    "count": 1
+    "recorded_tool_count": 0
   },
   {
     "example": "operation has timed out",
@@ -304,8 +217,7 @@
     "termination": null,
     "cause": null,
     "executor_connected": true,
-    "recorded_tool_count": 0,
-    "count": 1
+    "recorded_tool_count": 0
   },
   {
     "example": "Executor binary not found. Tried:\n  - /usr/lib/node_modules/agor-live/dist/executor/cli.js\n  - /usr/lib/node_modules/agor-live/executor/cli.js\n  - /usr/lib/node_modules/packages/executor/bin/agor-executor\n  - /usr/lib/node_modules/packages/executor/dist/cli.js\n  - /usr/lib/packages/executor/bin/agor-executor\n  - /usr/lib/packages/executor/dist/cli.js",
@@ -315,8 +227,7 @@
     "termination": null,
     "cause": null,
     "executor_connected": false,
-    "recorded_tool_count": 0,
-    "count": 1
+    "recorded_tool_count": 0
   },
   {
     "example": null,
@@ -326,8 +237,7 @@
     "termination": null,
     "cause": null,
     "executor_connected": true,
-    "recorded_tool_count": 5,
-    "count": 1
+    "recorded_tool_count": 5
   },
   {
     "example": null,
@@ -337,18 +247,6 @@
     "termination": null,
     "cause": null,
     "executor_connected": true,
-    "recorded_tool_count": null,
-    "count": 1
-  },
-  {
-    "example": null,
-    "status": "stopped",
-    "tool": "codex",
-    "sdk_failure_reason": null,
-    "termination": null,
-    "cause": "user_stop",
-    "executor_connected": true,
-    "recorded_tool_count": 32,
-    "count": 1
+    "recorded_tool_count": null
   }
 ]
