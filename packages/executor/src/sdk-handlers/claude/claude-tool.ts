@@ -10,7 +10,6 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
-  claudeResultFailureCode,
   projectClaudeResultResponse,
   projectContextUsageSnapshot,
   SAFE_MISSING_PROVIDER_RESULT_MESSAGE,
@@ -18,7 +17,7 @@ import {
 } from '@agor/core';
 import { generateId, shortId } from '@agor/core/db';
 import type { PermissionMode as ClaudeSDKPermissionMode } from '@agor/core/sdk';
-import { type ContextUsageSnapshot, withProviderDetail } from '@agor/core/types';
+import type { ContextUsageSnapshot } from '@agor/core/types';
 import { mapPermissionMode } from '@agor/core/utils/permission-mode-mapper';
 import type {
   BranchRepository,
@@ -675,13 +674,7 @@ export class ClaudeTool implements ITool {
         if (sdkResult && (sdkResult.subtype !== 'success' || sdkResult.is_error === true)) {
           hadError = true;
           errorSubtype = sdkResult.subtype;
-          // Fixed sentence first (classification); only the closed failure code follows.
-          errorDetails = [
-            withProviderDetail(
-              SAFE_ZERO_TURN_PROVIDER_RESULT_MESSAGE,
-              claudeResultFailureCode(rawSdkResponse)
-            ),
-          ];
+          errorDetails = [SAFE_ZERO_TURN_PROVIDER_RESULT_MESSAGE];
 
           // Create a system message with the error details so it's visible in the conversation UI
           if (this.messagesService) {
@@ -1135,13 +1128,7 @@ export class ClaudeTool implements ITool {
         if (sdkResult && (sdkResult.subtype !== 'success' || sdkResult.is_error === true)) {
           hadError = true;
           errorSubtype = sdkResult.subtype;
-          // Fixed sentence first (classification); only the closed failure code follows.
-          errorDetails = [
-            withProviderDetail(
-              SAFE_ZERO_TURN_PROVIDER_RESULT_MESSAGE,
-              claudeResultFailureCode(rawSdkResponse)
-            ),
-          ];
+          errorDetails = [SAFE_ZERO_TURN_PROVIDER_RESULT_MESSAGE];
 
           // Create a system message with the error details so it's visible in the conversation UI
           if (this.messagesService) {

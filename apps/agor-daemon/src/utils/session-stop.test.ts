@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionsServiceImpl } from '../declarations.js';
 
-import {
-  markStoppedSessionPromptableNoDrain,
-  stopRequester,
-  stopSessionPreserveQueue,
-} from './session-stop.js';
+import { markStoppedSessionPromptableNoDrain, stopSessionPreserveQueue } from './session-stop.js';
 
 const findActiveTasks = async (app: any, sessionId: string, params: unknown) => {
   const result = await app
@@ -580,19 +576,5 @@ describe('stopSessionPreserveQueue', () => {
         { provider: 'rest' }
       )
     ).rejects.toThrow('containment failed');
-  });
-});
-
-describe('stopRequester', () => {
-  it('names the person for UI stops, their agent for MCP stops, and Agor otherwise', () => {
-    expect(stopRequester({ user: { user_id: 'u1' }, provider: 'socketio' } as never)).toEqual({
-      requested_by_user_id: 'u1',
-      requested_via: 'ui',
-    });
-    expect(stopRequester({ user: { user_id: 'u1' }, provider: 'mcp' } as never)).toEqual({
-      requested_by_user_id: 'u1',
-      requested_via: 'mcp',
-    });
-    expect(stopRequester({})).toEqual({ requested_via: 'agor' });
   });
 });

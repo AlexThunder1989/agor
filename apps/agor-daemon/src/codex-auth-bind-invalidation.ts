@@ -67,7 +67,6 @@ export async function invalidateLiveBranchCodexCredentialBinds(input: {
       taskId,
       cause: 'user_stop',
       errorMessage: message,
-      requestedBy: { requested_via: 'agor' },
       runInFreshTenantWriteDatabase: (work) => withFreshTenantWrite(db, tenantId, work),
     });
   };

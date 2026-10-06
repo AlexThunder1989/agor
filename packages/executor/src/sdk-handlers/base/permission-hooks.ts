@@ -13,7 +13,6 @@ import {
   MessageRole,
   PermissionScope,
   PermissionStatus,
-  permissionTimeoutMessage,
   SessionStatus,
   TaskStatus,
 } from '@agor/core/types';
@@ -282,9 +281,6 @@ export function createCanUseToolCallback(
         await deps.tasksService.patch(taskId, {
           status: TaskStatus.TIMED_OUT,
           completed_at: new Date().toISOString(),
-          ...(decision.timeoutMs
-            ? { error_message: permissionTimeoutMessage(decision.timeoutMs) }
-            : {}),
         });
 
         if (deps.sessionsService) {

@@ -130,17 +130,6 @@ export function projectClaudeResultResponse(value: unknown): SafeClaudeResultRes
  * names, prompt sections, and future extension objects; none cross this
  * boundary. Accessors and inherited fields are never evaluated.
  */
-/**
- * The closed failure code of a non-success Claude result, safe to store as
- * diagnostic detail. Provider prose (`errors[]`, `result`) is never read here.
- */
-export function claudeResultFailureCode(value: unknown): string | undefined {
-  const result = projectClaudeResultResponse(value);
-  if (!result) return undefined;
-  if (result.subtype !== 'success' && result.subtype !== 'unknown') return result.subtype;
-  return result.is_error === true ? 'is_error' : undefined;
-}
-
 export function projectContextUsageSnapshot(value: unknown): ContextUsageSnapshot | undefined {
   const totalTokens = safeCount(ownDataValue(value, 'totalTokens'));
   const maxTokens = safeCount(ownDataValue(value, 'maxTokens'));
