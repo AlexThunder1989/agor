@@ -11,13 +11,14 @@ import type { AgorClient, Board, Branch, CardWithType, Session } from '@agor-liv
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { resetHydrationRevisions } from '../store/agorHydration';
-import { sessionCreated } from '../store/agorRealtimeActions';
+import { branchPatched, sessionCreated } from '../store/agorRealtimeActions';
 import { agorStore } from '../store/agorStore';
 import { makeBoardReadySelector, RETAINED_BACKGROUND_PARTITIONS } from '../store/boardPartitions';
 import { captureLoadLifetime } from '../store/loadLifetime';
 import { discardRealtimeNow, setRealtimeAuthorityScope } from '../store/realtimeBatch';
 import { holdRows, pinRows } from '../store/retention';
 import { USER_SCOPE_KEYS } from '../store/scopeMerge';
+import { sessionMcpCreated } from '../store/sessionMcpActions';
 import { fillOnDemand } from '../store/userScope';
 import { setGlobalHydrationForTests } from './useAgorData';
 import { useBoardPartition } from './useBoardPartition';
@@ -310,8 +311,11 @@ it('rows that enter without an owner never lift the plateau', async () => {
       branch_board_id: boardId(10 + (i % 10)),
       created_by: 'user-other',
     } as Session);
+    // Their MCP links follow the rows: none enters.
+    sessionMcpCreated({ session_id: `s-live-${i}`, mcp_server_id: 'mcp-1' });
   }
   expect(counts()).toEqual(plateau);
+  expect(agorStore.getState().sessionMcpServerIds.size).toBe(0);
 
   // Archived deep links: each opened (route pin and the link's hold) and left.
   for (let i = 0; i < 20; i++) {
@@ -329,5 +333,15 @@ it('rows that enter without an owner never lift the plateau', async () => {
     route();
   }
   expect(counts()).toEqual(plateau);
+
+  // A retained board's branch moved live onto a board never loaded: it and
+  // its sessions leave with the scope that held them.
+  const moved = rows.branches.find((branch) => branch.branch_id === branchId(5, 1))!;
+  branchPatched({ ...moved, board_id: boardId(15) });
+  expect(counts()).toEqual({
+    ...plateau,
+    branches: plateau.branches - 1,
+    sessions: plateau.sessions - SESSIONS_PER_BRANCH,
+  });
   shell.unmount();
 });
