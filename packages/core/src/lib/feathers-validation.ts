@@ -5,10 +5,12 @@
  * Prevents NoSQL injection by validating query structure and values.
  */
 
+import { BadRequest } from '@feathersjs/errors';
 import { Ajv } from '@feathersjs/schema';
 import type { TObject, TProperties } from '@feathersjs/typebox';
 import { getValidator, Type } from '@feathersjs/typebox';
 import { MESSAGE_PAGINATION, PAGINATION } from '../config/constants';
+import { MAX_SEARCH_TOKENS, uniqueSearchTokens } from '../search/searchable-fields';
 import { AGENTIC_TOOL_NAMES, PERSISTED_AGENTIC_TOOL_NAMES } from '../types/agentic-tool';
 import {
   KNOWLEDGE_DOCUMENT_KINDS,
@@ -555,6 +557,16 @@ export const knowledgeDocumentQueryValidator = getValidator(
   knowledgeDocumentQuerySchema,
   queryValidator
 );
+
+/**
+ * Reject a `search` of more than `MAX_SEARCH_TOKENS` distinct terms: each one
+ * is a substring test of every candidate row (`searchCondition`).
+ */
+export function assertSearchTerms(search: unknown): void {
+  if (typeof search === 'string' && uniqueSearchTokens(search).length > MAX_SEARCH_TOKENS) {
+    throw new BadRequest(`search accepts at most ${MAX_SEARCH_TOKENS} distinct terms`);
+  }
+}
 
 /**
  * Wrap validateQuery to produce a FeathersJS-compatible hook function.

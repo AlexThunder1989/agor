@@ -80,3 +80,14 @@ export function matchSearchTokens(
 export function tokenizeSearchQuery(query: string): string[] {
   return query.trim().toLowerCase().split(/\s+/).filter(Boolean);
 }
+
+/**
+ * The most distinct tokens a server search may carry: each one is a substring
+ * test of every candidate row, so the daemon rejects longer queries.
+ */
+export const MAX_SEARCH_TOKENS = 8;
+
+/** The distinct tokens of `query` (`tokenizeSearchQuery`): a repeated token matches once. */
+export function uniqueSearchTokens(query: string): string[] {
+  return [...new Set(tokenizeSearchQuery(query))];
+}

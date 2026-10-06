@@ -72,6 +72,7 @@ import {
   NotFound,
 } from '@agor/core/feathers';
 import { stripGitUrlCredentials } from '@agor/core/git/pure';
+import { assertSearchTerms } from '@agor/core/lib/feathers-validation';
 import type {
   AuthenticatedParams,
   BoardID,
@@ -1824,6 +1825,7 @@ export class BranchesService extends DrizzleService<Branch, Partial<Branch>, Bra
           : skip + data.length;
       return { total, limit, skip, data };
     }
+    assertSearchTerms(query?.search);
     if (shouldSqlPageBranchQuery(query)) {
       const branchFilter = query?.branch_id;
       const branchIds =

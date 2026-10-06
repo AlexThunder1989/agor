@@ -19,7 +19,7 @@ import type { LibSQLDatabase } from 'drizzle-orm/libsql';
 import type { PgTable } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type { SQLiteTable } from 'drizzle-orm/sqlite-core';
-import { tokenizeSearchQuery } from '../search/searchable-fields';
+import { MAX_SEARCH_TOKENS, uniqueSearchTokens } from '../search/searchable-fields';
 import type { Database } from './client';
 import type * as postgresSchema from './schema.postgres';
 import type * as sqliteSchema from './schema.sqlite';
@@ -189,22 +189,39 @@ export function jsonExtract(db: Database, column: SQL.Aliased | SQL | any, path:
 }
 
 /**
- * `matchSearchTokens` (`@agor/core/search`) as SQL: every token of `search`
- * (`tokenizeSearchQuery`) appears, case-insensitively and literally, in at
- * least one of `fields`. A search without tokens matches nothing, as on the
- * client.
+ * `matchSearchTokens` (`@agor/core/search`) as SQL: the rows of `id` that
+ * `scope` admits and where every distinct token of `search`
+ * (`uniqueSearchTokens`, at most `MAX_SEARCH_TOKENS`) appears,
+ * case-insensitively and literally, in at least one of `fields`. A search
+ * without tokens matches nothing, as on the client.
+ *
+ * The haystack is built in a derived table fenced against inlining (`OFFSET
+ * 0`), so it is computed once per row however many tokens test it, and only
+ * for the rows `scope` admits: pass every other condition of the read — the
+ * caller's visibility above all — so a row the caller cannot see is never
+ * read for its text (no cost, so no timing oracle).
  */
-export function searchTokensCondition(search: string, fields: SQLWrapper[]): SQL {
-  const tokens = tokenizeSearchQuery(search);
+export function searchCondition(
+  db: Database,
+  opts: { id: SQLWrapper; from: SQL; scope?: SQL; fields: SQLWrapper[]; search: string }
+): SQL {
+  const tokens = uniqueSearchTokens(opts.search);
   if (tokens.length === 0) return sql`1 = 0`;
+  if (tokens.length > MAX_SEARCH_TOKENS) {
+    throw new Error(`search accepts at most ${MAX_SEARCH_TOKENS} distinct terms`);
+  }
   const haystack = sql`lower(${sql.join(
-    fields.map((field) => sql`coalesce(${field}, '')`),
+    opts.fields.map((field) => sql`coalesce(${field}, '')`),
     sql` || ' ' || `
   )})`;
+  const fence = isSQLiteDatabase(db) ? sql`limit -1 offset 0` : sql`offset 0`;
   const matches = tokens.map(
-    (token) => sql`${haystack} like ${`%${token.replace(/[\\%_]/g, '\\$&')}%`} escape '\\'`
+    (token) => sql`search_rows.haystack like ${`%${token.replace(/[\\%_]/g, '\\$&')}%`} escape '\\'`
   );
-  return sql`(${sql.join(matches, sql` and `)})`;
+  return sql`${opts.id} in (select search_rows.search_id from (
+    select ${opts.id} as search_id, ${haystack} as haystack from ${opts.from}
+    ${opts.scope ? sql`where ${opts.scope}` : sql``} ${fence}
+  ) as search_rows where ${sql.join(matches, sql` and `)})`;
 }
 
 /**

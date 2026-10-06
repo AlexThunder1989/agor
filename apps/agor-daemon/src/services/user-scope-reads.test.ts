@@ -263,6 +263,30 @@ describe('user-scope reads through transport hooks', () => {
       ).map((b) => b.branch_id);
       expect(found).toEqual([legacy.branch_id]);
     }
+    // A search is at most MAX_SEARCH_TOKENS distinct terms; repeats count once.
+    const nine = 'a b c d e f g h i';
+    for (const service of ['sessions', 'branches'] as const) {
+      await expect(
+        app.service(service).find({
+          provider: 'rest',
+          user: viewer,
+          query: { search: nine, archived: false, $limit: 10 },
+        } as never)
+      ).rejects.toMatchObject({ name: 'BadRequest', message: expect.stringMatching(/at most 8/) });
+    }
+    const repeated = rows<Session>(
+      await app.service('sessions').find({
+        provider: 'rest',
+        user: viewer,
+        query: {
+          search: Array.from({ length: 40 }, () => 'login').join(' '),
+          archived: false,
+          $limit: 10,
+          $count: false,
+        },
+      } as never)
+    ).map((s) => s.session_id);
+    expect(repeated).toEqual([fixture.titledSessionIds[0]]);
     await expect(
       app.service('sessions').find({
         provider: 'rest',

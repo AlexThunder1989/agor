@@ -37,7 +37,6 @@ import {
   like,
   or,
   type SQL,
-  type SQLWrapper,
   sql,
 } from 'drizzle-orm';
 import { getBaseUrl } from '../../config/config-manager';
@@ -60,7 +59,7 @@ import {
   jsonExtract,
   lockRowForUpdate,
   runDatabaseTransaction,
-  searchTokensCondition,
+  searchCondition,
   select,
   txAsDb,
   update,
@@ -516,20 +515,27 @@ export class BranchRepository implements BaseRepository<Branch, Partial<Branch>>
     if (opts.archived !== undefined) conditions.push(eq(branches.archived, opts.archived));
     if (opts.branchIds) conditions.push(inArray(branches.branch_id, opts.branchIds));
     if (opts.createdBy) conditions.push(eq(branches.created_by, opts.createdBy));
+    if (opts.visibleToUserId) {
+      conditions.push(visibleBranchAccessCondition(this.db, opts.visibleToUserId));
+    }
+    let whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     if (opts.search !== undefined) {
+      // Over the rows every other condition (visibility included) admits.
       const data = (path: string) => jsonExtract(this.db, branches.data, path);
-      // The branch's own repo, correlated by its FK (same tenant scope and RLS).
-      const ofRepo = (field: SQLWrapper) =>
-        sql`(select ${field} from ${repos} where ${repos.repo_id} = ${branches.repo_id})`;
-      conditions.push(
-        searchTokensCondition(opts.search, [
+      whereClause = searchCondition(this.db, {
+        id: branches.branch_id,
+        // The branch's own repo, by its FK (same tenant scope and RLS).
+        from: sql`${branches} left join ${repos} on ${repos.repo_id} = ${branches.repo_id}`,
+        scope: whereClause,
+        search: opts.search,
+        fields: [
           branches.name,
           branches.ref,
           branches.branch_id,
           sql`cast(${branches.branch_unique_id} as text)`,
           data('path'),
-          ofRepo(repos.slug),
-          ofRepo(jsonExtract(this.db, repos.data, 'name')),
+          repos.slug,
+          jsonExtract(this.db, repos.data, 'name'),
           data('notes'),
           data('issue_url'),
           data('pull_request_url'),
@@ -537,13 +543,9 @@ export class BranchRepository implements BaseRepository<Branch, Partial<Branch>>
           data('custom_context.teammate.displayName'),
           data('custom_context.assistant.displayName'),
           data('custom_context.agent.displayName'),
-        ])
-      );
+        ],
+      });
     }
-    if (opts.visibleToUserId) {
-      conditions.push(visibleBranchAccessCondition(this.db, opts.visibleToUserId));
-    }
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     let countQuery = select(this.db, { count: sql<number>`count(*)` }).from(branches);
     if (whereClause) countQuery = countQuery.where(whereClause);

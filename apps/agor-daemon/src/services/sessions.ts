@@ -46,6 +46,7 @@ import {
   NotFound,
   Unavailable,
 } from '@agor/core/feathers';
+import { assertSearchTerms } from '@agor/core/lib/feathers-validation';
 import { isMCPServerNotUsableError } from '@agor/core/mcp';
 import {
   formatModelToolMismatchWarning,
@@ -2068,6 +2069,7 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
     if (query?.search !== undefined && !sqlPage) {
       throw new BadRequest('search is supported only for SQL-paginated session queries');
     }
+    assertSearchTerms(query?.search);
     if (sqlPage) {
       if (
         query?.$count === false &&

@@ -42,7 +42,7 @@ import {
   jsonExtract,
   lockRowForUpdate,
   runDatabaseTransaction,
-  searchTokensCondition,
+  searchCondition,
   select,
   txAsDb,
   update,
@@ -657,15 +657,6 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
       if (opts.sessionIds !== undefined)
         conditions.push(inArray(sessions.session_id, opts.sessionIds));
       if (opts.createdBy !== undefined) conditions.push(eq(sessions.created_by, opts.createdBy));
-      if (opts.search !== undefined) {
-        conditions.push(
-          searchTokensCondition(opts.search, [
-            jsonExtract(this.db, sessions.data, 'title'),
-            jsonExtract(this.db, sessions.data, 'description'),
-            sessions.agentic_tool,
-          ])
-        );
-      }
       if (opts.archived !== undefined) conditions.push(eq(sessions.archived, opts.archived));
       if (opts.visibleToUserId) {
         // Same branch.view policy either way; only the evaluation shape differs.
@@ -677,7 +668,21 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
             : inVisibleBranchSet(this.db, opts.visibleToUserId, sessions.branch_id, opts)
         );
       }
-      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+      let whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+      if (opts.search !== undefined) {
+        // Over the rows every other condition (visibility included) admits.
+        whereClause = searchCondition(this.db, {
+          id: sessions.session_id,
+          from: sql`${sessions} left join ${branches} on ${sessions.branch_id} = ${branches.branch_id}`,
+          scope: whereClause,
+          search: opts.search,
+          fields: [
+            jsonExtract(this.db, sessions.data, 'title'),
+            jsonExtract(this.db, sessions.data, 'description'),
+            sessions.agentic_tool,
+          ],
+        });
+      }
 
       // Exact totals remain the default for existing Feathers/findAll callers.
       let total: number | undefined;
