@@ -6,12 +6,21 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     conditions: ['source'],
-    alias: {
-      '@': path.resolve(__dirname, './src'),
+    alias: [
+      { find: '@', replacement: path.resolve(__dirname, './src') },
       // The repository-backed archive regression imports core source, whose
       // self-imports Vitest otherwise externalizes to unbuilt dist exports.
-      '@agor/core/types': path.resolve(__dirname, '../../packages/core/src/types/index.ts'),
-    },
+      {
+        find: '@agor/core/types',
+        replacement: path.resolve(__dirname, '../../packages/core/src/types/index.ts'),
+      },
+      // Its node environment resolves through SSR, without the `source`
+      // condition: the client package too would resolve to unbuilt dist.
+      {
+        find: /^@agor-live\/client$/,
+        replacement: path.resolve(__dirname, '../../packages/client/src/index.ts'),
+      },
+    ],
   },
   test: {
     globals: true,
