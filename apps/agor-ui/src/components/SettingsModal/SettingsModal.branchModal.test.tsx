@@ -4,10 +4,11 @@
  * empty (Step 3).
  */
 import type { AgorClient, Branch, Session, User } from '@agor-live/client';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { Grid } from 'antd';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { agorStore } from '../../store/agorStore';
+import { setRealtimeAuthorityScope } from '../../store/realtimeBatch';
 import { SettingsModal } from './SettingsModal';
 
 const branch = { branch_id: 'branch-1', repo_id: 'repo-1', name: 'feature' } as Branch;
@@ -21,18 +22,36 @@ vi.mock('./BranchesTable', () => ({
   ),
 }));
 vi.mock('../BranchModal', () => ({
-  BranchModal: ({ open, sessions }: { open: boolean; sessions: Session[] }) =>
-    open ? <div data-testid="branch-modal">{sessions.map((s) => s.title).join(',')}</div> : null,
+  BranchModal: ({
+    open,
+    sessions,
+    onClose,
+  }: {
+    open: boolean;
+    sessions: Session[];
+    onClose: () => void;
+  }) =>
+    open ? (
+      <div data-testid="branch-modal">
+        {sessions.map((s) => s.title).join(',')}
+        <button type="button" onClick={onClose}>
+          close branch
+        </button>
+      </div>
+    ) : null,
 }));
 
 beforeEach(() => {
   agorStore.getState().reset();
+  setRealtimeAuthorityScope('u1:admin:1');
   vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: true });
 });
 
-it("reads the opened branch's active sessions once", async () => {
-  const findAll = vi.fn(async () => [session]);
-  const client = { service: () => ({ findAll }) } as unknown as AgorClient;
+afterEach(() => setRealtimeAuthorityScope(null));
+
+const listeners = { on: () => {}, off: () => {} };
+
+function renderSettings(client: AgorClient) {
   render(
     <SettingsModal
       open
@@ -42,10 +61,31 @@ it("reads the opened branch's active sessions once", async () => {
       activeTab="branches"
     />
   );
+}
+
+it("reads the opened branch's active sessions once", async () => {
+  const findAll = vi.fn(async () => [session]);
+  const client = { service: () => ({ findAll, ...listeners }) } as unknown as AgorClient;
+  renderSettings(client);
   fireEvent.click(screen.getByRole('button', { name: 'open branch' }));
   expect(await screen.findByText('Fix it')).toBeInTheDocument();
   expect(findAll).toHaveBeenCalledTimes(1);
   expect(findAll).toHaveBeenCalledWith({
     query: { branch_id: 'branch-1', archived: false, $sort: { created_at: -1 } },
   });
+});
+
+it('never lets a read from an earlier opening of the same branch land', async () => {
+  const replies: Array<(sessions: Session[]) => void> = [];
+  const findAll = vi.fn(() => new Promise<Session[]>((resolve) => replies.push(resolve)));
+  const client = { service: () => ({ findAll, ...listeners }) } as unknown as AgorClient;
+  renderSettings(client);
+  fireEvent.click(screen.getByRole('button', { name: 'open branch' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'close branch' }));
+  fireEvent.click(screen.getByRole('button', { name: 'open branch' }));
+  expect(findAll).toHaveBeenCalledTimes(2);
+  await act(async () => replies[1]([{ ...session, title: 'Fresh' }]));
+  await act(async () => replies[0]([{ ...session, title: 'Stale' }]));
+  expect(screen.getByTestId('branch-modal')).toHaveTextContent('Fresh');
+  expect(screen.getByTestId('branch-modal')).not.toHaveTextContent('Stale');
 });
