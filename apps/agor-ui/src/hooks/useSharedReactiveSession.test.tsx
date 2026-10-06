@@ -4,13 +4,22 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { backgroundReadsClear } from '../store/backgroundReads';
 import { useSharedReactiveSession } from './useSharedReactiveSession';
 
-const { retain, release, handle } = vi.hoisted(() => {
-  const handle = {
-    state: { error: null, terminal: false },
+const { retain, release, handle, handleFor } = vi.hoisted(() => {
+  const make = (state: Record<string, unknown>) => ({
+    state: { error: null, terminal: false, ...state },
     subscribe: vi.fn(() => () => {}),
     ready: vi.fn(async () => {}),
+  });
+  const handle = make({});
+  const handles = new Map<string, ReturnType<typeof make>>();
+  const handleFor = (sessionId: string, state: Record<string, unknown>) =>
+    handles.set(sessionId, make({ sessionId, ...state }));
+  return {
+    retain: vi.fn((_client: unknown, sessionId: string) => handles.get(sessionId) ?? handle),
+    release: vi.fn(),
+    handle,
+    handleFor,
   };
-  return { retain: vi.fn(() => handle), release: vi.fn(), handle };
 });
 vi.mock('@agor-live/client', () => ({
   retainReactiveSession: retain,
@@ -62,4 +71,18 @@ it('a peek (not the open session) holds nothing', async () => {
   void backgroundReadsClear().then(() => (clear = true));
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(clear).toBe(true);
+});
+
+it("never shows the previous session's context-window projection after a switch", () => {
+  handleFor('session-a', {
+    latestContextWindow: { task_id: 'turn-a', computed_context_window: 7 },
+  });
+  handleFor('session-b', {});
+  const client = {} as AgorClient;
+  const { result, rerender } = renderHook(({ id }) => useSharedReactiveSession(client, id), {
+    initialProps: { id: 'session-a' },
+  });
+  expect(result.current.state?.latestContextWindow?.task_id).toBe('turn-a');
+  rerender({ id: 'session-b' });
+  expect(result.current.state?.latestContextWindow).toBeUndefined();
 });

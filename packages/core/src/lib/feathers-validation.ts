@@ -9,7 +9,7 @@ import { BadRequest } from '@feathersjs/errors';
 import { Ajv } from '@feathersjs/schema';
 import type { TObject, TProperties } from '@feathersjs/typebox';
 import { getValidator, Type } from '@feathersjs/typebox';
-import { MESSAGE_PAGINATION, PAGINATION } from '../config/constants';
+import { MESSAGE_PAGINATION, PAGINATION, TASK_PAGINATION } from '../config/constants';
 import { MAX_SEARCH_TOKENS, uniqueSearchTokens } from '../search/searchable-fields';
 import { AGENTIC_TOOL_NAMES, PERSISTED_AGENTIC_TOOL_NAMES } from '../types/agentic-tool';
 import {
@@ -196,6 +196,12 @@ export const taskQuerySchema = Type.Intersect(
             {
               $gt: Type.Optional(CommonSchemas.uuid),
               $lte: CommonSchemas.uuid,
+            },
+            { additionalProperties: false }
+          ),
+          Type.Object(
+            {
+              $in: Type.Array(CommonSchemas.uuid, { maxItems: TASK_PAGINATION.MAX_TASK_IDS }),
             },
             { additionalProperties: false }
           ),
