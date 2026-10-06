@@ -199,6 +199,53 @@ describe('pins', () => {
   });
 });
 
+describe('archived rows', () => {
+  beforeEach(() => {
+    agorStore.getState().reset();
+    resetHydrationRevisions();
+    discardRealtimeNow();
+    setRealtimeAuthorityScope(AUTHORITY);
+  });
+  afterEach(() => {
+    setRealtimeAuthorityScope(null);
+    discardRealtimeNow();
+    agorStore.getState().reset();
+  });
+
+  /** An archived deep-link target, filled for display. */
+  const fillArchived = (id: string, boardId: string) =>
+    agorStore.getState().applyMaps((prev) => ({
+      ...prev,
+      sessionById: new Map(prev.sessionById).set(id, {
+        ...session(id, 'br-1', boardId),
+        archived: true,
+      }),
+    }));
+
+  it('leave when the last pin on them is released', () => {
+    for (let i = 0; i < 20; i++) {
+      const release = pinRows({ sessions: [`s-archived-${i}`] });
+      fillArchived(`s-archived-${i}`, 'b9');
+      release();
+    }
+    expect(agorStore.getState().sessionById.size).toBe(0);
+  });
+
+  it("leave with their board's partition when nothing else holds them", () => {
+    seedBoard('b1', { branches: [branch('br-1', 'b1')], sessions: [] });
+    fillArchived('s-archived', 'b1');
+    evictBoard('b1');
+    expect(has('sessionById', 's-archived')).toBe(false);
+  });
+
+  it("survive a list replace of their board: they're outside every list", () => {
+    seedBoard('b1', { branches: [branch('br-1', 'b1')], sessions: [] });
+    fillArchived('s-archived', 'b1');
+    seedBoard('b1', { branches: [branch('br-1', 'b1')], sessions: [] });
+    expect(has('sessionById', 's-archived')).toBe(true);
+  });
+});
+
 describe('realtime admission (global hydration off)', () => {
   beforeEach(() => {
     agorStore.getState().reset();

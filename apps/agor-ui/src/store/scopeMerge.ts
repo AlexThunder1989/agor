@@ -379,6 +379,10 @@ const INCREMENTAL_SESSION_LIMIT = 64;
  *   branch was touched), and snapshot rows on a branch removed live during
  *   the load are skipped.
  *
+ * An archived session (a deep link's target, filled for display) is outside
+ * every list, so a list's replace keeps it; a retention eviction (`evict`,
+ * `retention.ts`) removes it like any other row nothing holds.
+ *
  * Returns `prev` unchanged when nothing changed. Never bumps revisions.
  */
 export function replaceScope(
@@ -386,7 +390,8 @@ export function replaceScope(
   scope: Pick<LoadScope, 'claims'>,
   rows: ScopeRows,
   touched: PartitionTouched,
-  others: readonly MemberLookup[]
+  others: readonly MemberLookup[],
+  { evict = false }: { evict?: boolean } = {}
 ): DataMaps {
   let maps = prev;
   const claims: LoadScope['claims'] = rows.complete === false ? {} : scope.claims;
@@ -432,10 +437,9 @@ export function replaceScope(
     const claim = claims.sessions;
     if (claim) {
       for (const [id, session] of maps.sessionById) {
-        // Archived rows are deep-link heals outside every list scope. A
-        // session whose branch was written live (moved onto the scope) is
+        // A session whose branch was written live (moved onto the scope) is
         // judged by that write, not by a read that predates it.
-        if (session.archived || returned.has(id) || touched('sessions', id)) continue;
+        if ((session.archived && !evict) || returned.has(id) || touched('sessions', id)) continue;
         if (session.branch_id && touched('branches', session.branch_id)) continue;
         if (!claim(session, maps) || claimedElsewhere('sessions', id)) continue;
         removals.push(session);

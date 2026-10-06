@@ -75,7 +75,7 @@ export function evictRows(claims: Claims, dropKeys: readonly ScopeKey[] = []): v
   let removedSessions: string[] = [];
   state.applyMaps(
     (prev) => {
-      const maps = replaceScope(prev, { claims }, NOTHING, never, holders);
+      const maps = replaceScope(prev, { claims }, NOTHING, never, holders, { evict: true });
       if (maps.sessionById === prev.sessionById) return maps;
       removedSessions = [...prev.sessionById.keys()].filter((id) => !maps.sessionById.has(id));
       const linked = removedSessions.filter((id) => maps.sessionMcpServerIds.has(id));
