@@ -356,10 +356,11 @@ turn of every orphaned session, including one that had already timed out. The
 banner names a stall only when the termination cause is `sdk_health_failure`,
 because the watchdog observes by default. Resume / Try again appear only on the latest
 FAILED or TIMED_OUT turn whose termination is neither `requested` nor
-`unverified` and that was not a user stop, and only while a prompt would start
-right away: the session is not executing and its queue is empty
-(`canSessionStartTurn`, the composer's rule; `ready_for_prompt` is not read
-because opening the session clears it). Try again (replay the
+`unverified` and that was not a user stop, and only while a new prompt would be
+dispatched rather than left queued (`canSessionStartTurn`): the queue is empty
+and the drainer's `sessionCanStartTask` holds, or the session is `failed`, which
+the prompt route repairs even after opening it cleared `ready_for_prompt`. An
+opened `timed_out` session gets no action, because nothing repairs it. Try again (replay the
 prompt) is offered only when the run never started; every other outcome,
 including an unconfirmed provider result, offers Resume.
 

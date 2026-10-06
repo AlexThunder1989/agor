@@ -25,27 +25,39 @@ async function openedAfterSettling(status: Session['status']): Promise<Session> 
 }
 
 describe('canSessionStartTurn', () => {
-  it.each([SessionStatus.FAILED, SessionStatus.TIMED_OUT, SessionStatus.IDLE])(
+  it.each([SessionStatus.FAILED, SessionStatus.IDLE])(
     'still allows a new turn after a %s session is opened',
     async (status) => {
       const opened = await openedAfterSettling(status);
       expect(opened.ready_for_prompt).toBe(false);
       expect(canSessionStartTurn(opened, 0)).toBe(true);
-      // The old gate read the unread flag and hid recovery once the session was opened.
-      if (status !== SessionStatus.IDLE) expect(isSessionPromptable(opened)).toBe(false);
+      // The prompt route repairs a failed session whose unread flag was cleared.
+      if (status === SessionStatus.FAILED) expect(isSessionPromptable(opened)).toBe(false);
     }
   );
+
+  it('offers no new turn on an opened timed-out session, where a prompt would stay queued', async () => {
+    const opened = await openedAfterSettling(SessionStatus.TIMED_OUT);
+    expect(opened.ready_for_prompt).toBe(false);
+    expect(canSessionStartTurn(opened, 0)).toBe(false);
+    expect(
+      canSessionStartTurn({ status: SessionStatus.TIMED_OUT, ready_for_prompt: true }, 0)
+    ).toBe(true);
+  });
 
   it.each([
     SessionStatus.RUNNING,
     SessionStatus.STOPPING,
     SessionStatus.AWAITING_PERMISSION,
     SessionStatus.AWAITING_INPUT,
-  ])('never starts a second turn while the session is %s', (status) => {
-    expect(canSessionStartTurn({ status }, 0)).toBe(false);
+    SessionStatus.COMPLETED,
+  ])('never starts a turn the drainer would not run while the session is %s', (status) => {
+    expect(canSessionStartTurn({ status, ready_for_prompt: true }, 0)).toBe(false);
   });
 
   it('never jumps a queued prompt', () => {
-    expect(canSessionStartTurn({ status: SessionStatus.FAILED }, 1)).toBe(false);
+    expect(canSessionStartTurn({ status: SessionStatus.IDLE, ready_for_prompt: true }, 1)).toBe(
+      false
+    );
   });
 });
