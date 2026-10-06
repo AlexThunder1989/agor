@@ -62,6 +62,7 @@ export interface TurnOutcomeContext {
 
 export const EDITS_KEPT = 'Any edits are kept.';
 export const NO_FILES_CHANGED = 'No files changed.';
+export const APPROVAL_TIMEOUT_MESSAGE = 'The agent stopped waiting for approval.';
 
 const LOST_CONNECTION = new Set([
   SAFE_MISSING_PROVIDER_RESULT_MESSAGE,
@@ -206,7 +207,7 @@ export function describeTurnOutcome(
     return {
       cause: 'approval_timeout',
       type: 'warning',
-      message: 'The agent stopped waiting for approval.',
+      message: APPROVAL_TIMEOUT_MESSAGE,
       detailsLead: `Approval requests expire after ${timeoutMs ? formatDuration(timeoutMs) : 'a while'}.`,
       action: 'resume',
     };
