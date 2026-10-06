@@ -86,6 +86,7 @@ describe('sendPromptWithReconciliation', () => {
         created_by: 'user-a',
         $sort: { task_id: -1 },
         $limit: 20,
+        $select: ['task_id', 'session_id', 'created_by', 'full_prompt'],
       },
     });
   });

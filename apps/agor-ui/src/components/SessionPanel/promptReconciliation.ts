@@ -20,12 +20,12 @@ interface PromptAttempt {
   prompt: string;
 }
 
-/** Task ids are server-generated UUIDv7s, so sorting by id orders this user's tasks by creation. */
+/** Newest-id-first; a task id the daemon generates for a new prompt is a UUIDv7 that sorts above every existing id. */
 async function findOwnTasks(
   client: AgorClient,
   attempt: PromptAttempt,
   limit: number,
-  select?: Array<keyof Task>
+  select: Array<keyof Task>
 ): Promise<Task[]> {
   const result = (await client.service('tasks').find({
     query: {
@@ -33,13 +33,13 @@ async function findOwnTasks(
       created_by: attempt.userId,
       $sort: { task_id: -1 },
       $limit: limit,
-      ...(select ? { $select: select } : {}),
+      $select: select,
     },
   })) as Task[] | { data: Task[] };
   return Array.isArray(result) ? result : result.data;
 }
 
-/** Never resends; only a matching task newer than the pre-send `baselineTaskId` (null: none existed) counts as landed. */
+/** Never resends; only a matching task above the pre-send max id `baselineTaskId` (null: none existed) counts as landed. */
 export async function reconcilePromptTransportFailure(
   getClient: () => AgorClient | null,
   attempt: PromptAttempt & { baselineTaskId: string | null },
@@ -49,7 +49,12 @@ export async function reconcilePromptTransportFailure(
   if (!client) return 'unknown';
 
   try {
-    const tasks = await findOwnTasks(client, attempt, RECENT_TASK_LIMIT);
+    const tasks = await findOwnTasks(client, attempt, RECENT_TASK_LIMIT, [
+      'task_id',
+      'session_id',
+      'created_by',
+      'full_prompt',
+    ]);
     const landed = tasks.some(
       (task) =>
         task.session_id === attempt.sessionId &&
@@ -80,7 +85,7 @@ export async function sendPromptWithReconciliation({
   isCurrent?: () => boolean;
   reconnectTimeoutMs?: number;
 }): Promise<boolean> {
-  // Server-side baseline so an identical earlier prompt cannot pass for this one; undefined if unavailable.
+  // Max existing task id, read from the server so an identical earlier prompt cannot pass for this one; undefined if unavailable.
   let baselineTaskId: string | null | undefined;
   const baselineClient = getClient();
   if (baselineClient) {
@@ -89,7 +94,6 @@ export async function sendPromptWithReconciliation({
       baselineTaskId = newest?.task_id ?? null;
     } catch (error) {
       if (isInFlightConnectionLossError(error)) {
-        console.error('Prompt not sent:', error);
         if (isCurrent()) showError(withConnectionErrorDetail(PROMPT_NOT_SENT_MESSAGE, error));
         return false;
       }
