@@ -5,51 +5,60 @@ import {
 } from '../../utils/connectionErrors';
 import { waitForConnectedClient } from './stopReconciliation';
 
-export type PromptTransportReconciliation = 'landed' | 'not_landed' | 'unknown';
+export type PromptTransportReconciliation = 'landed' | 'unknown';
 
 export const PROMPT_NOT_SENT_MESSAGE =
   "Couldn't send. The connection to Agor dropped, but your message is still in the box.";
 export const PROMPT_OUTCOME_UNKNOWN_MESSAGE =
   'The connection to Agor dropped as you sent this. Check the conversation before sending it again.';
 
-/** Tolerates browser/daemon clock drift when comparing `created_at` to the local send time. */
-const CLOCK_SKEW_TOLERANCE_MS = 30_000;
 const RECENT_TASK_LIMIT = 20;
 
 interface PromptAttempt {
   sessionId: string;
   userId: string;
   prompt: string;
-  sentAt: number;
 }
 
-/** Never resend from here: a lost acknowledgement may follow a committed task. */
+/** Task ids are server-generated UUIDv7s, so sorting by id orders this user's tasks by creation. */
+async function findOwnTasks(
+  client: AgorClient,
+  attempt: PromptAttempt,
+  limit: number,
+  select?: Array<keyof Task>
+): Promise<Task[]> {
+  const result = (await client.service('tasks').find({
+    query: {
+      session_id: attempt.sessionId,
+      created_by: attempt.userId,
+      $sort: { task_id: -1 },
+      $limit: limit,
+      ...(select ? { $select: select } : {}),
+    },
+  })) as Task[] | { data: Task[] };
+  return Array.isArray(result) ? result : result.data;
+}
+
+/** Never resends; only a matching task newer than the pre-send `baselineTaskId` (null: none existed) counts as landed. */
 export async function reconcilePromptTransportFailure(
   getClient: () => AgorClient | null,
-  attempt: PromptAttempt,
+  attempt: PromptAttempt & { baselineTaskId: string | null },
   reconnectTimeoutMs = 2_000
 ): Promise<PromptTransportReconciliation> {
   const client = await waitForConnectedClient(getClient, reconnectTimeoutMs);
   if (!client) return 'unknown';
 
   try {
-    const result = (await client.service('tasks').find({
-      query: {
-        session_id: attempt.sessionId,
-        created_by: attempt.userId,
-        $sort: { created_at: -1 },
-        $limit: RECENT_TASK_LIMIT,
-      },
-    })) as Task[] | { data: Task[] };
-    const tasks = Array.isArray(result) ? result : result.data;
+    const tasks = await findOwnTasks(client, attempt, RECENT_TASK_LIMIT);
     const landed = tasks.some(
       (task) =>
         task.session_id === attempt.sessionId &&
         task.created_by === attempt.userId &&
         task.full_prompt === attempt.prompt &&
-        Date.parse(task.created_at) >= attempt.sentAt - CLOCK_SKEW_TOLERANCE_MS
+        (attempt.baselineTaskId === null || task.task_id > attempt.baselineTaskId)
     );
-    return landed ? 'landed' : 'not_landed';
+    // No match may still mean the daemon is admitting it, so never claim it was not sent.
+    return landed ? 'landed' : 'unknown';
   } catch {
     return 'unknown';
   }
@@ -66,12 +75,29 @@ export async function sendPromptWithReconciliation({
 }: {
   send: () => Promise<unknown>;
   getClient: () => AgorClient | null;
-  attempt: Omit<PromptAttempt, 'sentAt'>;
+  attempt: PromptAttempt;
   showError: (message: string) => void;
   isCurrent?: () => boolean;
   reconnectTimeoutMs?: number;
 }): Promise<boolean> {
-  const sentAt = Date.now();
+  // Server-side baseline so an identical earlier prompt cannot pass for this one; undefined if unavailable.
+  let baselineTaskId: string | null | undefined;
+  const baselineClient = getClient();
+  if (baselineClient) {
+    try {
+      const [newest] = await findOwnTasks(baselineClient, attempt, 1, ['task_id']);
+      baselineTaskId = newest?.task_id ?? null;
+    } catch (error) {
+      if (isInFlightConnectionLossError(error)) {
+        console.error('Prompt not sent:', error);
+        if (isCurrent()) showError(withConnectionErrorDetail(PROMPT_NOT_SENT_MESSAGE, error));
+        return false;
+      }
+      // Any other failure only costs the landed check; the prompt is still sent.
+    }
+  }
+  if (!isCurrent()) return false;
+
   try {
     await send();
     return isCurrent();
@@ -85,19 +111,17 @@ export async function sendPromptWithReconciliation({
       }
       return false;
     }
-    const outcome = await reconcilePromptTransportFailure(
-      getClient,
-      { ...attempt, sentAt },
-      reconnectTimeoutMs
-    );
+    const outcome =
+      baselineTaskId === undefined
+        ? 'unknown'
+        : await reconcilePromptTransportFailure(
+            getClient,
+            { ...attempt, baselineTaskId },
+            reconnectTimeoutMs
+          );
     if (!isCurrent()) return false;
     if (outcome === 'landed') return true;
-    showError(
-      withConnectionErrorDetail(
-        outcome === 'not_landed' ? PROMPT_NOT_SENT_MESSAGE : PROMPT_OUTCOME_UNKNOWN_MESSAGE,
-        error
-      )
-    );
+    showError(withConnectionErrorDetail(PROMPT_OUTCOME_UNKNOWN_MESSAGE, error));
     return false;
   }
 }

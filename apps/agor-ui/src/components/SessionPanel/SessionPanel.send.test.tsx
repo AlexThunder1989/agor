@@ -1,4 +1,4 @@
-import type { AgorClient, Session, Task } from '@agor-live/client';
+import type { AgorClient, Session } from '@agor-live/client';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from 'antd';
 import { StrictMode } from 'react';
@@ -727,17 +727,27 @@ describe('SessionPanel send after a lost connection', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
-  function sendThroughLostConnection(tasks: Array<Partial<Task>> | null) {
+  // Outcome matrix lives in promptReconciliation.test.ts; this proves the composer wiring.
+  function sendThroughLostConnection(landed: boolean) {
     const showError = vi.fn();
-    const find = vi.fn().mockResolvedValue({ data: tasks ?? [] });
-    const reconnected = {
-      io: { connected: tasks !== null },
-      service: () => ({ find }),
-    } as unknown as AgorClient;
+    const find = vi.fn(async ({ query }: { query: { $limit: number } }) => ({
+      data:
+        query.$limit === 1 || !landed
+          ? []
+          : [
+              {
+                task_id: 'task-1',
+                session_id: 'session-1',
+                created_by: 'user-a',
+                full_prompt: 'Ship it',
+              },
+            ],
+    }));
+    const client = { io: { connected: true }, service: () => ({ find }) } as unknown as AgorClient;
     const onSendPrompt = (sessionId: string, prompt: string) =>
       sendPromptWithReconciliation({
         send: () => Promise.reject(new Error(SOCKET_DISCONNECTED_ERROR)),
-        getClient: () => reconnected,
+        getClient: () => client,
         attempt: { sessionId, userId: 'user-a', prompt },
         showError,
         reconnectTimeoutMs: 50,
@@ -750,36 +760,14 @@ describe('SessionPanel send after a lost connection', () => {
   }
 
   it('clears the composer without a toast when the prompt landed', async () => {
-    const { showError, textarea } = sendThroughLostConnection([
-      {
-        session_id: 'session-1' as Task['session_id'],
-        created_by: 'user-a',
-        full_prompt: 'Ship it',
-        created_at: new Date().toISOString(),
-      },
-    ]);
+    const { showError, textarea } = sendThroughLostConnection(true);
     await waitFor(() => expect(textarea).toHaveValue(''));
     expect(showError).not.toHaveBeenCalled();
-    expect(screen.queryByText(SOCKET_DISCONNECTED_ERROR)).not.toBeInTheDocument();
-  });
-
-  it('keeps the text with one toast when the prompt did not land', async () => {
-    const { showError, textarea } = sendThroughLostConnection([]);
-    await waitFor(() => expect(showError).toHaveBeenCalledOnce());
-    expect(showError).toHaveBeenCalledWith(
-      "Couldn't send. The connection to Agor dropped, but your message is still in the box. (socket has been disconnected)"
-    );
-    expect(textarea).toHaveValue('Ship it');
-    expect(screen.queryByText(SOCKET_DISCONNECTED_ERROR)).not.toBeInTheDocument();
   });
 
   it('keeps the text with one toast when the outcome is unknown', async () => {
-    const { showError, textarea } = sendThroughLostConnection(null);
+    const { showError, textarea } = sendThroughLostConnection(false);
     await waitFor(() => expect(showError).toHaveBeenCalledOnce());
-    expect(showError).toHaveBeenCalledWith(
-      'The connection to Agor dropped as you sent this. Check the conversation before sending it again. (socket has been disconnected)'
-    );
     expect(textarea).toHaveValue('Ship it');
-    expect(screen.queryByText(SOCKET_DISCONNECTED_ERROR)).not.toBeInTheDocument();
   });
 });
