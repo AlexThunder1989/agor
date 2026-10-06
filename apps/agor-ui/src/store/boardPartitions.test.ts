@@ -28,11 +28,14 @@ import {
 } from './agorRealtimeActions';
 import { agorStore } from './agorStore';
 import {
+  evictUnloadedBoards,
   loadBoardPartition,
   makeBoardReadySelector,
   partitionLoadMark,
   partitionLoadSince,
   partitionsLoadedSince,
+  RETAINED_BACKGROUND_PARTITIONS,
+  registerBoardUse,
   retryBoardPartition,
   selectBoardPartition,
 } from './boardPartitions';
@@ -695,6 +698,151 @@ describe('loadBoardPartition', () => {
     agorStore.getState().markGloballyHydrated(['sessions']);
     expect(holds('s-any')).toBe(true);
     expect(holds('br-any', 'branches')).toBe(false);
+  });
+});
+
+describe('partition LRU', () => {
+  beforeEach(() => {
+    agorStore.getState().reset();
+    resetHydrationRevisions();
+    discardRealtimeNow();
+    setRealtimeAuthorityScope(AUTHORITY);
+  });
+  afterEach(() => {
+    setRealtimeAuthorityScope(null);
+    discardRealtimeNow();
+    agorStore.getState().reset();
+    resetHydrationRevisions();
+  });
+
+  const boardRows = (boardId: string) => ({
+    branches: [branch(`br-${boardId}`, { board_id: boardId })],
+    sessions: [session(`s-${boardId}`, `br-${boardId}`, { branch_board_id: boardId })],
+    cards: [{ card_id: `k-${boardId}`, board_id: boardId, title: boardId } as CardWithType],
+  });
+  /** Load `boardId`'s partition: one branch, session and card of its own. */
+  async function loadBoard(boardId: string) {
+    const { client, release } = makePartitionClient({
+      ...boardRows(boardId),
+      board: fullBoard({ board_id: boardId }),
+    });
+    const load = loadBoardPartition(client, boardId, { canUseMemberWorkspaceServices: true });
+    release();
+    await load;
+  }
+  /** Display `boardId` (a board shell's use): loaded while used. */
+  async function visit(boardId: string, background = false) {
+    const release = registerBoardUse(boardId, background);
+    await loadBoard(boardId);
+    return release;
+  }
+  const loadedBoards = () =>
+    [...agorStore.getState().coverage.keys()]
+      .filter((key) => key.startsWith('board:'))
+      .map((key) => key.slice('board:'.length))
+      .sort();
+  const has = (map: 'branchById' | 'sessionById' | 'cardById', id: string) =>
+    agorStore.getState()[map].has(id);
+
+  it('keeps the displayed board and the most recently used background partitions', async () => {
+    expect(RETAINED_BACKGROUND_PARTITIONS).toBe(3);
+    let release = await visit('b1');
+    for (const boardId of ['b2', 'b3', 'b4', 'b5', 'b6']) {
+      release();
+      release = await visit(boardId);
+    }
+    // b6 displayed; b5, b4, b3 recently used; b1 and b2 evicted with their rows.
+    expect(loadedBoards()).toEqual(['b3', 'b4', 'b5', 'b6']);
+    for (const boardId of ['b1', 'b2']) {
+      expect(has('branchById', `br-${boardId}`)).toBe(false);
+      expect(has('sessionById', `s-${boardId}`)).toBe(false);
+      expect(has('cardById', `k-${boardId}`)).toBe(false);
+      expect(agorStore.getState().sessionsByBranch.has(`br-${boardId}`)).toBe(false);
+    }
+    for (const boardId of ['b3', 'b4', 'b5', 'b6'])
+      expect(has('sessionById', `s-${boardId}`)).toBe(true);
+    // Re-opening an evicted board reads it again.
+    release();
+    release = await visit('b1');
+    expect(loadedBoards()).toEqual(['b1', 'b4', 'b5', 'b6']);
+    expect(has('sessionById', 's-b1')).toBe(true);
+    release();
+  });
+
+  it("an evicted partition's rows stay while another scope holds them", async () => {
+    const lifetime = captureLoadLifetime()!;
+    agorStore.getState().setCoverage(USER_SCOPE_KEYS.sessions, {
+      status: 'loaded',
+      ...lifetime,
+      generation: 0,
+      members: { sessions: new Set(['s-b1']) },
+    });
+    let release = await visit('b1');
+    for (const boardId of ['b2', 'b3', 'b4', 'b5']) {
+      release();
+      release = await visit(boardId);
+    }
+    expect(loadedBoards()).not.toContain('b1');
+    // My session stays (the user scope holds it); its branch and the card leave.
+    expect(has('sessionById', 's-b1')).toBe(true);
+    expect(has('branchById', 'br-b1')).toBe(false);
+    expect(has('cardById', 'k-b1')).toBe(false);
+    release();
+  });
+
+  it('mounted background partitions are never evicted and are kept first', async () => {
+    const releases = [];
+    // Five mounted background consumers (an expanded mobile navigation).
+    for (const boardId of ['m1', 'm2', 'm3', 'm4', 'm5']) releases.push(await visit(boardId, true));
+    expect(loadedBoards()).toEqual(['m1', 'm2', 'm3', 'm4', 'm5']);
+    // Collapsing them releases them into the LRU: the three most recent stay.
+    for (const release of releases) release();
+    expect(loadedBoards()).toEqual(['m3', 'm4', 'm5']);
+    // A mounted one outranks a more recently released one.
+    const mounted = await visit('m6', true);
+    const shown = await visit('m7');
+    expect(loadedBoards()).toEqual(['m4', 'm5', 'm6', 'm7']);
+    mounted();
+    shown();
+  });
+
+  it('never evicts a partition still loading', async () => {
+    const pending = makePartitionClient(boardRows('slow'));
+    const releaseSlow = registerBoardUse('slow', true);
+    const slow = loadBoardPartition(pending.client, 'slow', {
+      canUseMemberWorkspaceServices: true,
+    });
+    releaseSlow();
+    const releases = [];
+    for (const boardId of ['b1', 'b2', 'b3', 'b4']) releases.push(await visit(boardId, true));
+    for (const release of releases) release();
+    expect(loadedBoards()).toEqual(['b2', 'b3', 'b4', 'slow']);
+    pending.release();
+    await slow;
+    expect(has('sessionById', 's-slow')).toBe(true);
+  });
+
+  it("drops an evicted session's MCP links and loaded mark", async () => {
+    let release = await visit('b1');
+    agorStore.getState().replaceMaps({ sessionMcpServerIds: new Map([['s-b1', ['mcp-1']]]) });
+    agorStore.getState().markSessionMcpLoaded('s-b1');
+    for (const boardId of ['b2', 'b3', 'b4', 'b5']) {
+      release();
+      release = await visit(boardId);
+    }
+    expect(has('sessionById', 's-b1')).toBe(false);
+    expect(agorStore.getState().sessionMcpServerIds.has('s-b1')).toBe(false);
+    expect(agorStore.getState().sessionMcpLoaded.has('s-b1')).toBe(false);
+    release();
+  });
+
+  it('evictUnloadedBoards removes the rows of boards without coverage only', async () => {
+    await loadBoard('b1');
+    await loadBoard('b2');
+    agorStore.getState().setCoverage(boardScopeKey('b1'), null);
+    evictUnloadedBoards(['b1', 'b2']);
+    expect(has('sessionById', 's-b1')).toBe(false);
+    expect(has('sessionById', 's-b2')).toBe(true);
   });
 });
 

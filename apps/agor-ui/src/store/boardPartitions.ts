@@ -36,6 +36,7 @@ import {
 } from './agorHydration';
 import { type AgorState, agorStore } from './agorStore';
 import { captureLoadLifetime, isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
+import { anyOf, evictRows } from './retention';
 import {
   BOARD_SCOPE_PREFIX,
   type BoardPartitionSnapshot,
@@ -118,28 +119,90 @@ export function nextPartitionGeneration(): number {
   return ++loadSequence;
 }
 
-// The boards the UI currently displays (registered by the board shells'
-// `useBoardPartition`; a `background` consumer never registers), in
-// registration order. The UI resolves its board from far more than the URL
-// (artifact routes, the mobile shell's fallbacks), so a reconnect resync
-// reconciles THIS board rather than re-deriving one from the URL.
-const displayedBoards = new Map<number, string>();
-let displayedSequence = 0;
+/**
+ * Background partitions the LRU keeps besides the displayed board: the most
+ * recently used ones (a mounted background consumer counts as in use now).
+ */
+export const RETAINED_BACKGROUND_PARTITIONS = 3;
 
-/** Record that the UI displays `boardId`; returns the unregister function. */
-export function registerDisplayedBoard(boardId: string): () => void {
-  const key = ++displayedSequence;
-  displayedBoards.set(key, boardId);
+// The mounted consumers of a board's partition (`useBoardPartition`), in
+// registration order: the board shells' displayed board, and background
+// consumers (mobile navigation, the teammate panel). The UI resolves its
+// board from far more than the URL (artifact routes, the mobile shell's
+// fallbacks), so a reconnect resync reconciles the displayed board rather
+// than re-deriving one from the URL.
+const boardUses = new Map<number, { boardId: string; background: boolean }>();
+let useSequence = 0;
+// When each board was last used (a use registered or released), for the LRU.
+const lastUsed = new Map<string, number>();
+
+/**
+ * Record that a mounted consumer uses `boardId`'s partition (displayed unless
+ * `background`); returns the release function. Both ends run the LRU.
+ */
+export function registerBoardUse(boardId: string, background = false): () => void {
+  const key = ++useSequence;
+  boardUses.set(key, { boardId, background });
+  lastUsed.set(boardId, key);
+  evictInactivePartitions();
   return () => {
-    displayedBoards.delete(key);
+    boardUses.delete(key);
+    lastUsed.set(boardId, ++useSequence);
+    evictInactivePartitions();
   };
 }
 
-/** The board the UI displays (the most recently registered one), if any. */
+/** The board the UI displays (the most recently registered displayed use), if any. */
 export function getDisplayedBoardId(): string | undefined {
   let latest: string | undefined;
-  for (const boardId of displayedBoards.values()) latest = boardId;
+  for (const use of boardUses.values()) if (!use.background) latest = use.boardId;
   return latest;
+}
+
+/**
+ * The LRU: keep every displayed board, and of the other partitions the
+ * `RETAINED_BACKGROUND_PARTITIONS` most recently used (mounted ones first);
+ * evict the rest that are not mounted or loading. Evicting a partition drops
+ * its coverage and the rows it claims that no other scope holds (`evictRows`).
+ */
+export function evictInactivePartitions(): void {
+  const displayed = new Set<string>();
+  const mounted = new Set<string>();
+  for (const use of boardUses.values()) (use.background ? mounted : displayed).add(use.boardId);
+  const { coverage } = agorStore.getState();
+  const background: string[] = [];
+  for (const key of coverage.keys()) {
+    if (!key.startsWith(BOARD_SCOPE_PREFIX)) continue;
+    const boardId = key.slice(BOARD_SCOPE_PREFIX.length);
+    if (!displayed.has(boardId)) background.push(boardId);
+  }
+  for (const boardId of lastUsed.keys()) {
+    if (!coverage.has(boardScopeKey(boardId)) && !mounted.has(boardId) && !displayed.has(boardId))
+      lastUsed.delete(boardId);
+  }
+  if (background.length <= RETAINED_BACKGROUND_PARTITIONS) return;
+  const recency = (boardId: string) =>
+    mounted.has(boardId) ? Number.POSITIVE_INFINITY : (lastUsed.get(boardId) ?? 0);
+  background.sort((a, b) => recency(b) - recency(a));
+  const evicted = background
+    .slice(RETAINED_BACKGROUND_PARTITIONS)
+    .filter(
+      (boardId) =>
+        !mounted.has(boardId) && coverage.get(boardScopeKey(boardId))?.status !== 'loading'
+    );
+  if (evicted.length === 0) return;
+  evictRows(anyOf(evicted.map(boardPartitionScope)), evicted.map(boardScopeKey));
+}
+
+/**
+ * The rows of `boardIds` whose partitions are unloaded (a reconnect resync
+ * dropped them), unless another scope holds them. A board loaded or loading
+ * again since keeps its rows.
+ */
+export function evictUnloadedBoards(boardIds: readonly string[]): void {
+  const { coverage } = agorStore.getState();
+  const unloaded = boardIds.filter((boardId) => !coverage.has(boardScopeKey(boardId)));
+  if (unloaded.length > 0) evictRows(anyOf(unloaded.map(boardPartitionScope)));
 }
 
 /**

@@ -65,6 +65,7 @@ import {
 } from '../store/agorStore';
 import {
   claimDisplayedBoardForResync,
+  evictUnloadedBoards,
   getDisplayedBoardId,
   nextPartitionGeneration,
   partitionLoadMark,
@@ -91,6 +92,7 @@ import {
   untombstoneSession,
 } from '../store/realtimeBatch';
 import {
+  BOARD_SCOPE_PREFIX,
   boardPartitionScope,
   boardScopeKey,
   type Coverage,
@@ -1179,8 +1181,17 @@ export function useAgorData(
         // among them) are already reconciled: they stay loaded. The reset
         // publishes with the rows and the displayed board's settle below, so
         // no update shows the board unloaded or its rows without coverage.
-        const resetCoverage = (coverage: Coverage) =>
-          silent ? withoutBoardPartitions(coverage, sparedBoardIds) : coverage;
+        // The boards the reset unloads lose their rows once the user scope
+        // is replaced (below).
+        let unloadedBoardIds: string[] = [];
+        const resetCoverage = (coverage: Coverage) => {
+          if (!silent) return coverage;
+          const next = withoutBoardPartitions(coverage, sparedBoardIds);
+          unloadedBoardIds = [...coverage.keys()]
+            .filter((key) => key.startsWith(BOARD_SCOPE_PREFIX) && !next.has(key))
+            .map((key) => key.slice(BOARD_SCOPE_PREFIX.length));
+          return next;
+        };
         // The displayed board reconciles (`replaceScope`, fenced like
         // everything above): rows written live during this load keep their
         // live value, and rows the board no longer has (deleted, moved or
@@ -1308,6 +1319,21 @@ export function useAgorData(
             // messages page); Home has no transcript, and small reads stay early.
             deferBulkRead: openedTranscriptReady ?? undefined,
           });
+        }
+        // Retention: the rows of the boards this resync unloaded leave unless
+        // a scope holds them — judged once the user scope is replaced under
+        // this lifetime, so my rows on those boards stay. A board displayed
+        // or loaded again meanwhile keeps its rows.
+        if (silent && unloadedBoardIds.length > 0) {
+          void (userScopeSettled ?? Promise.resolve())
+            .catch(() => undefined)
+            .then(() => {
+              if (!authorityIsCurrent()) return;
+              const displayed = getDisplayedBoardId();
+              evictUnloadedBoards(
+                unloadedBoardIds.filter((id) => id !== boardScope && id !== displayed)
+              );
+            });
         }
 
         debugTimer?.endIndexing();

@@ -5,7 +5,7 @@ import {
   loadBoardPartition,
   makeBoardPartitionSelector,
   makeBoardReadySelector,
-  registerDisplayedBoard,
+  registerBoardUse,
   retryBoardPartition,
   selectBoardPartition,
 } from '../store/boardPartitions';
@@ -18,10 +18,12 @@ import { isLoadLifetimeCurrent } from '../store/loadLifetime';
  * when the socket reconnects. Returns `boardReady` — gate every "absent means
  * none / no access" inference on it (invariant I1).
  *
- * The consumer registers `boardId` as the displayed board (the one a
- * reconnect resync reconciles first) unless it passes `background`: a
- * consumer that loads a board it doesn't display (mobile navigation
+ * The consumer registers its use of `boardId`: as the displayed board (the
+ * one a reconnect resync reconciles first) unless it passes `background`, so
+ * a consumer that loads a board it doesn't display (mobile navigation
  * expanding another board) never takes that priority from the board shell.
+ * Once released, the partition stays among the recently used background
+ * partitions until the LRU evicts it (`evictInactivePartitions`).
  */
 export function useBoardPartition(
   client: AgorClient | null,
@@ -68,11 +70,11 @@ export function useBoardPartition(
     partitionEpoch,
   ]);
 
-  // Publish the displayed board, so a reconnect resync reconciles this board
-  // in place (see `registerDisplayedBoard`).
+  // Publish the use: a reconnect resync reconciles the displayed board in
+  // place, and the LRU never evicts a mounted board (`registerBoardUse`).
   useEffect(() => {
-    if (background || !boardId || !boardKnown) return;
-    return registerDisplayedBoard(boardId);
+    if (!boardId || !boardKnown) return;
+    return registerBoardUse(boardId, background);
   }, [background, boardId, boardKnown]);
 
   // A failed load retries automatically once the socket reconnects.

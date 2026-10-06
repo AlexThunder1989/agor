@@ -6,7 +6,7 @@ import { agorStore } from '../store/agorStore';
 import {
   getDisplayedBoardId,
   loadBoardPartition,
-  registerDisplayedBoard,
+  registerBoardUse,
   selectBoardPartition,
 } from '../store/boardPartitions';
 import { discardRealtimeNow, setRealtimeAuthorityScope } from '../store/realtimeBatch';
@@ -85,7 +85,7 @@ describe('useBoardPartition', () => {
         ['board-2', { board_id: 'board-2', name: 'Other' } as never],
       ])
     );
-    const unregister = registerDisplayedBoard(BOARD);
+    const unregister = registerBoardUse(BOARD);
     const { client, sessionReads, releaseAll } = makeClient();
     const background = renderHook(() =>
       useBoardPartition(client, 'board-2', {

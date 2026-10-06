@@ -20,7 +20,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { getRevision } from '../store/agorHydration';
 import { agorStore } from '../store/agorStore';
-import { registerDisplayedBoard, selectBoardPartition } from '../store/boardPartitions';
+import { registerBoardUse, selectBoardPartition } from '../store/boardPartitions';
 // Session `patched`/`updated` writes are coalesced to one flush per frame (see
 // realtimeBatch); flush synchronously in tests that assert the post-patch store.
 import { flushRealtimeNow } from '../store/realtimeBatch';
@@ -2371,7 +2371,7 @@ describe('useAgorData — reconnect follows the board the UI displays', () => {
     await waitForInitialLoad(result);
     await flush();
     // The UI resolved the artifact's board and shows it (useBoardPartition).
-    const unregister = registerDisplayedBoard('board-art');
+    const unregister = registerBoardUse('board-art');
     onTestFinished(unregister);
 
     act(() => emitIo('connect'));
@@ -2886,5 +2886,42 @@ describe('useAgorData — scoped reconnect (global hydration off)', () => {
     // Unmarked, but the capped read can't prove it: it stays.
     expect(state.branchById.has('mate-unmarked')).toBe(true);
     expect(state.branchById.has('mate-1')).toBe(true);
+  });
+
+  it("a reconnect evicts the unloaded boards' rows that no scope holds", async () => {
+    withoutGlobalHydration();
+    const { server } = workspace();
+    const { emitIo } = await connectedWorkspace(server);
+    // Another loaded board with someone else's rows, and my board C.
+    agorStore.getState().applyMaps((prev) => ({
+      ...prev,
+      branchById: new Map(prev.branchById).set(
+        'b-B',
+        makeBranch({ branch_id: 'b-B', board_id: 'board-B', created_by: 'user-other' }) as never
+      ),
+      sessionById: new Map(prev.sessionById).set(
+        's-B',
+        makeSession({
+          session_id: 's-B',
+          branch_id: 'b-B',
+          branch_board_id: 'board-B',
+          created_by: 'user-other',
+        }) as never
+      ),
+    }));
+    markBoardLoaded('board-B');
+    markBoardLoaded('board-C');
+
+    act(() => emitIo('connect'));
+    await waitFor(() => expect(agorStore.getState().branchById.has('b-B')).toBe(false));
+    await flush();
+    const state = agorStore.getState();
+    expect(state.sessionById.has('s-B')).toBe(false);
+    // Board C's rows are mine: the user scope holds them.
+    expect(state.branchById.has('b-mine')).toBe(true);
+    expect(state.sessionById.has('s-mine')).toBe(true);
+    // The displayed board keeps its rows.
+    expect(state.branchById.has('b-A')).toBe(true);
+    expect(state.sessionById.has('s-A')).toBe(true);
   });
 });

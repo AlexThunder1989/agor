@@ -279,7 +279,7 @@ derived when a replace asks. A board is ready only when its partition is loaded 
 
 ### 4.5 Caching and reconnect
 
-- No eviction.
+- Eviction: see Retention (C2) below.
 - **Step 2:** a reconnect refetches board objects and cards for the displayed board only.
 - **Step 3:** a reconnect replaces the displayed partition and the user scope (§3.8). Other partitions are marked unloaded and their non-scope rows dropped.
 - Add an LRU only if the S11 measurements call for it.
@@ -287,6 +287,12 @@ derived when a replace asks. A board is ready only when its partition is loaded 
   sessions, annotations, record) that respects the other scopes' committed members, so a re-opened board drops rows
   deleted while it was unloaded. The fill-only partition merge is gone. A session whose branch was written live during
   the read is fenced like the branch.
+- **Retention (C2).** A row stays while some scope holds it. `useBoardPartition` registers every mounted use
+  (`registerBoardUse`); the LRU keeps the displayed board plus `RETAINED_BACKGROUND_PARTITIONS` (3) most recently used
+  background partitions, mounted ones first, and never evicts a mounted or loading one. Evicting drops the coverage
+  and runs `replaceScope` with an empty snapshot over the board's rows (`store/retention.ts`): rows another scope's
+  members hold stay. Evicted sessions' MCP links go with them. A reconnect evicts the boards it unloaded the same way
+  once the user scope is replaced.
 
 ## 5. Realtime
 

@@ -375,7 +375,7 @@ const INCREMENTAL_SESSION_LIMIT = 64;
  */
 export function replaceScope(
   prev: DataMaps,
-  scope: LoadScope,
+  scope: Pick<LoadScope, 'claims'>,
   rows: ScopeRows,
   touched: PartitionTouched,
   others: readonly MemberLookup[]
