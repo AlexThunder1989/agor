@@ -15,6 +15,7 @@ import {
 import { Badge, Button, Checkbox, Empty, Select, Space, Typography, theme } from 'antd';
 import { useMemo, useState } from 'react';
 import { useAppActions } from '../../contexts/AppActionsContext';
+import { useEnsureBranches, useEnsureSessions } from '../../hooks/useEnsureRows';
 import type { SocketEvent } from '../../hooks/useEventStream';
 import { useAgorStore } from '../../store/agorStore';
 import {
@@ -41,6 +42,18 @@ export interface EventStreamPanelProps {
   branchActions?: BranchActions;
   currentBoard?: Board | null;
   client: AgorClient | null;
+}
+
+/** Debounce of the label reads: events arrive in bursts. */
+const EVENT_LABEL_DEBOUNCE_MS = 1000;
+
+/** An event payload's string id field, or ''. */
+function eventDataId(event: SocketEvent, key: 'session_id' | 'branch_id'): string {
+  const value =
+    event.data && typeof event.data === 'object'
+      ? (event.data as Record<string, unknown>)[key]
+      : undefined;
+  return typeof value === 'string' ? value : '';
 }
 
 export const EventStreamPanel: React.FC<EventStreamPanelProps> = ({
@@ -167,6 +180,23 @@ export const EventStreamPanel: React.FC<EventStreamPanelProps> = ({
     eventTypeFilters,
     crudOperationFilters,
   ]);
+
+  // The store holds only the loaded scopes: read the sessions and branches the
+  // shown events name (or their sessions' branches), debounced and each once.
+  useEnsureSessions(
+    client,
+    filteredEvents.map((event) => eventDataId(event, 'session_id')),
+    EVENT_LABEL_DEBOUNCE_MS
+  );
+  useEnsureBranches(
+    client,
+    filteredEvents.map(
+      (event) =>
+        eventDataId(event, 'branch_id') ||
+        (sessionById.get(eventDataId(event, 'session_id'))?.branch_id ?? '')
+    ),
+    EVENT_LABEL_DEBOUNCE_MS
+  );
 
   const totalCount = displayEvents.length;
   const displayCount = filteredEvents.length;
