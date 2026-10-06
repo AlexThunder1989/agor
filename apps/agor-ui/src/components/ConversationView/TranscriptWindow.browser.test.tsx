@@ -251,6 +251,14 @@ it('trims as soon as a reader wheels back to the latest turns, before another tu
     await scrollTo(viewport, viewport.scrollTop + step);
   }
   expect(mountedTurns(viewport)).toEqual(range(5, 49));
+  // Into the hook's near-bottom zone, where its lock engages, but short of the
+  // end: the reader may still be reading, so nothing is trimmed or moved.
+  const nearBottom = viewport.scrollTop + distanceFromBottom(viewport) - 50;
+  viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: 70, bubbles: true }));
+  await scrollTo(viewport, nearBottom);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(mountedTurns(viewport)).toEqual(range(5, 49));
+  expect(Math.abs(viewport.scrollTop - nearBottom)).toBeLessThan(1);
   const latest = screen.getByText(/Answer 49\./);
   const remaining = distanceFromBottom(viewport);
   const latestTop = latest.getBoundingClientRect().top;
@@ -408,6 +416,7 @@ it('keeps a reader who pages up or drags the scrollbar right after jump-to-botto
     viewport.scrollTop -= viewport.clientHeight / 2;
   });
   await settle();
+  act(() => focused.dispatchEvent(new KeyboardEvent('keyup', { key: 'PageUp', bubbles: true })));
   expect(distanceFromBottom(viewport)).toBeGreaterThan(viewport.clientHeight / 4);
 
   // So does a drag on the scrollbar, which belongs to the scroller itself.
@@ -421,6 +430,33 @@ it('keeps a reader who pages up or drags the scrollbar right after jump-to-botto
   expect(distanceFromBottom(viewport)).toBeGreaterThan(viewport.clientHeight / 4);
   expect(mountedTurns(viewport)).toEqual(range(0, 19));
 
+  // Also while content grows: addTurn resolves after the growth was observed
+  // (the hook's resize guard is up) and before its follow-scroll lands.
+  act(() => jumpToBottom!());
+  await settle();
+  await addTurn();
+  act(() => {
+    viewport.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, buttons: 1 }));
+    viewport.scrollTop -= viewport.clientHeight / 2;
+  });
+  await settle();
+  act(() => viewport.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })));
+  expect(distanceFromBottom(viewport)).toBeGreaterThan(viewport.clientHeight / 4);
+
+  // Shift+Space on a focused control activates it and scrolls nothing: the
+  // reader stays parked and the next turn is followed.
+  act(() => jumpToBottom!());
+  await settle();
+  const control = viewport.querySelector<HTMLElement>('[data-task-block] button')!;
+  act(() => {
+    control.dispatchEvent(
+      new KeyboardEvent('keydown', { key: ' ', shiftKey: true, bubbles: true })
+    );
+    control.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', shiftKey: true, bubbles: true }));
+  });
+  await addTurn();
+  await waitFor(() => expect(distanceFromBottom(viewport)).toBeLessThan(2), { timeout: 5_000 });
+
   // End agrees with the jump: the reader stays parked, following and trimmed.
   act(() => {
     jumpToBottom!();
@@ -429,7 +465,7 @@ it('keeps a reader who pages up or drags the scrollbar right after jump-to-botto
   });
   await settle();
   for (let i = 0; i < 11; i++) await addTurn();
-  await waitFor(() => expect(mountedTurns(viewport)).toEqual(range(1, 30)), { timeout: 5_000 });
+  await waitFor(() => expect(mountedTurns(viewport)).toEqual(range(3, 32)), { timeout: 5_000 });
   await waitFor(() => expect(distanceFromBottom(viewport)).toBeLessThan(2), { timeout: 5_000 });
 });
 

@@ -33,10 +33,10 @@ import { HistoryTextChoices, historyTextKeyTurn } from '../MessageBlock/HistoryM
 import { TaskBlock } from '../TaskBlock';
 import {
   afterScrollSettles,
-  escapeOnReaderScroll,
   isBottomLockEngaged,
   jumpToBottom,
   resetScrollBaseline,
+  watchReaderScroll,
 } from './stickToBottomLock';
 
 const { Text } = Typography;
@@ -199,6 +199,9 @@ const ConversationViewInner = React.memo<ConversationViewProps>(
     // A queue/composer resize changes only the latter. Reconcile through the
     // same bottom lock so a scrolled-up reader is never pulled away.
     const viewportCleanupRef = useRef<(() => void) | null>(null);
+    // Whether the reader's last scroll left them at the end, not only near it:
+    // the parked trim waits for the end (see watchReaderScroll).
+    const [readerAtEnd, setReaderAtEnd] = useState(true);
     const setScrollViewport = useCallback(
       (element: HTMLDivElement | null) => {
         viewportCleanupRef.current?.();
@@ -206,7 +209,7 @@ const ConversationViewInner = React.memo<ConversationViewProps>(
         scrollRef(element);
         if (!element) return;
         resetScrollBaseline(state);
-        const stopEscapes = escapeOnReaderScroll(element, state, stopScroll);
+        const stopWatching = watchReaderScroll(element, state, stopScroll, setReaderAtEnd);
         let height = element.clientHeight;
         let resizeGeneration = 0;
         let guardedDifference = 0;
@@ -236,7 +239,7 @@ const ConversationViewInner = React.memo<ConversationViewProps>(
         });
         observer.observe(element);
         viewportCleanupRef.current = () => {
-          stopEscapes();
+          stopWatching();
           ++resizeGeneration;
           observer.disconnect();
           if (state.resizeDifference === guardedDifference) state.resizeDifference = 0;
@@ -481,7 +484,8 @@ const ConversationViewInner = React.memo<ConversationViewProps>(
         loadingOlder ||
         tasks.length <= LEAN_TRANSCRIPT_TASK_WINDOW ||
         // The rendered flags re-run this when the reader returns to the bottom.
-        !isAtBottom
+        !isAtBottom ||
+        !readerAtEnd
       )
         return;
       const trim = () => {
@@ -505,6 +509,7 @@ const ConversationViewInner = React.memo<ConversationViewProps>(
       tasks.length,
       isAtBottom,
       escapedFromLock,
+      readerAtEnd,
       loadingOlder,
       scrollRef,
       state,

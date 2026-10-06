@@ -32,8 +32,9 @@ _A coordinator session fanned out to eight parallel security-review children, ea
 Long user and assistant messages in older turns start collapsed, with **show more**
 to reveal the full text. The latest whole turn and live turns stay expanded; a new
 turn never automatically collapses text you were already reading. Your explicit
-**show more / show less** choices last while that conversation is mounted, including
-reconnects and tool-detail loading. Reopening it applies the history defaults again.
+**show more / show less** choices last while that turn stays loaded, including
+reconnects and tool-detail loading. A turn loaded again after it was trimmed, or a
+reopened conversation, starts from the history defaults.
 
 Collapsed messages show a shortened preview. Expand the message to use code or
 table export controls. The message copy action still copies the full source;
