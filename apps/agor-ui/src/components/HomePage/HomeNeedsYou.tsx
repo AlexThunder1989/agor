@@ -1,6 +1,8 @@
 import type { AgorClient } from '@agor-live/client';
 import { Alert, Segmented } from 'antd';
-import { memo } from 'react';
+import { memo, useCallback } from 'react';
+import { useEnsureBranches, useEnsureSessions } from '../../hooks/useEnsureRows';
+import { type AgorState, useAgorStore } from '../../store/agorStore';
 import type { HomeCommentNeed, HomeNeed, HomeSessionNeed } from '../../store/selectors';
 import { HomeCommentRow, HomeList, HomeNeedRow } from './HomeRow';
 import { HomeCard, HomeLink, HomeSection, HomeShowMore, HomeSkeleton } from './HomeSection';
@@ -82,6 +84,31 @@ export const HomeNeedsYou = memo(function HomeNeedsYou({
   markAllReadDisabled,
   onArchive,
 }: HomeNeedsYouProps) {
+  // The store holds only the loaded scopes: read the shown comment rows'
+  // target sessions, and the branches their chips name, by id.
+  const targets = needs
+    .flatMap((need) => ('session' in need ? [] : [need.thread]))
+    .map((thread) => `${thread.branch_id ?? ''} ${thread.session_id ?? ''}`)
+    .join(',');
+  useEnsureSessions(
+    client,
+    targets.split(',').map((target) => target.split(' ')[1])
+  );
+  const branchKey = useAgorStore(
+    useCallback(
+      (s: AgorState) =>
+        targets
+          .split(',')
+          .map((target) => {
+            const [branchId, sessionId] = target.split(' ');
+            return branchId || s.sessionById.get(sessionId)?.branch_id || '';
+          })
+          .join(','),
+      [targets]
+    )
+  );
+  useEnsureBranches(client, branchKey.split(','));
+
   const total = Math.min(filter === 'comments' ? commentCount : needsCount, NEEDS_MAX);
   const hidden = total - NEEDS_PREVIEW;
   const sessions =
