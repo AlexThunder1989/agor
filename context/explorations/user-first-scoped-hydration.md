@@ -301,6 +301,10 @@ derived when a replace asks. A board is ready only when its partition is loaded 
   loaded board joins that board's membership; no eviction sweeps rows outside the scope or pins it releases. An
   eviction counts stale-lifetime scopes too, so a release while disconnected never frees my rows. Archived deep-link
   rows are not evicted (`replaceScope` never removes archived sessions).
+- **Foreground priority (C2).** All reads share one socket, so a background partition's session pages sent first
+  delay the open transcript. The open session's panel (`useSharedReactiveSession({ foreground })`) and a displayed
+  board's partition load hold background partition loads (`store/backgroundReads.ts`), which send no read until the
+  holds settle (bounded at 10 s). A load already in flight is not preempted.
 
 ## 5. Realtime
 

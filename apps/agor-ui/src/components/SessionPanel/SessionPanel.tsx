@@ -541,6 +541,8 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
   const reactiveSessionId = session?.session_id ?? null;
   const { state: reactiveSessionState } = useSharedReactiveSession(client, reactiveSessionId, {
     enabled: open,
+    // The open session: background partition reads wait for its first page.
+    foreground: true,
     // ConversationView retains the same lean handle. Keeping the cache key
     // identical collapses duplicate Session bootstrap/reconnect reads while
     // preserving paged history without eager historical tool hydration.

@@ -35,6 +35,7 @@ import {
   wholesaleReplacedSince,
 } from './agorHydration';
 import { type AgorState, agorStore } from './agorStore';
+import { backgroundReadsClear, holdBackgroundReads } from './backgroundReads';
 import { captureLoadLifetime, isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
 import { anyOf, evictRows } from './retention';
 import {
@@ -348,12 +349,14 @@ async function fetchBoardPartition(
  * is cancelled (lifetime ended) or superseded releases its entry instead of
  * leaving the board stuck in `loading`. A load whose every attempt spans a
  * wholesale replacement never applies: it records a retryable error. The
- * snapshot and the `loaded` entry publish in one store update.
+ * snapshot and the `loaded` entry publish in one store update. A displayed
+ * board's load holds background ones (`background`), which send no read
+ * until the foreground reads settle (`backgroundReads.ts`).
  */
 export function loadBoardPartition(
   client: AgorClient,
   boardId: string,
-  options: { canUseMemberWorkspaceServices: boolean }
+  options: { canUseMemberWorkspaceServices: boolean; background?: boolean }
 ): Promise<void> {
   // Captured before the first await, like every load (see `loadLifetime`).
   const lifetime = captureLoadLifetime();
@@ -371,6 +374,12 @@ export function loadBoardPartition(
   const isCurrent = () => isLoadLifetimeCurrent(lifetime) && ownsLoading(boardId, generation);
   const run = async () => {
     setBoardPartition(boardId, { status: 'loading', authorityScope, loadEpoch, generation });
+    // A background board's reads queue behind the foreground ones on the one
+    // socket: send none until the open transcript and displayed board settle.
+    if (options.background) {
+      await backgroundReadsClear();
+      if (!isCurrent()) return;
+    }
     for (let attempt = 0; ; attempt++) {
       const fence = beginPartitionLoad();
       try {
@@ -423,5 +432,6 @@ export function loadBoardPartition(
     if (ownsLoading(boardId, generation)) setBoardPartition(boardId, null);
   });
   inflight.set(key, promise);
+  if (!options.background) holdBackgroundReads(promise);
   return promise;
 }

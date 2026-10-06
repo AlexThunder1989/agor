@@ -57,7 +57,7 @@ export function useBoardPartition(
     if (current && isLoadLifetimeCurrent(current) && (status === 'loading' || status === 'error')) {
       return;
     }
-    void loadBoardPartition(client, boardId, { canUseMemberWorkspaceServices });
+    void loadBoardPartition(client, boardId, { canUseMemberWorkspaceServices, background });
   }, [
     boardId,
     boardKnown,
@@ -68,6 +68,7 @@ export function useBoardPartition(
     status,
     authority,
     partitionEpoch,
+    background,
   ]);
 
   // Publish the use: a reconnect resync reconciles the displayed board in

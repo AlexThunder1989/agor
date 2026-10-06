@@ -27,6 +27,7 @@ import {
   sessionPatched,
 } from './agorRealtimeActions';
 import { agorStore } from './agorStore';
+import { holdBackgroundReads } from './backgroundReads';
 import {
   evictUnloadedBoards,
   loadBoardPartition,
@@ -843,6 +844,61 @@ describe('partition LRU', () => {
     evictUnloadedBoards(['b1', 'b2']);
     expect(has('sessionById', 's-b1')).toBe(false);
     expect(has('sessionById', 's-b2')).toBe(true);
+  });
+});
+
+describe('foreground priority', () => {
+  beforeEach(() => {
+    agorStore.getState().reset();
+    resetHydrationRevisions();
+    discardRealtimeNow();
+    setRealtimeAuthorityScope(AUTHORITY);
+  });
+  afterEach(() => {
+    setRealtimeAuthorityScope(null);
+    discardRealtimeNow();
+    agorStore.getState().reset();
+  });
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("a background partition sends no read until the open session's transcript settles", async () => {
+    let transcriptLanded!: () => void;
+    holdBackgroundReads(new Promise<void>((resolve) => (transcriptLanded = resolve)));
+    const background = makePartitionClient({ sessions: [session('s-1', 'br-1')] });
+    const load = loadBoardPartition(background.client, BOARD, {
+      canUseMemberWorkspaceServices: true,
+      background: true,
+    });
+    await settle();
+    expect(background.calls).toEqual([]);
+    transcriptLanded();
+    await settle();
+    expect(background.calls).toContain('sessions');
+    background.release();
+    await load;
+    expect(agorStore.getState().sessionById.has('s-1')).toBe(true);
+  });
+
+  it('the displayed board reads at once, and background partitions wait for it', async () => {
+    const displayed = makePartitionClient({});
+    const shown = loadBoardPartition(displayed.client, BOARD, {
+      canUseMemberWorkspaceServices: true,
+    });
+    expect(displayed.calls).toContain('sessions');
+    const background = makePartitionClient({});
+    const other = loadBoardPartition(background.client, 'board-2', {
+      canUseMemberWorkspaceServices: true,
+      background: true,
+    });
+    await settle();
+    expect(background.calls).toEqual([]);
+    displayed.release();
+    await shown;
+    await settle();
+    expect(background.calls).toContain('sessions');
+    background.release();
+    await other;
   });
 });
 
