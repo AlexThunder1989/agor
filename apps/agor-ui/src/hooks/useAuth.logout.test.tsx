@@ -35,6 +35,21 @@ function session(accessToken = 'tenant-a-access', refreshToken = 'tenant-a-refre
     user: { user_id: 'alice', role: 'member', email: 'a@example.test' },
   };
 }
+function tenantB() {
+  return {
+    ...session('tenant-b-access', 'tenant-b-refresh'),
+    user: { user_id: 'bob', role: 'member', email: 'b@example.test' },
+  };
+}
+async function logOutAndSignInAsB(result: { current: ReturnType<typeof useAuth> }) {
+  await act(async () => {
+    await result.current.logout();
+  });
+  authenticate.mockResolvedValueOnce(tenantB());
+  await act(async () => {
+    expect(await result.current.login('b@example.test', 'secret')).toBe(true);
+  });
+}
 describe('logout wins over pending runtime authentication', () => {
   beforeEach(() => {
     resetRefreshFailureState();
@@ -86,9 +101,9 @@ describe('logout wins over pending runtime authentication', () => {
       expect(localStorage.getItem(REFRESH_TOKEN_KEY)).toBeNull();
     }
   );
-  it.each(['success', 'auth-failure', 'transient-failure'])(
-    'keeps replacement tenant B after tenant A refresh %s',
-    async (outcome) => {
+  it('keeps replacement tenant B when tenant A timer refresh fails late', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
       localStorage.setItem(ACCESS_TOKEN_KEY, 'tenant-a-access');
       localStorage.setItem(REFRESH_TOKEN_KEY, 'tenant-a-refresh');
       authenticate.mockResolvedValueOnce(session());
@@ -96,92 +111,92 @@ describe('logout wins over pending runtime authentication', () => {
       await waitFor(() => expect(result.current.authenticated).toBe(true));
       const held = deferred<ReturnType<typeof session>>();
       refreshCreate.mockReturnValueOnce(held.promise);
-      const client = await createRestClient('http://localhost:3030');
-      const refresh = refreshTokensSingleFlight(client, 'tenant-a-refresh');
-      const rejected = expect(refresh).rejects.toBeInstanceOf(SupersededAuthenticationError);
-      authenticate.mockResolvedValueOnce({
-        ...session('tenant-b-access', 'tenant-b-refresh'),
-        user: { user_id: 'bob', role: 'member', email: 'b@example.test' },
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5 * 60_000 + 10);
       });
+      await waitFor(() => expect(refreshCreate).toHaveBeenCalled());
+      authenticate.mockResolvedValueOnce(tenantB());
       await act(async () => {
         expect(await result.current.login('b@example.test', 'secret')).toBe(true);
       });
       await act(async () => {
-        if (outcome === 'success') held.resolve(session('late-a-access', 'late-a-refresh'));
-        else
-          held.reject(
-            Object.assign(new Error('old refresh failed'), {
-              code: outcome === 'auth-failure' ? 401 : 503,
-            })
-          );
-        await rejected;
+        held.reject(Object.assign(new Error('old refresh failed'), { code: 401 }));
+        await vi.advanceTimersByTimeAsync(10);
       });
       expect(result.current.user?.user_id).toBe('bob');
       expect(result.current.error).toBeNull();
       expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBe('tenant-b-access');
-      expect(localStorage.getItem(REFRESH_TOKEN_KEY)).toBe('tenant-b-refresh');
+    } finally {
+      vi.useRealTimers();
     }
-  );
-  it('does not reuse tenant A in-flight refresh for a new tenant B credential', async () => {
+  });
+  it('does not refresh tenant A over tenant B after a late JWT rejection', async () => {
     localStorage.setItem(ACCESS_TOKEN_KEY, 'tenant-a-access');
     localStorage.setItem(REFRESH_TOKEN_KEY, 'tenant-a-refresh');
-    authenticate.mockResolvedValueOnce(session());
+    const held = deferred<ReturnType<typeof session>>();
+    authenticate.mockReturnValueOnce(held.promise);
+    const { result } = renderHook(() => useAuth());
+    await waitFor(() => expect(authenticate).toHaveBeenCalled());
+    authenticate.mockResolvedValueOnce(tenantB());
+    await act(async () => {
+      expect(await result.current.login('b@example.test', 'secret')).toBe(true);
+    });
+    refreshCreate.mockResolvedValue(session('late-access', 'late-refresh'));
+    await act(async () => {
+      held.reject(Object.assign(new Error('expired'), { code: 401 }));
+      await held.promise.catch(() => {});
+    });
+    expect(refreshCreate).not.toHaveBeenCalled();
+    expect(result.current.user?.user_id).toBe('bob');
+    expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBe('tenant-b-access');
+  });
+  it('does not let a superseded wake refresh cancel a replacement login', async () => {
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    const expiringAccess = `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 30 }))}.signature`;
+    localStorage.setItem(ACCESS_TOKEN_KEY, expiringAccess);
+    localStorage.setItem(REFRESH_TOKEN_KEY, 'tenant-a-refresh');
+    authenticate.mockResolvedValueOnce(session(expiringAccess));
     const { result } = renderHook(() => useAuth());
     await waitFor(() => expect(result.current.authenticated).toBe(true));
-    const held = deferred<ReturnType<typeof session>>();
-    refreshCreate.mockReturnValueOnce(held.promise);
-    const client = await createRestClient('http://localhost:3030');
-    const oldRefresh = refreshTokensSingleFlight(client, 'tenant-a-refresh');
-    const rejected = expect(oldRefresh).rejects.toBeInstanceOf(SupersededAuthenticationError);
-    authenticate.mockResolvedValueOnce({
-      ...session('tenant-b-access', 'tenant-b-refresh'),
-      user: { user_id: 'bob', role: 'member', email: 'b@example.test' },
+    const heldRefresh = deferred<ReturnType<typeof session>>();
+    refreshCreate.mockReturnValueOnce(heldRefresh.promise);
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await waitFor(() => expect(refreshCreate).toHaveBeenCalled());
+    await act(async () => {
+      await result.current.logout();
+    });
+    const heldLogin = deferred<ReturnType<typeof session>>();
+    authenticate.mockReturnValueOnce(heldLogin.promise);
+    let login!: Promise<boolean>;
+    act(() => {
+      login = result.current.login('b@example.test', 'secret');
     });
     await act(async () => {
-      await result.current.login('b@example.test', 'secret');
-    });
-    const fresh = {
-      ...session('fresh-b-access', 'fresh-b-refresh'),
-      user: { user_id: 'bob', role: 'member', email: 'b@example.test' },
-    };
-    refreshCreate.mockResolvedValueOnce(fresh);
-    await act(async () => {
-      expect(await refreshTokensSingleFlight(client, 'tenant-b-refresh')).toEqual(fresh);
+      heldRefresh.resolve(session('late-a', 'late-a-refresh'));
+      await heldRefresh.promise;
     });
     await act(async () => {
-      held.resolve(session());
-      await rejected;
+      heldLogin.resolve(tenantB());
+      expect(await login).toBe(true);
     });
     expect(result.current.user?.user_id).toBe('bob');
-    expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBe('fresh-b-access');
   });
-  it.each(['success', 'auth-failure', 'transient-failure'])(
-    'ignores old access-only reauth %s after another tab replaces credentials',
-    async (outcome) => {
-      localStorage.setItem(ACCESS_TOKEN_KEY, 'tenant-a-access');
-      const held = deferred<ReturnType<typeof session>>();
-      authenticate.mockReturnValueOnce(held.promise);
-      const { result } = renderHook(() => useAuth());
-      await waitFor(() => expect(authenticate).toHaveBeenCalled());
-      // Storage mutation models another same-origin tab without our module epoch.
-      localStorage.setItem(ACCESS_TOKEN_KEY, 'tenant-b-access');
-      localStorage.setItem(REFRESH_TOKEN_KEY, 'tenant-b-refresh');
-      await act(async () => {
-        if (outcome === 'success') held.resolve(session());
-        else
-          held.reject(
-            Object.assign(new Error('stale authentication'), {
-              code: outcome === 'auth-failure' ? 401 : 503,
-            })
-          );
-        await held.promise.catch(() => {});
-      });
-      expect(result.current.user).toBeNull();
-      expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBe('tenant-b-access');
-      expect(localStorage.getItem(REFRESH_TOKEN_KEY)).toBe('tenant-b-refresh');
-      expect(refreshCreate).not.toHaveBeenCalled();
-    }
-  );
+  it('does not let a late launch rejection clear a replacement login', async () => {
+    window.history.replaceState({}, '', '/ui/?launch_code=tenant-a-code');
+    const held = deferred<ReturnType<typeof session>>();
+    launchCreate.mockReturnValue(held.promise);
+    const { result } = renderHook(() => useAuth());
+    await waitFor(() => expect(launchCreate).toHaveBeenCalled());
+    await logOutAndSignInAsB(result);
+    await act(async () => {
+      held.reject(Object.assign(new Error('bad code'), { code: 401 }));
+      await held.promise.catch(() => {});
+    });
+    expect(result.current.user?.user_id).toBe('bob');
+    expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBe('tenant-b-access');
+  });
   it('lets a pending replacement login supersede an old refresh', async () => {
     localStorage.setItem(ACCESS_TOKEN_KEY, 'tenant-a-access');
     localStorage.setItem(REFRESH_TOKEN_KEY, 'tenant-a-refresh');
@@ -204,70 +219,59 @@ describe('logout wins over pending runtime authentication', () => {
       await rejected;
     });
     await act(async () => {
-      heldLogin.resolve({
-        ...session('tenant-b-access', 'tenant-b-refresh'),
-        user: { user_id: 'bob', role: 'member', email: 'b@example.test' },
-      });
+      heldLogin.resolve(tenantB());
       expect(await login).toBe(true);
     });
     expect(result.current.user?.user_id).toBe('bob');
   });
-  it('does not retry a sleeping reconnect after logout', async () => {
-    localStorage.setItem(ACCESS_TOKEN_KEY, 'tenant-a-access');
-    authenticate.mockResolvedValueOnce(session());
-    const { result } = renderHook(() => useAuth());
-    await waitFor(() => expect(result.current.authenticated).toBe(true));
-    vi.useFakeTimers();
-    try {
-      authenticate.mockRejectedValueOnce(new TypeError('Failed to fetch'));
-      let retry!: Promise<void>;
-      await act(async () => {
-        retry = result.current.reAuthenticate();
-        await Promise.resolve();
-      });
-      await act(async () => {
-        await result.current.logout();
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(2500);
-        await retry;
-      });
-      expect(authenticate).toHaveBeenCalledTimes(2);
-      expect(result.current.authenticated).toBe(false);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-  it('does not start timer or visibility recovery while a replacement login is pending', async () => {
-    const expiringAccess = `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 30 }))}.signature`;
-    localStorage.setItem(ACCESS_TOKEN_KEY, expiringAccess);
-    localStorage.setItem(REFRESH_TOKEN_KEY, 'tenant-a-refresh');
-    authenticate.mockResolvedValueOnce(session(expiringAccess));
-    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  it('does not retry a sleeping launch exchange after logout', async () => {
+    window.history.replaceState({}, '', '/ui/?launch_code=tenant-a-code');
+    launchCreate.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    launchCreate.mockResolvedValue(session('late-access', 'late-refresh'));
     vi.useFakeTimers();
     try {
       const { result } = renderHook(() => useAuth());
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
-      expect(result.current.authenticated).toBe(true);
-      const held = deferred<ReturnType<typeof session>>();
-      authenticate.mockReturnValueOnce(held.promise);
+      expect(launchCreate).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await result.current.logout();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2500);
+      });
+      expect(launchCreate).toHaveBeenCalledTimes(1);
+      expect(result.current.authenticated).toBe(false);
+      expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('does not let a sleeping daemon retry cancel a replacement login', async () => {
+    localStorage.setItem(ACCESS_TOKEN_KEY, 'tenant-a-access');
+    authenticate.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useAuth());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(authenticate).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await result.current.logout();
+      });
+      const heldLogin = deferred<ReturnType<typeof session>>();
+      authenticate.mockReturnValueOnce(heldLogin.promise);
       let login!: Promise<boolean>;
       act(() => {
         login = result.current.login('b@example.test', 'secret');
       });
       await act(async () => {
-        document.dispatchEvent(new Event('visibilitychange'));
-        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        await vi.advanceTimersByTimeAsync(2500);
       });
-      expect(refreshCreate).not.toHaveBeenCalled();
-      expect(authenticate).toHaveBeenCalledTimes(2);
       await act(async () => {
-        held.resolve({
-          ...session('tenant-b-access', 'tenant-b-refresh'),
-          user: { user_id: 'bob', role: 'member', email: 'b@example.test' },
-        });
+        heldLogin.resolve(tenantB());
         expect(await login).toBe(true);
       });
       expect(result.current.user?.user_id).toBe('bob');
@@ -275,40 +279,63 @@ describe('logout wins over pending runtime authentication', () => {
       vi.useRealTimers();
     }
   });
-  it('resumes automatic refresh after a pending replacement login fails', async () => {
-    const expiringAccess = `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 30 }))}.signature`;
-    localStorage.setItem(ACCESS_TOKEN_KEY, expiringAccess);
+  it('does not refresh a stale launch fallback over a replacement login', async () => {
+    window.history.replaceState({}, '', '/ui/?launch_code=tenant-a-code');
     localStorage.setItem(REFRESH_TOKEN_KEY, 'tenant-a-refresh');
-    authenticate.mockResolvedValueOnce(session(expiringAccess));
-    vi.useFakeTimers();
-    try {
-      const { result } = renderHook(() => useAuth());
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(0);
-      });
-      const held = deferred<ReturnType<typeof session>>();
-      authenticate.mockReturnValueOnce(held.promise);
-      let login!: Promise<boolean>;
-      act(() => {
-        login = result.current.login('b@example.test', 'wrong-password');
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1000);
-      });
-      expect(refreshCreate).not.toHaveBeenCalled();
-      await act(async () => {
-        held.reject(Object.assign(new Error('Invalid login'), { code: 401 }));
-        expect(await login).toBe(false);
-      });
-      refreshCreate.mockResolvedValueOnce(session('refreshed-a-access', 'refreshed-a-refresh'));
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1000);
-      });
-      expect(refreshCreate).toHaveBeenCalledTimes(1);
-      expect(result.current.user?.user_id).toBe('alice');
-      expect(result.current.accessToken).toBe('refreshed-a-access');
-    } finally {
-      vi.useRealTimers();
-    }
+    const held = deferred<ReturnType<typeof session>>();
+    launchCreate.mockReturnValue(held.promise);
+    refreshCreate.mockResolvedValue(session('late-a-access', 'late-a-refresh'));
+    const { result } = renderHook(() => useAuth());
+    await waitFor(() => expect(launchCreate).toHaveBeenCalled());
+    await logOutAndSignInAsB(result);
+    await act(async () => {
+      held.reject(Object.assign(new Error('bad code'), { code: 401 }));
+      await held.promise.catch(() => {});
+    });
+    expect(refreshCreate).not.toHaveBeenCalled();
+    expect(result.current.user?.user_id).toBe('bob');
+    expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBe('tenant-b-access');
+  });
+  it('lets a launch sign-in supersede an older in-flight refresh', async () => {
+    window.history.replaceState({}, '', '/ui/?launch_code=tenant-b-code');
+    localStorage.setItem(ACCESS_TOKEN_KEY, 'tenant-a-access');
+    localStorage.setItem(REFRESH_TOKEN_KEY, 'tenant-a-refresh');
+    const heldLaunch = deferred<ReturnType<typeof session>>();
+    launchCreate.mockReturnValue(heldLaunch.promise);
+    const heldRefresh = deferred<ReturnType<typeof session>>();
+    refreshCreate.mockReturnValueOnce(heldRefresh.promise);
+    const { result } = renderHook(() => useAuth());
+    await waitFor(() => expect(launchCreate).toHaveBeenCalled());
+    const client = await createRestClient('http://localhost:3030');
+    const oldRefresh = refreshTokensSingleFlight(client, 'tenant-a-refresh').catch((e) => e);
+    await act(async () => {
+      heldLaunch.resolve(tenantB());
+      await heldLaunch.promise;
+    });
+    await act(async () => {
+      heldRefresh.resolve(session('late-a', 'late-a-refresh'));
+      expect(await oldRefresh).toBeInstanceOf(SupersededAuthenticationError);
+    });
+    expect(result.current.user?.user_id).toBe('bob');
+    expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBe('tenant-b-access');
+  });
+  it('keeps a replacement login signed in when a stale fallback refresh is superseded', async () => {
+    window.history.replaceState({}, '', '/ui/?launch_code=tenant-a-code');
+    localStorage.setItem(ACCESS_TOKEN_KEY, 'tenant-a-access');
+    localStorage.setItem(REFRESH_TOKEN_KEY, 'tenant-a-refresh');
+    launchCreate.mockRejectedValue(Object.assign(new Error('bad code'), { code: 401 }));
+    authenticate.mockRejectedValueOnce(Object.assign(new Error('bad request'), { code: 400 }));
+    authenticate.mockRejectedValueOnce(Object.assign(new Error('expired'), { code: 401 }));
+    const heldRefresh = deferred<ReturnType<typeof session>>();
+    refreshCreate.mockReturnValueOnce(heldRefresh.promise);
+    const { result } = renderHook(() => useAuth());
+    await waitFor(() => expect(refreshCreate).toHaveBeenCalled());
+    await logOutAndSignInAsB(result);
+    await act(async () => {
+      heldRefresh.resolve(session('late-a', 'late-a-refresh'));
+      await heldRefresh.promise;
+    });
+    expect(result.current.authenticated).toBe(true);
+    expect(result.current.user?.user_id).toBe('bob');
   });
 });

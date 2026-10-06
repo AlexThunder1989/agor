@@ -10,10 +10,8 @@ import type { AuthenticatedAgorClient, User } from '@agor-live/client';
 export const ACCESS_TOKEN_KEY = 'agor-access-token';
 export const REFRESH_TOKEN_KEY = 'agor-refresh-token';
 
-// A same-tab generation also detects clear-and-reinstall of identical bytes.
-// Exact storage checks detect credential replacement by another browser tab.
+// Bumped when this tab signs in or out; routine rotation keeps in-flight work current.
 let tokenGeneration = 0;
-let authenticationEpoch = 0;
 export class SupersededAuthenticationError extends Error {
   constructor() {
     super('Authentication was superseded');
@@ -22,21 +20,11 @@ export class SupersededAuthenticationError extends Error {
 }
 export function invalidateTokenAuthority(): void {
   tokenGeneration += 1;
-  authenticationEpoch += 1;
 }
-/** Routine token rotation retains the connection owner; explicit invalidation retires it. */
-export function captureAuthenticationEpoch(): () => boolean {
-  const epoch = authenticationEpoch;
-  return () => epoch === authenticationEpoch;
-}
+/** Returns a check that stays true until this tab next signs in or out. */
 export function captureTokenAuthority(): () => boolean {
   const generation = tokenGeneration;
-  const accessToken = getStoredAccessToken();
-  const refreshToken = getStoredRefreshToken();
-  return () =>
-    generation === tokenGeneration &&
-    accessToken === getStoredAccessToken() &&
-    refreshToken === getStoredRefreshToken();
+  return () => generation === tokenGeneration;
 }
 
 export interface RefreshResult {
@@ -76,7 +64,6 @@ export async function refreshAccessToken(
  * @param refreshToken - Optional refresh token to store (if rotated)
  */
 export function storeTokens(accessToken: string, refreshToken?: string): void {
-  tokenGeneration += 1;
   localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
   if (refreshToken) {
     localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
@@ -105,28 +92,6 @@ export function getStoredAccessToken(): string | null {
  * Clear all authentication tokens from localStorage
  */
 export function clearTokens(): void {
-  invalidateTokenAuthority();
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
-}
-
-/**
- * Refresh and store tokens in one operation
- *
- * Convenience function that combines refreshAccessToken and storeTokens.
- *
- * @param client - Agor client instance
- * @param refreshToken - Current refresh token
- * @returns Refresh result with new tokens and user info
- */
-export async function refreshAndStoreTokens(
-  client: AuthenticatedAgorClient,
-  refreshToken: string
-): Promise<RefreshResult> {
-  const isCurrent = captureTokenAuthority();
-  if (getStoredRefreshToken() !== refreshToken) throw new SupersededAuthenticationError();
-  const result = await refreshAccessToken(client, refreshToken);
-  if (!isCurrent()) throw new SupersededAuthenticationError();
-  storeTokens(result.accessToken, result.refreshToken);
-  return result;
 }

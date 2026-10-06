@@ -10,7 +10,12 @@ import {
   TOKENS_REFRESH_UNRECOVERABLE_EVENT,
   TOKENS_REFRESHED_EVENT,
 } from './singleFlightRefresh';
-import { REFRESH_TOKEN_KEY } from './tokenRefresh';
+import {
+  invalidateTokenAuthority,
+  REFRESH_TOKEN_KEY,
+  SupersededAuthenticationError,
+  storeTokens,
+} from './tokenRefresh';
 
 const mockRefresh = vi.fn();
 
@@ -73,10 +78,37 @@ describe('refreshTokensSingleFlight', () => {
     const first = await refreshTokensSingleFlight(client, 'rt');
     expect(first.accessToken).toBe('first');
 
-    localStorage.setItem(REFRESH_TOKEN_KEY, 'rt');
     const second = await refreshTokensSingleFlight(client, 'rt');
     expect(second.accessToken).toBe('second');
     expect(mockRefresh).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not share an in-flight refresh with a different refresh token', async () => {
+    let finishOld!: (value: ReturnType<typeof makeResult>) => void;
+    let finishNew!: (value: ReturnType<typeof makeResult>) => void;
+    mockRefresh.mockReturnValueOnce(new Promise((resolve) => (finishOld = resolve)));
+    mockRefresh.mockReturnValueOnce(new Promise((resolve) => (finishNew = resolve)));
+    const client = makeClient();
+    const oldRefresh = refreshTokensSingleFlight(client, 'rt');
+    invalidateTokenAuthority();
+    storeTokens('b-access-0', 'b-rt');
+    const newRefresh = refreshTokensSingleFlight(client, 'b-rt');
+    finishOld(makeResult('late-a', 'late-a-refresh'));
+    await expect(oldRefresh).rejects.toBeInstanceOf(SupersededAuthenticationError);
+    // The old refresh settling must not free the new account's in-flight slot.
+    expect(refreshTokensSingleFlight(client, 'b-rt')).toBe(newRefresh);
+    finishNew(makeResult('b-access', 'b-refresh'));
+    await expect(newRefresh).resolves.toMatchObject({ accessToken: 'b-access' });
+    expect(mockRefresh).toHaveBeenCalledTimes(2);
+    expect(localStorage.getItem(REFRESH_TOKEN_KEY)).toBe('b-refresh');
+  });
+
+  it('rejects without a request once the session was logged out', async () => {
+    localStorage.clear();
+    await expect(refreshTokensSingleFlight(makeClient(), 'rt')).rejects.toBeInstanceOf(
+      SupersededAuthenticationError
+    );
+    expect(mockRefresh).not.toHaveBeenCalled();
   });
 
   it('clears the in-flight slot on failure so the next caller can retry', async () => {

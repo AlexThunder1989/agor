@@ -59,11 +59,7 @@ export function dispatchTokensRefreshed(result: RefreshResult): void {
  */
 export const TOKENS_REFRESH_UNRECOVERABLE_EVENT = 'agor:tokens-refresh-unrecoverable';
 
-let inflight: {
-  promise: Promise<RefreshResult>;
-  refreshToken: string;
-  isCurrent: () => boolean;
-} | null = null;
+let inflight: { promise: Promise<RefreshResult>; refreshToken: string } | null = null;
 
 /**
  * Latched once the refresh endpoint returns a definite auth failure. While
@@ -131,9 +127,8 @@ export function refreshTokensSingleFlight(
   client: AuthenticatedAgorClient,
   refreshToken: string
 ): Promise<RefreshResult> {
-  if (getStoredRefreshToken() !== refreshToken) {
-    return Promise.reject(new SupersededAuthenticationError());
-  }
+  // Nothing stored means the session was logged out while the caller prepared this refresh.
+  if (!getStoredRefreshToken()) return Promise.reject(new SupersededAuthenticationError());
   // Fast-fail if we already know the refresh token is dead. Without this,
   // every recovery caller would trigger a brand-new POST
   // to /authentication/refresh that also 401s, producing a tight loop as
@@ -143,7 +138,7 @@ export function refreshTokensSingleFlight(
     return Promise.reject(new RefreshUnrecoverableError());
   }
 
-  if (inflight?.refreshToken === refreshToken && inflight.isCurrent()) return inflight.promise;
+  if (inflight?.refreshToken === refreshToken) return inflight.promise;
 
   const isCurrent = captureTokenAuthority();
   const promise = refreshAccessToken(client, refreshToken)
@@ -171,8 +166,7 @@ export function refreshTokensSingleFlight(
       // unrecoverable-event listener that just cleared tokens. Wrapping with
       // `cause` preserves diagnostics. Subsequent callers fast-fail with the
       // same type via the `unrecoverable` guard above.
-      // A retiring refresh cannot expire a replacement account, latch its
-      // refresh token as dead, or broadcast logout to its clients.
+      // A superseded refresh must not latch or broadcast logout for the replacement account.
       if (!isCurrent()) throw new SupersededAuthenticationError();
       if (isDefiniteAuthFailure(err)) {
         throw markAuthenticationUnrecoverable(err);
@@ -183,6 +177,6 @@ export function refreshTokensSingleFlight(
       if (inflight?.promise === promise) inflight = null;
     });
 
-  inflight = { promise, refreshToken, isCurrent };
+  inflight = { promise, refreshToken };
   return promise;
 }
