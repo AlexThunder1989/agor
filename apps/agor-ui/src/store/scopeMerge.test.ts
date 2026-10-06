@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { type DataMaps, EMPTY_MAPS } from './agorMaps';
 import {
   boardPartitionScope,
-  fillScope,
   globalSetsMembers,
   replaceScope,
   scopeMembers,
@@ -41,14 +40,14 @@ const boardObject = (id: string, overrides: Partial<BoardEntityObject> = {}) =>
 const card = (id: string, overrides: Partial<CardWithType> = {}) =>
   ({ card_id: id, board_id: A, title: id, ...overrides }) as CardWithType;
 
-/** Store state built from rows with the fill reducer (fresh, no fence). */
+/** Store state built from rows (fresh, no fence, nothing to remove). */
 function storeWith(rows: {
   branches?: Branch[];
   sessions?: Session[];
   boardObjects?: BoardEntityObject[];
   cards?: CardWithType[];
 }): DataMaps {
-  return fillScope(EMPTY_MAPS, rows, never);
+  return replaceScope(EMPTY_MAPS, { key: USER_SCOPE_KEYS.references, claims: {} }, rows, never, []);
 }
 
 const never = () => false;
@@ -59,24 +58,22 @@ const touchedSet =
 const scopeA = boardPartitionScope(A);
 const ids = (map: Map<string, unknown>) => [...map.keys()].sort();
 
-describe('fillScope', () => {
-  it('inserts absent rows and never overwrites or removes', () => {
-    const prev = storeWith({
-      cards: [card('k-1', { title: 'live' })],
-      boardObjects: [boardObject('o-1')],
-    });
-    const next = fillScope(
-      prev,
-      { cards: [card('k-1', { title: 'stale' }), card('k-2')], boardObjects: [] },
-      never
-    );
-    expect(next.cardById.get('k-1')?.title).toBe('live');
-    expect(ids(next.cardById)).toEqual(['k-1', 'k-2']);
-    expect(next.boardObjectById.has('o-1')).toBe(true);
-  });
-});
-
 describe('replaceScope', () => {
+  it('keeps an omitted session whose branch was written live during the read', () => {
+    const prev = storeWith({
+      branches: [branch('br-moved')],
+      sessions: [session('s-1', 'br-moved')],
+    });
+    const next = replaceScope(
+      prev,
+      scopeA,
+      { branches: [], sessions: [] },
+      touchedSet('branches:br-moved'),
+      []
+    );
+    expect(ids(next.sessionById)).toEqual(['s-1']);
+  });
+
   it('removes deleted rows, overwrites stale ones, and inserts new ones', () => {
     const prev = storeWith({
       boardObjects: [boardObject('o-kept'), boardObject('o-moved'), boardObject('o-deleted')],

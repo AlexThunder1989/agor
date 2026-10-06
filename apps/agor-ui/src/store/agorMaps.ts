@@ -591,8 +591,8 @@ export function keepLiveWrites<T>(
 
 /**
  * Fill-only merge of branch and session rows (invariant I2: a load never
- * overwrites a live row). The branch and session half of `fillScope`
- * (`scopeMerge.ts`); the user-scope reads use it directly.
+ * overwrites a live row): the user-scope reads and on-demand reads use it.
+ * Board partitions reconcile instead (`replaceScope` in `scopeMerge.ts`).
  *
  * - A row is inserted only when its id is ABSENT from the store and no live
  *   event touched it since the load started. Present rows are kept current by

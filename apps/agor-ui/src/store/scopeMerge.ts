@@ -7,12 +7,14 @@
  * global session and branch sets. Both reducers are fenced per id: a row that
  * a live event wrote since the load began keeps its live value, or its absence.
  *
- * - `fillScope` inserts absent rows and never overwrites a present one (I2).
- *   It cannot remove anything, so it is not reconciliation.
+ * - `applyEntityFill` (`agorMaps.ts`) inserts absent rows and never
+ *   overwrites a present one (I2). It cannot remove anything, so it is not
+ *   reconciliation; on-demand reads use it.
  * - `replaceScope` reconciles: it also overwrites present rows with the
  *   snapshot, and removes rows the scope claims that the snapshot no longer
  *   returns (deleted, moved out, or no longer visible) — only when the read
  *   was complete, and only when no other scope's committed membership holds them.
+ *   Every board partition load and every reconnect applies with it.
  *
  * Each scope's state is one `ScopeCoverage` entry in the store's `coverage`
  * map: its status, lifetime and generation, and, once loaded, its committed
@@ -31,7 +33,6 @@ import type { Board, BoardEntityObject, Branch, CardWithType, Session } from '@a
 import { boardIdForSession } from '../utils/boardIdForSession';
 import { shallowEqualEntity } from '../utils/shallowEqual';
 import {
-  applyEntityFill,
   applySessionPatchToMaps,
   buildSessionMaps,
   type DataMaps,
@@ -345,37 +346,6 @@ export function globalSetsMembers(globallyHydrated: ReadonlySet<string>): Member
 }
 
 /**
- * Fill-only apply: insert absent, untouched rows of every collection in
- * `rows`; never overwrite or remove. Branches and sessions go through
- * `applyEntityFill`; board objects and cards follow the same rules (rows on a
- * touched-and-absent branch are skipped). `rows.board` is ignored: a board
- * record is always replaced (see `replaceScope`).
- */
-export function fillScope(prev: DataMaps, rows: ScopeRows, touched: PartitionTouched): DataMaps {
-  let maps = applyEntityFill(prev, rows, touched);
-
-  for (const boardObject of rows.boardObjects ?? []) {
-    if (maps.boardObjectById.has(boardObject.object_id)) continue;
-    if (
-      touched('boardObjects', boardObject.object_id) ||
-      isOnRemovedBranch(maps, boardObject.branch_id, touched)
-    )
-      continue;
-    maps = upsertBoardObjectInMaps(maps, boardObject, 'create');
-  }
-
-  let cardById = maps.cardById;
-  for (const card of rows.cards ?? []) {
-    if (cardById.has(card.card_id) || touched('cards', card.card_id)) continue;
-    if (cardById === maps.cardById) cardById = new Map(cardById);
-    cardById.set(card.card_id, card);
-  }
-  if (cardById !== maps.cardById) maps = { ...maps, cardById };
-
-  return maps;
-}
-
-/**
  * Whether a snapshot row equals the store row. The daemon reserializes nested
  * fields (positions, configs, board objects), so a shallow compare would
  * rewrite — and re-render — every row on each replace; compare the JSON when
@@ -397,8 +367,9 @@ const INCREMENTAL_SESSION_LIMIT = 64;
  * - when the read was complete, every untouched store row the scope claims
  *   but the snapshot omits is removed, unless one of `others` (the committed
  *   memberships of the other loaded scopes) holds it;
- * - touched rows keep their live value or absence, and snapshot rows on a
- *   branch removed live during the load are skipped.
+ * - touched rows keep their live value or absence (a session also when its
+ *   branch was touched), and snapshot rows on a branch removed live during
+ *   the load are skipped.
  *
  * Returns `prev` unchanged when nothing changed. Never bumps revisions.
  */
@@ -453,8 +424,11 @@ export function replaceScope(
     const claim = claims.sessions;
     if (claim) {
       for (const [id, session] of maps.sessionById) {
-        // Archived rows are deep-link heals outside every list scope.
+        // Archived rows are deep-link heals outside every list scope. A
+        // session whose branch was written live (moved onto the scope) is
+        // judged by that write, not by a read that predates it.
         if (session.archived || returned.has(id) || touched('sessions', id)) continue;
+        if (session.branch_id && touched('branches', session.branch_id)) continue;
         if (!claim(session, maps) || claimedElsewhere('sessions', id)) continue;
         removals.push(session);
       }
@@ -546,36 +520,4 @@ export interface BoardPartitionSnapshot extends ScopeRows {
   board: Board | null;
   /** Explicit: the reducer and the coverage commit read the same answer. */
   complete: boolean;
-}
-
-/**
- * Apply a board partition: branches and sessions fill-only (Steps 1–2: the
- * global sets and their resync own them), board objects, cards and the full
- * board record reconcile with `replaceScope`. An annotation belongs to exactly
- * one board, so no other scope's membership can hold one this board claims.
- * Comments are global and loaded before first paint, so they are not part of
- * a partition.
- */
-export function applyPartitionSnapshot(
-  prev: DataMaps,
-  snapshot: BoardPartitionSnapshot,
-  touched: PartitionTouched
-): DataMaps {
-  const filled = fillScope(
-    prev,
-    { branches: snapshot.branches, sessions: snapshot.sessions },
-    touched
-  );
-  return replaceScope(
-    filled,
-    boardPartitionScope(snapshot.boardId),
-    {
-      boardObjects: snapshot.boardObjects,
-      cards: snapshot.cards,
-      board: snapshot.board,
-      complete: snapshot.complete,
-    },
-    touched,
-    []
-  );
 }

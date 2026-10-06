@@ -7,6 +7,7 @@ import {
   cancelAllHydrations,
   resetHydrationRevisions,
 } from './agorHydration';
+import { applyEntityFill } from './agorMaps';
 import {
   branchPatched,
   sessionCreated,
@@ -19,7 +20,6 @@ import { discardRealtimeNow, setRealtimeAuthorityScope } from './realtimeBatch';
 import {
   boardPartitionScope,
   boardScopeKey,
-  fillScope,
   replaceScope,
   type ScopeRows,
   USER_SCOPE_KEYS,
@@ -246,7 +246,11 @@ describe('user scope', () => {
     agorStore
       .getState()
       .applyMaps((prev) =>
-        fillScope(prev, { branches: [branch('br-ref', { board_id: 'board-2' })] }, () => false)
+        applyEntityFill(
+          prev,
+          { branches: [branch('br-ref', { board_id: 'board-2' })] },
+          () => false
+        )
       );
     const { client } = makeClient({ mine: () => [session('s-1', 'br-ref')] });
     await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: false });

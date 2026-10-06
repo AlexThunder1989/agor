@@ -283,6 +283,10 @@ derived when a replace asks. A board is ready only when its partition is loaded 
 - **Step 2:** a reconnect refetches board objects and cards for the displayed board only.
 - **Step 3:** a reconnect replaces the displayed partition and the user scope (§3.8). Other partitions are marked unloaded and their non-scope rows dropped.
 - Add an LRU only if the S11 measurements call for it.
+- **Step 3 batch C2 (implemented).** Every partition load is a complete `replaceScope` of the board (branches,
+  sessions, annotations, record) that respects the other scopes' committed members, so a re-opened board drops rows
+  deleted while it was unloaded. The fill-only partition merge is gone. A session whose branch was written live during
+  the read is fenced like the branch.
 
 ## 5. Realtime
 

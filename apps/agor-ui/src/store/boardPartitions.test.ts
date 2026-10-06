@@ -44,7 +44,6 @@ import {
   setRealtimeAuthorityScope,
 } from './realtimeBatch';
 import {
-  applyPartitionSnapshot,
   type BoardPartitionSnapshot,
   boardPartitionScope,
   boardScopeKey,
@@ -95,9 +94,16 @@ const snapshotOf = (overrides: Partial<BoardPartitionSnapshot> = {}): BoardParti
 
 const never = () => false;
 
-describe('applyPartitionSnapshot', () => {
+/** A partition load's apply: a complete replace of the board. */
+const replacePartition = (
+  prev: typeof EMPTY_MAPS,
+  snapshot: BoardPartitionSnapshot,
+  touched: (collection: string, id: string) => boolean
+) => replaceScope(prev, boardPartitionScope(snapshot.boardId), snapshot, touched, []);
+
+describe('partition replace', () => {
   it('inserts absent rows into every map and the session buckets', () => {
-    const next = applyPartitionSnapshot(
+    const next = replacePartition(
       EMPTY_MAPS,
       snapshotOf({
         branches: [branch('br-1')],
@@ -116,30 +122,9 @@ describe('applyPartitionSnapshot', () => {
     expect(next.boardById.get(BOARD)?.objects).toBeDefined();
   });
 
-  it('never overwrites a present branch or session (the global sets own them)', () => {
-    const live = session('s-1', 'br-1', { title: 'live' });
-    const liveBranch = branch('br-1', { name: 'live' });
-    const prev = applyPartitionSnapshot(
-      EMPTY_MAPS,
-      snapshotOf({ branches: [liveBranch], sessions: [live] }),
-      never
-    );
-    const next = applyPartitionSnapshot(
-      prev,
-      snapshotOf({
-        branches: [branch('br-1', { name: 'stale' })],
-        sessions: [session('s-1', 'br-1', { title: 'stale' })],
-      }),
-      never
-    );
-    expect(next).toBe(prev);
-    expect(next.sessionById.get('s-1')?.title).toBe('live');
-    expect(next.branchById.get('br-1')?.name).toBe('live');
-  });
-
   it('skips touched ids and rows on a touched-and-absent branch', () => {
     const touched = new Set(['sessions:s-gone', 'branches:br-archived', 'cards:k-gone']);
-    const next = applyPartitionSnapshot(
+    const next = replacePartition(
       EMPTY_MAPS,
       snapshotOf({
         branches: [branch('br-1'), branch('br-archived')],
@@ -163,11 +148,11 @@ describe('applyPartitionSnapshot', () => {
     const lean = { board_id: BOARD, name: 'Board' } as Board;
     const prev = { ...EMPTY_MAPS, boardById: new Map([[BOARD, lean]]) };
     expect(
-      applyPartitionSnapshot(prev, snapshotOf({ board: fullBoard() }), never).boardById.get(BOARD)
+      replacePartition(prev, snapshotOf({ board: fullBoard() }), never).boardById.get(BOARD)
         ?.objects
     ).toBeDefined();
     expect(
-      applyPartitionSnapshot(
+      replacePartition(
         prev,
         snapshotOf({ board: fullBoard() }),
         (collection) => collection === 'boards'
@@ -188,7 +173,7 @@ describe('applyPartitionSnapshot', () => {
         ],
       },
     } as Partial<Session>);
-    const next = applyPartitionSnapshot(
+    const next = replacePartition(
       EMPTY_MAPS,
       snapshotOf({ branches: [branch('br-1'), branch('br-2')], sessions: [source, target] }),
       never
@@ -442,7 +427,7 @@ describe('loadBoardPartition', () => {
 
   it("a branch moved onto the board during its read brings its present sessions into the board's membership", async () => {
     agorStore.getState().applyMaps((prev) =>
-      applyPartitionSnapshot(
+      replacePartition(
         prev,
         snapshotOf({
           boardId: 'board-2',
@@ -463,12 +448,11 @@ describe('loadBoardPartition', () => {
   });
 
   it('keeps a session patched live during the load', async () => {
-    const live = session('s-1', 'br-1', { title: 'live' });
-    sessionPatched(live);
     const { client, release } = makePartitionClient({
       sessions: [session('s-1', 'br-1', { title: 'stale' })],
     });
     const load = loadBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true });
+    sessionPatched(session('s-1', 'br-1', { title: 'live' }));
     release();
     await load;
     expect(agorStore.getState().sessionById.get('s-1')?.title).toBe('live');
@@ -606,7 +590,7 @@ describe('loadBoardPartition', () => {
   it('reloading a board reconciles its annotations: deleted, moved and hidden rows leave', async () => {
     // Rows left from before a reconnect unloaded the board.
     agorStore.getState().applyMaps((prev) =>
-      applyPartitionSnapshot(
+      replacePartition(
         prev,
         snapshotOf({
           boardObjects: [boardObject('o-kept', 'br-1'), boardObject('o-hidden', 'br-private')],
@@ -633,6 +617,52 @@ describe('loadBoardPartition', () => {
     const members = selectBoardPartition(state, BOARD)?.members;
     expect([...(members?.cards ?? [])].sort()).toEqual(['k-kept', 'k-live']);
     expect([...(members?.boardObjects ?? [])]).toEqual(['o-kept']);
+  });
+
+  it("reloading a board replaces its branches and sessions, keeping rows other scopes' members hold", async () => {
+    const lifetime = captureLoadLifetime()!;
+    // Rows left from before the board was unloaded.
+    agorStore.getState().applyMaps((prev) =>
+      replaceScope(
+        prev,
+        boardPartitionScope(BOARD),
+        {
+          branches: [branch('br-1', { name: 'stale' }), branch('br-deleted'), branch('br-mine')],
+          sessions: [
+            session('s-1', 'br-1', { title: 'stale' }),
+            session('s-deleted', 'br-1'),
+            session('s-mine', 'br-1'),
+          ],
+        },
+        never,
+        []
+      )
+    );
+    // My session and my branch belong to the user scope too.
+    agorStore.getState().setCoverage(USER_SCOPE_KEYS.sessions, {
+      status: 'loaded',
+      ...lifetime,
+      generation: 0,
+      members: { sessions: new Set(['s-mine']) },
+    });
+    agorStore.getState().setCoverage(USER_SCOPE_KEYS.branches, {
+      status: 'loaded',
+      ...lifetime,
+      generation: 0,
+      members: { branches: new Set(['br-mine']) },
+    });
+    const { client, release } = makePartitionClient({
+      branches: [branch('br-1', { name: 'fresh' })],
+      sessions: [session('s-1', 'br-1', { title: 'fresh' })],
+    });
+    const load = loadBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true });
+    release();
+    await load;
+    const state = agorStore.getState();
+    expect([...state.branchById.keys()].sort()).toEqual(['br-1', 'br-mine']);
+    expect([...state.sessionById.keys()].sort()).toEqual(['s-1', 's-mine']);
+    expect(state.branchById.get('br-1')?.name).toBe('fresh');
+    expect(state.sessionById.get('s-1')?.title).toBe('fresh');
   });
 
   it('only committed members of other current, loaded scopes (and the global sets) keep rows', () => {

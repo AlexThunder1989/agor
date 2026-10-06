@@ -9,16 +9,15 @@
  * from ABSENCE ("teammate inaccessible", "no sessions", an empty canvas) gate on
  * `makeBoardReadySelector(boardId)` instead.
  *
- * Invariant I2 — a load never overwrites a live row. The snapshot is merged with
- * `applyPartitionSnapshot`, fenced per id by the touched stamps that every
- * realtime write records (`agorHydration.touchedSince`): a row written live
- * during the load keeps its live value. Branches and sessions are filled
- * (the global sets own them until Step 3); board objects, cards and the full
- * board record are reconciled (`replaceScope`), so loading a board again
- * after it was unloaded (a reconnect unloads every board but the displayed
- * one) drops rows deleted, moved or hidden meanwhile. The snapshot is never
- * discarded because of churn, so a partition load cannot starve the way a
- * skip-apply-on-race hydration can.
+ * Invariant I2 — a load never overwrites a live row. Every load is a complete
+ * replace of the board (`replaceScope`): branches, sessions, board objects,
+ * cards and the full board record. It is fenced per id by the touched stamps
+ * that every realtime write records (`agorHydration.touchedSince`), so a row
+ * written live during the load keeps its live value. Loading a board again
+ * after it was unloaded (a reconnect or the LRU) drops rows deleted, moved or
+ * hidden meanwhile, unless another scope's committed membership holds them.
+ * The snapshot is never discarded because of churn, so a partition load cannot
+ * starve the way a skip-apply-on-race hydration can.
  *
  * Loads are deduplicated per (authority, board), and a load whose authority
  * changed before it resolved applies nothing.
@@ -38,18 +37,19 @@ import {
 import { type AgorState, agorStore } from './agorStore';
 import { captureLoadLifetime, isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
 import {
-  applyPartitionSnapshot,
   BOARD_SCOPE_PREFIX,
   type BoardPartitionSnapshot,
   boardPartitionScope,
   boardScopeKey,
   type CoverageUpdate,
+  replaceScope,
   type ScopeCoverage,
   type ScopeRows,
   settledMembers,
   withCoverage,
 } from './scopeMerge';
 import { sessionListQuery } from './sessionListQuery';
+import { otherCommittedMembers } from './userScope';
 
 /** `boardId`'s partition coverage entry, if any. */
 export function selectBoardPartition(
@@ -277,8 +277,8 @@ async function fetchBoardPartition(
 }
 
 /**
- * Load one board's partition and merge it into the store
- * (`applyPartitionSnapshot`). Deduplicated per
+ * Load one board's partition and replace it in the store (`replaceScope`,
+ * respecting the other scopes' committed members). Deduplicated per
  * (authority, lifetime, board); resolves once applied, dropped, or failed.
  *
  * The `loading` entry is owned by this load (its `generation`). A load that
@@ -326,7 +326,14 @@ export function loadBoardPartition(
         const touched = (collection: HydratedCollection, id: string) =>
           touchedSince(collection, id, fence.startRevisions[collection]);
         store().applyMaps(
-          (prev) => applyPartitionSnapshot(prev, snapshot, touched),
+          (prev) =>
+            replaceScope(
+              prev,
+              boardPartitionScope(boardId),
+              snapshot,
+              touched,
+              otherCommittedMembers(store(), boardScopeKey(boardId))
+            ),
           settleBoardPartition(boardId, lifetime, generation, snapshot, fence.startRevisions)
         );
         return;
