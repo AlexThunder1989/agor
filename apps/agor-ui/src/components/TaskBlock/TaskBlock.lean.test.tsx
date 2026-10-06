@@ -316,7 +316,7 @@ it('keeps verified recovery and authorization notices visible at the bottom with
       client: {} as NonNullable<React.ComponentProps<typeof TaskBlock>['client']>,
     })
   );
-  expect(screen.getByRole('button', { name: 'Resume in new task' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Continue conversation' })).toBeVisible();
   expect(screen.getAllByRole('alert')).toHaveLength(1);
   expect(screen.getByRole('alert')).toHaveTextContent('Durable failure reason');
   expect(container.querySelector('[data-task-block]')!.lastElementChild).toBe(
@@ -336,7 +336,7 @@ it('keeps verified recovery and authorization notices visible at the bottom with
   );
   expect(screen.getAllByRole('alert')).toHaveLength(1);
   expect(screen.getByRole('alert')).toHaveTextContent('Task access revoked');
-  expect(screen.queryByRole('button', { name: 'Resume in new task' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Continue conversation' })).toBeNull();
 });
 
 it('keeps stopped outcomes warning-level even with an explanatory reason', () => {
@@ -603,4 +603,47 @@ it('keeps a load pin taken before the previous commit’s passive effect runs', 
   await new Promise((resolve) => setTimeout(resolve, 50));
   // The stale effect (from the render before the click) must not release it.
   expect(events).toEqual(['click', 'retain 1']);
+});
+
+it('retains received output without a typing indicator after cleanup fails', () => {
+  const { container } = render(
+    view({
+      task: {
+        ...task,
+        status: TaskStatus.STOPPING,
+        sdk_failure: { termination: 'unverified' } as Task['sdk_failure'],
+        termination_request: { cause: 'heartbeat_lost', requested_at: 'now' },
+      },
+    })
+  );
+  expect(screen.getByText('Visible answer')).toBeVisible();
+  expect(screen.getByText('Retained prompt')).toBeVisible();
+  expect(screen.getByRole('status')).toHaveTextContent('Cleanup needs attention');
+  expect(container.querySelector('.ant-bubble-loading')).toBeNull();
+});
+
+it('explains a failed Continue action inline instead of only logging it', async () => {
+  const prompt = vi.fn().mockRejectedValue(new Error('Disconnected'));
+  render(
+    view({
+      task: {
+        ...task,
+        status: TaskStatus.FAILED,
+        sdk_failure: { termination: 'verified' } as Task['sdk_failure'],
+        termination_request: { cause: 'heartbeat_lost', requested_at: 'now' },
+      },
+      isLatestTask: true,
+      sessionId: task.session_id,
+      client: { sessions: { prompt } } as unknown as NonNullable<
+        React.ComponentProps<typeof TaskBlock>['client']
+      >,
+    })
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Continue conversation' }));
+  expect(
+    await screen.findByText(
+      'Could not continue the conversation. Try again or send a message below.'
+    )
+  ).toBeVisible();
+  expect(prompt).toHaveBeenCalledOnce();
 });

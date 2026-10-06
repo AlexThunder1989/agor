@@ -223,8 +223,9 @@ describe('verified runtime interruption projection', () => {
   } as unknown as Task;
 
   it.each([
-    ['heartbeat_lost', 'stopped unexpectedly or stopped responding'],
-    ['startup_timeout', 'did not start in time'],
+    ['heartbeat_lost', 'stopped unexpectedly or lost its connection'],
+    ['startup_timeout', 'could not start in time'],
+    ['executor_interrupted', 'was interrupted before it could finish'],
     ['sdk_health_failure', 'stopped making progress'],
   ])('explains a %s interruption by its cause', (cause, expected) => {
     const description = runtimeInterruptionDescription({
@@ -232,7 +233,7 @@ describe('verified runtime interruption projection', () => {
       termination_request: { ...task.termination_request!, cause },
     } as Task);
     expect(description).toContain(expected);
-    expect(description).toContain('verified containment');
+    expect(description).toContain('previous work has stopped');
   });
 
   it('offers outcome-based recovery only for the latest verified interruption', () => {

@@ -10,6 +10,10 @@ export function classifyExecutorExit(input: {
 }): ExecutorExitDisposition {
   if (input.mode === 'local') return 'authoritative';
   if (input.code === 0) return 'passive';
+  // A signaled launcher did not report its failure contract. sh -c can encode
+  // its child's signal as 128+signal instead of exposing Node's signal field.
+  // Neither form proves whether detached remote work was already submitted.
+  if (input.code === null || input.code >= 128) return 'ambiguous';
   return input.nonzeroMayHaveDispatched ? 'ambiguous' : 'authoritative';
 }
 

@@ -1,5 +1,6 @@
 import { type Task, TaskStatus } from '@agor/core/types';
 import { Alert, theme } from 'antd';
+import { taskRecoveryNotice } from './taskRecovery';
 
 // Exhaustive policy: new lifecycle states must choose a presentation instead of
 // accidentally acquiring another floating icon. Approvals/queue own their UI.
@@ -20,6 +21,28 @@ const outcomeLabels: Record<TaskStatus, string | null> = {
 /** Exceptional outcomes belong after the response, never above the prompt or behind hover. */
 export function TurnOutcome({ task }: { task: Task }) {
   const { token } = theme.useToken();
+  const recovery = taskRecoveryNotice(task);
+  if (recovery)
+    return (
+      <Alert
+        {...recovery}
+        showIcon
+        role="status"
+        data-turn-outcome
+        description={
+          <>
+            {recovery.description}
+            {task.error_message && (
+              <details>
+                <summary>Technical details</summary>
+                {task.termination_request?.cleanup_diagnostic ?? task.error_message}
+              </details>
+            )}
+          </>
+        }
+        style={{ marginTop: token.marginSM }}
+      />
+    );
   const label =
     outcomeLabels[task.status] ?? (task.error_message ? 'Turn reported an error' : null);
   if (!label) return null;

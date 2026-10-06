@@ -151,7 +151,10 @@ export function isAuthorizationRevokedFailure(task: Task): boolean {
 
 /** Presentation policy: keep STOPPING output visible until a durable terminal projection arrives. */
 export function shouldRenderLiveTaskProgress(task: Task): boolean {
-  return task.status === TaskStatus.RUNNING || task.status === TaskStatus.STOPPING;
+  return (
+    task.status === TaskStatus.RUNNING ||
+    (task.status === TaskStatus.STOPPING && task.sdk_failure?.termination !== 'unverified')
+  );
 }
 
 /**
@@ -163,13 +166,15 @@ export function runtimeInterruptionDescription(task: Task): string {
   const cause = task.termination_request?.cause ?? task.sdk_failure?.reason;
   const reason =
     cause === 'startup_timeout'
-      ? 'The executor did not start in time.'
+      ? 'The agent could not start in time.'
       : cause === 'heartbeat_lost'
-        ? 'The executor stopped unexpectedly or stopped responding. This can happen when Agor restarts during a task.'
-        : cause === 'sdk_health_failure'
-          ? 'The agent stopped making progress, so Agor ended the task.'
-          : 'Agor interrupted this task.';
-  return `${reason} Agor verified containment before making this session promptable.`;
+        ? 'The agent stopped unexpectedly or lost its connection.'
+        : cause === 'executor_interrupted'
+          ? 'The agent was interrupted before it could finish.'
+          : cause === 'sdk_health_failure'
+            ? 'The agent stopped making progress, so Agor ended the task.'
+            : 'Agor interrupted this task.';
+  return `${reason} The previous work has stopped. You can continue this conversation.`;
 }
 
 function RuntimeInterruptionNotice({
@@ -183,9 +188,11 @@ function RuntimeInterruptionNotice({
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [resumed, setResumed] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
   const handleResume = async () => {
     if (!client || !sessionId) return;
     setSubmitting(true);
+    setResumeError(null);
     try {
       // This deliberately starts a new durable Task. It never attempts to
       // revive the failed Task or reuse its executor ownership.
@@ -196,6 +203,7 @@ function RuntimeInterruptionNotice({
       setResumed(true);
     } catch (error) {
       console.error('Failed to resume after runtime interruption:', error);
+      setResumeError('Could not continue the conversation. Try again or send a message below.');
     } finally {
       setSubmitting(false);
     }
@@ -210,13 +218,19 @@ function RuntimeInterruptionNotice({
       description={
         <>
           {runtimeInterruptionDescription(task)}
-          {task.error_message && <div>{task.error_message}</div>}
+          {resumeError && <Alert type="error" title={resumeError} />}
+          {task.error_message && (
+            <details>
+              <summary>Technical details</summary>
+              {task.error_message}
+            </details>
+          )}
         </>
       }
       action={
         client && sessionId && !resumed ? (
           <Button size="small" type="primary" loading={submitting} onClick={handleResume}>
-            Resume in new task
+            Continue conversation
           </Button>
         ) : undefined
       }
@@ -1284,11 +1298,11 @@ export const TaskBlock = React.memo<TaskBlockProps>(
         {/* Keep latest TODO visible even after completion (Claude parity). */}
         <StickyTodoRenderer messages={messages} taskStatus={task.status} />
 
-        {/* Show typing indicator whenever the executor may still be live.
+        {/* Show typing only during active work, not recovery or a failed cleanup.
                       Marked as a conversation block so its unmount at stream
                       end gives search one final structural re-scan that picks
                       up the finished message text. */}
-        {runtimeLive && (
+        {task.status === TaskStatus.RUNNING && (
           <div data-conversation-block style={{ margin: `${token.marginSM}px 0` }}>
             <Bubble
               placement="start"
