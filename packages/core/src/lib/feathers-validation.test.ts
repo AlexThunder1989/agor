@@ -126,6 +126,19 @@ describe('branchQueryValidator', () => {
   });
 });
 
+describe('search text', () => {
+  it('rejects NUL and other control characters; whitespace stays a separator', async () => {
+    for (const validator of [sessionQueryValidator, branchQueryValidator]) {
+      for (const search of ['zz\u0000', 'a\u0001b', 'a\u001bb', 'a\u007fb']) {
+        await expect(validator({ search })).rejects.toThrow(/validation failed/);
+      }
+      expect(await validator({ search: 'login\tfix\nflow' })).toEqual({
+        search: 'login\tfix\nflow',
+      });
+    }
+  });
+});
+
 describe('branchCountsQueryValidator', () => {
   it('takes no query: a filter it would ignore is rejected', async () => {
     expect(await branchCountsQueryValidator({})).toEqual({});

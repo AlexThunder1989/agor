@@ -86,6 +86,13 @@ export const CommonSchemas = {
     Type.Literal('allow-all'),
   ]),
 
+  // Daemon search text: no control characters (NUL ends a SQLite LIKE
+  // pattern, so `'%\0%'` matches every row); tab, LF and CR separate terms.
+  searchText: Type.String({
+    maxLength: 255,
+    pattern: '^[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]*$',
+  }),
+
   // Timestamps
   timestamp: Type.Integer({ minimum: 0 }),
 
@@ -165,7 +172,7 @@ export const sessionQuerySchema = createQuerySchema(
     schedule_id: Type.Optional(CommonSchemas.uuid),
     created_by: Type.Optional(CommonSchemas.uuid),
     // Every token in `SEARCHABLE_FIELDS.session` (SQL page only).
-    search: Type.Optional(Type.String({ maxLength: 255 })),
+    search: Type.Optional(CommonSchemas.searchText),
     archived: Type.Optional(CommonSchemas.boolean),
     created_at: Type.Optional(CommonSchemas.timestamp),
     updated_at: Type.Optional(CommonSchemas.timestamp),
@@ -348,7 +355,7 @@ export const branchQuerySchema = createQuerySchema(
     teammate: Type.Optional(CommonSchemas.boolean),
     // Every token, over `SEARCHABLE_FIELDS.branch`, the branch id, unique id and
     // path, and its repo's slug and name (SQL page only; `BranchRepository.findPage`).
-    search: Type.Optional(Type.String({ maxLength: 255 })),
+    search: Type.Optional(CommonSchemas.searchText),
     repo_id: Type.Optional(CommonSchemas.uuid),
     board_id: Type.Optional(CommonSchemas.uuid),
     zone_id: Type.Optional(Type.String({ maxLength: 255 })),
@@ -404,9 +411,9 @@ export const userQuerySchema = createQuerySchema(
   Type.Object({
     user_id: Type.Optional(CommonSchemas.uuid),
     email: Type.Optional(Type.String({ maxLength: 255 })),
-    search: Type.Optional(Type.String({ maxLength: 255 })),
-    query: Type.Optional(Type.String({ maxLength: 255 })),
-    q: Type.Optional(Type.String({ maxLength: 255 })),
+    search: Type.Optional(CommonSchemas.searchText),
+    query: Type.Optional(CommonSchemas.searchText),
+    q: Type.Optional(CommonSchemas.searchText),
     limit: Type.Optional(Type.Integer({ minimum: 0, maximum: 10000 })),
     skip: Type.Optional(Type.Integer({ minimum: 0, maximum: 10000 })),
     offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 10000 })),

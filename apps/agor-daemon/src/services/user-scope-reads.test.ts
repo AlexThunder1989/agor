@@ -282,6 +282,16 @@ describe('user-scope reads through transport hooks', () => {
       ).map((b) => b.branch_id);
       expect(found).toEqual([legacy.branch_id]);
     }
+    // NUL ends a SQLite LIKE pattern (`'%\0%'` matches every row): rejected.
+    for (const service of ['sessions', 'branches'] as const) {
+      await expect(
+        app.service(service).find({
+          provider: 'rest',
+          user: viewer,
+          query: { search: '\u0000', archived: false, $limit: 10 },
+        } as never)
+      ).rejects.toThrow(/validation failed/);
+    }
     // A search is at most MAX_SEARCH_TOKENS distinct terms; repeats count once.
     const nine = 'a b c d e f g h i';
     for (const service of ['sessions', 'branches'] as const) {
