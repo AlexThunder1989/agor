@@ -33,6 +33,7 @@ import {
   selectSessionsByBranch,
   selectUserById,
 } from '../../store/selectors';
+import { selectTeammatesLoaded } from '../../store/userScope';
 import { mapToArray } from '../../utils/mapHelpers';
 import { useThemedMessage } from '../../utils/message';
 import { BranchSessionSections } from '../BranchCard';
@@ -128,6 +129,8 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
   // this panel when its own slice changes.
   const sessionsByBranch = useAgorStore(selectSessionsByBranch);
   const branchById = useAgorStore(selectBranchById);
+  // The assign list is the user scope's teammates (U3): empty means none only once it lands.
+  const teammatesLoaded = useAgorStore(selectTeammatesLoaded);
   const repoById = useAgorStore(selectRepoById);
   const userById = useAgorStore(selectUserById);
   const commentById = useAgorStore(selectCommentById);
@@ -465,9 +468,10 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
               options={teammateOptions}
               optionFilterProp="searchText"
               disabled={assigningTeammate || teammateOptions.length === 0}
+              loading={!teammatesLoaded}
               style={{ width: '100%' }}
             />
-            {teammateOptions.length === 0 && (
+            {teammateOptions.length === 0 && teammatesLoaded && (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 No existing teammates are available to assign.
               </Typography.Text>
