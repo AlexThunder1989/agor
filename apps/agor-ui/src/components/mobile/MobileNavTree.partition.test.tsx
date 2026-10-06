@@ -39,6 +39,11 @@ function makeClient() {
         return name === 'branches' ? [branch] : name === 'sessions' ? [session] : [];
       }),
       get: vi.fn(async () => ({ ...board, objects: {} })),
+      find: vi.fn(async () =>
+        name === 'branch-counts' ? [{ board_id: board.board_id, branch_count: 4 }] : []
+      ),
+      on: vi.fn(),
+      off: vi.fn(),
     }),
   } as unknown as AgorClient;
   return { client, reads };
@@ -91,4 +96,11 @@ it('loads an expanded board in the background and lists its branches and session
   await waitFor(() => expect(reads).toContain('sessions'));
   // A navigation list never takes the displayed board's place.
   expect(getDisplayedBoardId()).toBeUndefined();
+});
+
+it("badges a collapsed board with its branch-counts aggregate, not the store's branches", async () => {
+  const { client, reads } = makeClient();
+  render(<Tree client={client} />);
+  await waitFor(() => expect(document.querySelector('.ant-badge-count')).toHaveTextContent('4'));
+  expect(reads).toEqual([]);
 });

@@ -19,6 +19,7 @@ import { resolveExternalAppLink } from '@/utils/externalAppLink';
 import { mapToArray } from '@/utils/mapHelpers';
 import { getSessionDisplayTitle } from '@/utils/sessionTitle';
 import { useBoardPartition } from '../../hooks/useBoardPartition';
+import { useBranchCounts } from '../../hooks/useBranchCounts';
 import { BoardCollapse } from '../BoardCollapse';
 import { getBoardEmoji } from '../BoardTile';
 
@@ -147,6 +148,7 @@ export const MobileNavTree: React.FC<MobileNavTreeProps> = ({
   };
 
   const boards = useMemo(() => mapToArray(boardById), [boardById]);
+  const branchCountByBoard = useBranchCounts(client);
   const openSettings = (section: string) => {
     onOpenWorkspaceSettings(section);
     onNavigate?.();
@@ -187,7 +189,7 @@ export const MobileNavTree: React.FC<MobileNavTreeProps> = ({
             badge: (
               <Space size={8}>
                 <Badge
-                  count={boardBranches.length}
+                  count={branchCountByBoard.get(board.board_id) ?? 0}
                   style={{ backgroundColor: token.colorPrimaryBg }}
                   showZero
                 />
