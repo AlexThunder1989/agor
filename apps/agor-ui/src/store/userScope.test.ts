@@ -1001,6 +1001,68 @@ describe('user scope — reconnect replace', () => {
     expect(flags()).toMatchObject({ mySessionsLoaded: true, teammatesLoaded: true });
   });
 
+  it('my own teammate branch deleted while disconnected leaves even when U3 replies before U2', async () => {
+    // br-own-mate is mine AND a teammate: both U2 and U3 hold it.
+    const ownMate = branch('br-own-mate', {
+      created_by: ME,
+      custom_context: { teammate: { kind: 'teammate' } },
+    } as Partial<Branch>);
+    const first = makeClient({ myBranches: () => [ownMate], teammates: () => [ownMate] });
+    await startUserScope(first.client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: true,
+    });
+    expect(has('branchById', 'br-own-mate')).toBe(true);
+    // Deleted while disconnected; on reconnect U3 answers first, U2 later.
+    let releaseU2!: () => void;
+    const u2 = new Promise<void>((resolve) => {
+      releaseU2 = resolve;
+    });
+    const resync = makeClient({
+      myBranches: async () => {
+        await u2;
+        return [];
+      },
+      teammates: () => [],
+    });
+    const run = startUserScope(resync.client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: true,
+      replace: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    releaseU2();
+    await run;
+    expect(has('branchById', 'br-own-mate')).toBe(false);
+    expect(flags().teammatesLoaded).toBe(true);
+  });
+
+  it('a cold run still shows teammate rows before my branches settle', async () => {
+    let releaseU2!: () => void;
+    const u2 = new Promise<void>((resolve) => {
+      releaseU2 = resolve;
+    });
+    const { client } = makeClient({
+      myBranches: async () => {
+        await u2;
+        return [];
+      },
+      teammates: () => [mate('mate-1')],
+    });
+    const run = startUserScope(client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: true,
+    });
+    await vi.waitFor(() => expect(has('branchById', 'mate-1')).toBe(true));
+    expect(flags().teammatesLoaded).toBe(false);
+    releaseU2();
+    await run;
+    expect(flags().teammatesLoaded).toBe(true);
+  });
+
   it('a capped read removes nothing', async () => {
     await loadScope();
     const capped = Array.from({ length: MY_SESSIONS_FULL_LIMIT }, (_, i) =>

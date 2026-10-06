@@ -281,7 +281,8 @@ export type FillRows = { branches?: Branch[]; sessions?: Session[] };
  *
  * With `piece`, the read commits that piece in the update that applies its
  * rows; with `commitIf`, the rows apply at once and the piece commits once it
- * resolves true (false resolves null). Its membership is the rows it returned,
+ * resolves true (false resolves null); a deferred replace applies its rows
+ * only then, with the coverage. Its membership is the rows it returned,
  * with the rows realtime wrote meanwhile judged by their current value
  * (`settledMembers`). With `replace`, the rows reconcile that scope
  * (`replaceScope`, complete unless the piece says the read was capped) instead
@@ -351,8 +352,18 @@ async function fillRead(
             )
           : applyEntityFill(prev, rows, touched);
       let meta = options.meta?.(rows);
-      if (piece?.commitIf) {
-        // A deferred commit publishes the rows now and the coverage once allowed.
+      if (piece?.commitIf && replace) {
+        // A deferred reconcile applies its rows and coverage together once
+        // allowed: applied earlier, its removals would be judged against the
+        // memberships of the very pieces it waits for (a branch both pieces
+        // hold would survive each one's replace through the other's old one).
+        if (!(await piece.commitIf()) || !current()) return null;
+        if (wholesaleReplacedSince(fence)) {
+          if (attempt < MAX_WHOLESALE_RESTARTS) continue;
+          throw new WholesaleReplacementError();
+        }
+      } else if (piece?.commitIf) {
+        // A deferred fill publishes the rows now and the coverage once allowed.
         agorStore.getState().applyMaps(update, undefined, meta);
         if (!(await piece.commitIf()) || !current()) return null;
         update = (prev) => prev;
