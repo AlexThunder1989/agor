@@ -549,6 +549,8 @@ const ConversationViewInner = React.memo<ConversationViewProps>(
     // A loop rather than a render-scoped .map() callback, for the reason above.
     const taskBlocks: React.ReactNode[] = [];
     for (const [taskIndex, task] of tasks.entries()) {
+      // Only the latest turn offers recovery, so older memoized turns ignore promptability changes.
+      const isLatestTask = taskIndex === tasks.length - 1;
       taskBlocks.push(
         <TaskBlock
           key={task.task_id}
@@ -569,8 +571,8 @@ const ConversationViewInner = React.memo<ConversationViewProps>(
           onLoadTaskMessages={handleLoadTaskMessages}
           onRetainTaskDetails={handleRetainTaskDetails}
           teammateEmoji={teammateEmoji}
-          isLatestTask={taskIndex === tasks.length - 1}
-          canStartTurn={canStartTurn}
+          isLatestTask={isLatestTask}
+          canStartTurn={canStartTurn && isLatestTask}
           client={client}
           onOpenAgenticToolSettings={onOpenAgenticToolSettings}
           compact={compact}
