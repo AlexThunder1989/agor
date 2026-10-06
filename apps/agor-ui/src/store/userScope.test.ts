@@ -1034,4 +1034,59 @@ describe('user scope — reconnect replace', () => {
     expect(has('branchById', 'br-gone')).toBe(true);
     expect(has('branchById', 'mate-gone')).toBe(true);
   });
+
+  it('re-reads every referenced branch, present ones too, and removes the ones a chunk omits', async () => {
+    const first = makeClient({
+      mine: () => [
+        session('s-1', 'br-ref'),
+        session('s-2', 'br-gone'),
+        session('s-3', 'br-held'),
+        session('s-del', 'br-mine-del'),
+      ],
+      myBranches: () => [mine('br-mine-del')],
+      byIds: (ids) => ids.map((id) => branch(id, { board_id: 'board-2' })),
+    });
+    await startUserScope(first.client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: false,
+    });
+    await vi.waitFor(() => expect(flags().homeBranchesLoaded).toBe(true));
+    // board-3's committed membership holds br-held.
+    agorStore.getState().setCoverage(boardScopeKey('board-3'), {
+      ...boardCoverage('loaded', lifetime()),
+      members: { branches: new Set(['br-held']) },
+    });
+
+    // While disconnected: br-ref renamed, br-gone deleted, br-held hidden
+    // from the id read, and s-del deleted with its branch br-mine-del.
+    const resync = makeClient({
+      mine: () => [session('s-1', 'br-ref'), session('s-2', 'br-gone'), session('s-3', 'br-held')],
+      myBranches: () => [],
+      byIds: (ids) =>
+        ids
+          .filter((id) => id === 'br-ref')
+          .map((id) => branch(id, { board_id: 'board-2', name: 'renamed' })),
+    });
+    await startUserScope(resync.client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: false,
+      replace: true,
+    });
+    await vi.waitFor(() => expect(has('branchById', 'br-gone')).toBe(false));
+    const state = agorStore.getState();
+    expect(state.branchById.get('br-ref')?.name).toBe('renamed');
+    expect(state.absentBranchIds.has('br-gone')).toBe(true);
+    expect(has('sessionById', 's-del')).toBe(false);
+    // Referenced only by a session that is gone now: still reconciled.
+    expect(has('branchById', 'br-mine-del')).toBe(false);
+    expect(has('branchById', 'br-held')).toBe(true);
+    expect(state.absentBranchIds.has('br-held')).toBe(false);
+    const requested = resync.calls.flatMap(
+      (c) => (c.query.branch_id as { $in?: string[] } | undefined)?.$in ?? []
+    );
+    expect(requested).toEqual(expect.arrayContaining(['br-ref', 'br-gone', 'br-held']));
+    expect(flags().homeBranchesLoaded).toBe(true);
+  });
 });

@@ -23,7 +23,9 @@
  * A reconnect run (`replace`) reconciles instead: U1, U2 and U3 apply as
  * complete replaces of their piece (`replaceScope`), so rows deleted, archived
  * or moved out while disconnected leave, unless another scope's committed
- * membership holds them; a capped read removes nothing.
+ * membership holds them; a capped read removes nothing. Once they settled it
+ * re-reads every referenced branch, present ones too, by id: a chunk's
+ * omitted ids leave the same way and become absent.
  * U1, U2 and U3 each commit a coverage entry (`USER_SCOPE_KEYS`) in the update
  * that applies their rows, with the run's generation, their membership
  * (`settledMembers`, then kept live by realtime) and whether the read was
@@ -404,8 +406,6 @@ function commitPiece(
 /**
  * Mark the referenced-branch piece loaded. Its membership is derived
  * (`referenceMembers`), so it commits none.
- * TODO(batch C): a reconnect should re-read every referenced id, not only the
- * missing ones, so rows changed while disconnected reconcile too.
  */
 function settleReferencePiece(run: ScopeRun): void {
   commitPiece(run, USER_SCOPE_KEYS.references, { status: 'loaded' });
@@ -545,12 +545,20 @@ function idReadsDrained(run: ScopeRun): Promise<void> {
 
 /**
  * Read one chunk of branch ids and record the ones the server doesn't return —
- * and that didn't arrive meanwhile — as absent. A failed read is retried with
- * backoff; the ids stay pending until it settles.
+ * and that didn't arrive meanwhile — as absent. In a replace run the chunk
+ * reconciles its ids: returned rows overwrite, omitted ones leave unless
+ * another scope's committed membership holds them. A failed read is retried
+ * with backoff; the ids stay pending until it settles.
  */
 async function readBranchChunk(run: ScopeRun, chunk: string[]): Promise<void> {
   try {
     const requested = new Set(chunk);
+    const replace: LoadScope | undefined = run.replace
+      ? {
+          key: USER_SCOPE_KEYS.references,
+          claims: { branches: (branch) => requested.has(branch.branch_id) },
+        }
+      : undefined;
     const rows = await fillRead(
       () => isCurrent(run),
       async () => ({
@@ -563,6 +571,7 @@ async function readBranchChunk(run: ScopeRun, chunk: string[]): Promise<void> {
       {
         violatesFilter: ({ branches }) =>
           (branches ?? []).some((branch) => !requested.has(branch.branch_id)),
+        replace,
       }
     );
     // Recheck after the await: `fillRead` applied while current, but this
@@ -607,7 +616,7 @@ function scheduleRetry(run: ScopeRun, ids: string[]): void {
     for (const id of ids) run.pending.delete(id);
     queueBranches(
       run,
-      ids.filter((id) => !agorStore.getState().branchById.has(id))
+      ids.filter((id) => run.replace || !agorStore.getState().branchById.has(id))
     );
     settleHomeBranches(run);
   }, referenceRetryDelayMs(attempt));
@@ -723,6 +732,10 @@ export async function startUserScope(
     });
   }
 
+  // A replace run re-reads the branches referenced before it, too: one may
+  // lose its last reference when U1 removes a session, and nothing else
+  // would read it again.
+  const startReferences = run.replace ? referencedBranchIds(store(), run.userId) : null;
   // Subscribe before any read: a reference that appears while the reads below
   // are in flight is seen by the subscription, never lost between a scan and
   // a late subscribe.
@@ -836,6 +849,16 @@ export async function startUserScope(
   // teammates (U3) only shrink the id list, so they needn't succeed.
   const ok = (index: number) => settled[index].status === 'fulfilled' && settled[index].value;
   if (ok(0) && ok(1)) run.referencesKnown = true;
+  if (startReferences) {
+    // After U1-U3 applied, so no piece replace runs after a chunk and keeps a
+    // row through a reference that is gone. Missing ids are already queued.
+    const state = store();
+    const present = [...startReferences, ...referencedBranchIds(state, run.userId)];
+    queueBranches(
+      run,
+      present.filter((id) => state.branchById.has(id))
+    );
+  }
   // Immediate catch-up scan (not debounced), even when U1 or U2 failed: the
   // references a read that did land added are queued now. Resolve only once
   // those follow-up id reads settle, so a caller holding the global snapshots
