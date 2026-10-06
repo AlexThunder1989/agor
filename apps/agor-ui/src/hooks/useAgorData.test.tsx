@@ -1525,8 +1525,6 @@ describe('useAgorData — lean boards list + objects hydration', () => {
 
 describe('useAgorData — user-scope flags', () => {
   it('reset on an identity change and recover once the silent resync re-runs the scope', async () => {
-    // Rows honour each user's `created_by` filter (rows violating it would
-    // read as an older daemon that ignores the key).
     const seed: Record<string, unknown[]> = {
       'sessions:find': [makeSession({ created_by: 'user-a' })],
       'sessions:findAll': [makeSession({ created_by: 'user-a' })],
@@ -1940,13 +1938,13 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
     await waitFor(() => expect(selectMySessionsLoaded(agorStore.getState())).toBe(true));
   });
 
-  it('degrades to the global recent slice when an older daemon rejects the my-sessions page', async () => {
+  it('opens the gate when the my-sessions page fails, and U1 reads my sessions', async () => {
     window.history.pushState({}, '', '/');
-    const recent = makeSession({ session_id: 's-recent' });
-    const { client, fetchArguments, onFetch } = makeMockClient({ 'sessions:find': [recent] });
-    // Call 1 is the my-sessions page; call 2 the fallback recent slice.
+    const mine = makeSession({ session_id: 's-mine', created_by: 'user-me' });
+    const { client, fetchArguments, onFetch } = makeMockClient({ 'sessions:find': [mine] });
+    // Call 1 is the gated my-sessions page; call 2 is U1.
     onFetch('sessions', 'find', (call) =>
-      call === 1 ? Promise.reject(new Error('400 $count unsupported')) : undefined
+      call === 1 ? Promise.reject(new Error('socket timeout')) : undefined
     );
     onFetch('sessions', 'findAll', never);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -1957,16 +1955,10 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
         expect(result.current.initialLoadComplete).toBe(true);
       });
       expect(result.current.error).toBeNull();
-      expect(fetchArguments('sessions', 'find')[1]).toEqual({
-        query: {
-          archived: false,
-          lean: true,
-          $limit: 50,
-          $count: false,
-          $sort: { updated_at: -1 },
-        },
-      });
-      expect(agorStore.getState().sessionById.has('s-recent')).toBe(true);
+      await waitFor(() => expect(agorStore.getState().sessionById.has('s-mine')).toBe(true));
+      expect(
+        (fetchArguments('sessions', 'find')[1] as { query: { $limit?: number } }).query.$limit
+      ).toBe(10000);
     } finally {
       warn.mockRestore();
     }
@@ -2182,62 +2174,6 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
       ).toBe(false);
     } finally {
       bob.unmount();
-    }
-  });
-
-  it('completes Home from the global snapshots against an older daemon that rejects every new key', async () => {
-    window.history.pushState({}, '', '/');
-    const mine = makeSession({ session_id: 's-mine', created_by: 'user-me', branch_id: 'b-1' });
-    const lost = makeSession({ session_id: 's-lost', created_by: 'user-me', branch_id: 'b-gone' });
-    const mock = makeMockClient({
-      'sessions:find': [mine],
-      'sessions:findAll': [mine, lost],
-      'branches:findAll': [makeBranch({ branch_id: 'b-1', created_by: 'user-me' })],
-    });
-    // The pre-PR validator: `created_by` with `$count: false`, `teammate`,
-    // branch `created_by` and id lists are all rejected with 400, every time.
-    const rejected: unknown[] = [];
-    const isNewKey = (name: string, query: Record<string, unknown> = {}) =>
-      (name === 'sessions' && query.created_by !== undefined) ||
-      (name === 'branches' &&
-        (query.created_by !== undefined ||
-          query.teammate !== undefined ||
-          typeof query.branch_id === 'object'));
-    const service = mock.client.service;
-    (mock.client as { service: unknown }).service = (name: string) => {
-      const svc = service(name);
-      for (const method of ['find', 'findAll'] as const) {
-        const original = svc[method];
-        svc[method] = vi.fn((args?: { query?: Record<string, unknown> }) => {
-          if (isNewKey(name, args?.query)) {
-            rejected.push(args?.query);
-            return Promise.reject(
-              Object.assign(new Error('Invalid query'), { name: 'BadRequest', code: 400 })
-            );
-          }
-          return original(args);
-        });
-      }
-      return svc;
-    };
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const { result } = renderHook(() => useAgorData(mock.client, authority));
-      await waitForInitialLoad(result);
-      expect(result.current.error).toBeNull();
-      await waitFor(() => {
-        const state = agorStore.getState();
-        expect(state.userScopeDegraded).toBe(true);
-        expect(selectMySessionsLoaded(state)).toBe(true);
-        expect(selectTeammatesLoaded(state)).toBe(true);
-        expect(selectHomeBranchesLoaded(state)).toBe(true);
-      });
-      expect(agorStore.getState().sessionById.has('s-lost')).toBe(true);
-      expect([...agorStore.getState().absentBranchIds]).toEqual(['b-gone']);
-      // Only the gated page probed the new keys; the scope sent none after it.
-      expect(rejected).toHaveLength(1);
-    } finally {
-      warn.mockRestore();
     }
   });
 

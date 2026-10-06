@@ -107,7 +107,6 @@ import {
 import { resetSessionMcpLinks } from '../store/sessionMcpLinks';
 import {
   fillOnDemand,
-  isUnsupportedQueryError,
   MY_SESSIONS_GATED_LIMIT,
   mySessionsQuery,
   otherCommittedMembers,
@@ -748,12 +747,8 @@ export function useAgorData(
         // Set when the gated page of MY sessions returned fewer rows than its
         // limit, i.e. it already holds every active session I created.
         let gatedMineComplete = false;
-        // Set when the daemon rejected the gated page's keys or ignored its
-        // `created_by` filter (an older daemon): the user scope starts degraded.
-        let gatedUnsupported = false;
-        // The global recent slice: the reconnect resync's full set, the
-        // fallback when the user-scoped page is unavailable (an older daemon
-        // rejects `created_by` with `$count:false`), and the standalone default.
+        // The global recent slice: the reconnect resync's full set and the
+        // standalone default.
         const recentSessions = () =>
           client
             .service('sessions')
@@ -794,20 +789,13 @@ export function useAgorData(
                     .find({ query: mySessionsQuery(authenticatedUserId, MY_SESSIONS_GATED_LIMIT) })
                     .then((result) => {
                       const rows = (Array.isArray(result) ? result : result.data) as Session[];
-                      // Rows of other users mean the filter was ignored: still
-                      // visible rows for first paint, but no proof of "all mine".
-                      gatedUnsupported = rows.some((s) => s.created_by !== authenticatedUserId);
-                      gatedMineComplete =
-                        !gatedUnsupported && rows.length < MY_SESSIONS_GATED_LIMIT;
+                      gatedMineComplete = rows.length < MY_SESSIONS_GATED_LIMIT;
                       return rows;
                     })
                     .catch((err) => {
-                      console.warn(
-                        '[useAgorData] my-sessions page failed; using recent slice:',
-                        err
-                      );
-                      gatedUnsupported = isUnsupportedQueryError(err);
-                      return recentSessions();
+                      // Non-fatal: U1 reads every session of mine after paint.
+                      console.warn('[useAgorData] my-sessions page failed:', err);
+                      return [] as Session[];
                     })
                 : recentSessions()
           ),
@@ -1325,7 +1313,6 @@ export function useAgorData(
             userId: authenticatedUserId,
             lifetime: loadLifetime,
             gatedMineComplete: !silent && gatedMineComplete,
-            unsupported: !silent && gatedUnsupported,
             // A resync reconciles the scope: rows deleted, archived or moved
             // out while disconnected leave.
             replace: silent,

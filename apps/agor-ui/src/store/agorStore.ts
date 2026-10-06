@@ -90,18 +90,11 @@ export interface UserScopeMeta {
    * it. Holds the current link's miss only.
    */
   missingLinkTargets: Set<string>;
-  /**
-   * The daemon does not support the user-scope reads (an older daemon rejects
-   * or ignores their query keys). Terminal for the run; while global
-   * hydration exists (Steps 1–2) its snapshots complete the scope instead.
-   */
-  userScopeDegraded: boolean;
 }
 
 const INITIAL_USER_SCOPE: UserScopeMeta = {
   absentBranchIds: new Set(),
   missingLinkTargets: new Set(),
-  userScopeDegraded: false,
 };
 
 /** Load/meta fields that ride alongside the data maps. */
