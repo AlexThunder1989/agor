@@ -2,17 +2,23 @@
  * Long-tab retention (design r3 §4.5): with global hydration off, opening and
  * closing many boards and sessions keeps the store on a plateau — the
  * displayed board, `RETAINED_BACKGROUND_PARTITIONS` recent partitions, the
- * user scope and the pinned rows — instead of growing with every visit.
+ * user scope and the pinned rows — instead of growing with every visit, and
+ * so do the ways a row can enter without an owner: replies that land after
+ * their view unmounted, realtime on boards never loaded, archived deep links
+ * and board loads that settle after the user moved on.
  */
 import type { AgorClient, Board, Branch, CardWithType, Session } from '@agor-live/client';
-import { cleanup, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { resetHydrationRevisions } from '../store/agorHydration';
+import { sessionCreated } from '../store/agorRealtimeActions';
 import { agorStore } from '../store/agorStore';
 import { makeBoardReadySelector, RETAINED_BACKGROUND_PARTITIONS } from '../store/boardPartitions';
 import { captureLoadLifetime } from '../store/loadLifetime';
 import { discardRealtimeNow, setRealtimeAuthorityScope } from '../store/realtimeBatch';
+import { holdRows, pinRows } from '../store/retention';
 import { USER_SCOPE_KEYS } from '../store/scopeMerge';
+import { fillOnDemand } from '../store/userScope';
 import { setGlobalHydrationForTests } from './useAgorData';
 import { useBoardPartition } from './useBoardPartition';
 import { useEnsureSessions } from './useEnsureRows';
@@ -81,6 +87,27 @@ function makeClient(rows: ReturnType<typeof server>) {
   return client;
 }
 
+/** The user scope: my sessions, loaded with their rows. */
+function seedUserScope(rows: ReturnType<typeof server>) {
+  const mine = rows.sessions.filter((s) => s.created_by === ME);
+  agorStore.getState().applyMaps(
+    (prev) => ({
+      ...prev,
+      sessionById: new Map([...prev.sessionById, ...mine.map((s) => [s.session_id, s] as const)]),
+    }),
+    (_maps, coverage) =>
+      new Map(coverage).set(USER_SCOPE_KEYS.sessions, {
+        status: 'loaded',
+        ...captureLoadLifetime()!,
+        generation: 0,
+        userId: ME,
+        members: { sessions: new Set(mine.map((s) => s.session_id)) },
+        complete: true,
+      })
+  );
+  return mine;
+}
+
 /** The app shell: the displayed board, and the open session read by id and pinned. */
 function useShell(client: AgorClient, board: string | null, session: string | null) {
   useBoardPartition(client, board, { canUseMemberWorkspaceServices: true });
@@ -112,23 +139,7 @@ afterEach(() => {
 it('opening and closing 20 boards and 50 sessions keeps the store on a plateau', async () => {
   const rows = server();
   const client = makeClient(rows);
-  // The user scope: my sessions, loaded with their rows.
-  const mine = rows.sessions.filter((s) => s.created_by === ME);
-  agorStore.getState().applyMaps(
-    (prev) => ({
-      ...prev,
-      sessionById: new Map([...prev.sessionById, ...mine.map((s) => [s.session_id, s] as const)]),
-    }),
-    (_maps, coverage) =>
-      new Map(coverage).set(USER_SCOPE_KEYS.sessions, {
-        status: 'loaded',
-        ...captureLoadLifetime()!,
-        generation: 0,
-        userId: ME,
-        members: { sessions: new Set(mine.map((s) => s.session_id)) },
-        complete: true,
-      })
-  );
+  const mine = seedUserScope(rows);
 
   const { rerender, unmount } = renderHook(
     ({ board, session }: { board: string | null; session: string | null }) =>
@@ -203,4 +214,120 @@ it('opening and closing 20 boards and 50 sessions keeps the store on a plateau',
   );
   expect(state.globallyHydrated.size).toBe(0);
   unmount();
+});
+
+/** `makeClient`, with every read held until `releaseAll`. */
+function deferredClient(rows: ReturnType<typeof server>) {
+  const client = makeClient(rows);
+  const held: (() => void)[] = [];
+  const hold = <T,>(read: () => Promise<T>) =>
+    new Promise<T>((resolve, reject) => held.push(() => read().then(resolve, reject)));
+  const deferred = {
+    service: (name: string) => {
+      const service = client.service(name as never) as unknown as Record<
+        string,
+        (...args: unknown[]) => Promise<unknown>
+      >;
+      return {
+        findAll: (...args: unknown[]) => hold(() => service.findAll(...args)),
+        find: (...args: unknown[]) => hold(() => service.find(...args)),
+        get: (...args: unknown[]) => hold(() => service.get(...args)),
+      };
+    },
+  } as unknown as AgorClient;
+  const releaseAll = async () => {
+    while (held.length > 0) {
+      await act(async () => {
+        for (const release of held.splice(0)) release();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+  };
+  return { client: deferred, releaseAll };
+}
+
+it('rows that enter without an owner never lift the plateau', async () => {
+  const rows = server();
+  const mine = seedUserScope(rows);
+  const perBoard = BRANCHES_PER_BOARD * SESSIONS_PER_BRANCH;
+  const counts = () => {
+    const state = agorStore.getState();
+    return {
+      partitions: [...state.coverage.keys()].filter((key) => key.startsWith('board:')).length,
+      branches: state.branchById.size,
+      sessions: state.sessionById.size,
+      cards: state.cardById.size,
+    };
+  };
+  // Home after leaving: the retained partitions and the user scope, no pins.
+  const plateau = {
+    partitions: RETAINED_BACKGROUND_PARTITIONS,
+    branches: RETAINED_BACKGROUND_PARTITIONS * BRANCHES_PER_BOARD,
+    sessions:
+      RETAINED_BACKGROUND_PARTITIONS * perBoard + mine.length - RETAINED_BACKGROUND_PARTITIONS,
+    cards: RETAINED_BACKGROUND_PARTITIONS,
+  };
+
+  // Deferred board loads: visit 8 boards, each read still in flight when
+  // the next one is displayed; they settle after the user went Home.
+  const slow = deferredClient(rows);
+  const shell = renderHook(
+    ({ board }: { board: string | null }) => useShell(slow.client, board, null),
+    {
+      initialProps: { board: boardId(0) as string | null },
+    }
+  );
+  for (let b = 1; b < 8; b++) shell.rerender({ board: boardId(b) });
+  shell.rerender({ board: null });
+  await slow.releaseAll();
+  expect(counts()).toEqual(plateau);
+
+  // Late replies: 20 views ask for sessions on unloaded boards and unmount
+  // before the reads answer.
+  const late = deferredClient(rows);
+  for (let i = 0; i < 20; i++) {
+    const view = renderHook(() =>
+      useEnsureSessions(late.client, [sessionId(10 + (i % 10), 1, i % 4)])
+    );
+    view.unmount();
+  }
+  const search = holdRows();
+  const searched = fillOnDemand(
+    async () => ({ sessions: rows.sessions.filter((s) => s.branch_board_id === boardId(15)) }),
+    search
+  );
+  search.release();
+  await late.releaseAll();
+  await searched;
+  expect(counts()).toEqual(plateau);
+
+  // Realtime on boards never loaded: 100 other users' sessions.
+  for (let i = 0; i < 100; i++) {
+    sessionCreated({
+      ...rows.sessions[0],
+      session_id: `s-live-${i}`,
+      branch_id: branchId(10 + (i % 10), 2),
+      branch_board_id: boardId(10 + (i % 10)),
+      created_by: 'user-other',
+    } as Session);
+  }
+  expect(counts()).toEqual(plateau);
+
+  // Archived deep links: each opened (route pin and the link's hold) and left.
+  for (let i = 0; i < 20; i++) {
+    const id = `s-archived-${i}`;
+    const route = pinRows({ sessions: [id] });
+    const link = holdRows();
+    await fillOnDemand(
+      async () => ({
+        sessions: [{ ...rows.sessions[0], session_id: id, archived: true } as Session],
+      }),
+      link
+    );
+    expect(agorStore.getState().sessionById.has(id)).toBe(true);
+    link.release();
+    route();
+  }
+  expect(counts()).toEqual(plateau);
+  shell.unmount();
 });
