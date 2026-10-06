@@ -142,9 +142,15 @@ export function createManagedAgenticToolInstallManifest(
     // npm ignores overrides in dependencies, including our integration wrapper.
     // Put this on the managed install ROOT as well as in pnpm-workspace.yaml:
     // Gemini 0.61 pins simple-git 3.28.0, reintroducing GHSA-jcxm-m3jx-f287,
-    // GHSA-r275-fr43-pm7q, GHSA-hffm-xvc3-vprc, and GHSA-x6jw-m9v5-85vh otherwise.
+    // GHSA-r275-fr43-pm7q, GHSA-hffm-xvc3-vprc, and GHSA-x6jw-m9v5-85vh otherwise,
+    // and shell-quote 1.8.3 (GHSA-w7jw-789q-3m8p, GHSA-395f-4hp3-45gv,
+    // GHSA-pqg4-j6r4-53mv).
     ...(tool === 'gemini'
-      ? { overrides: { '@google/gemini-cli-core': { 'simple-git': '4.0.2' } } }
+      ? {
+          overrides: {
+            '@google/gemini-cli-core': { 'simple-git': '4.0.2', 'shell-quote': '>=1.11.0 <2' },
+          },
+        }
       : {}),
   };
 }

@@ -82,7 +82,9 @@ describe('managed agentic tool loading', () => {
       version: '0.0.0',
       private: true,
       dependencies: { '@agor-live/gemini': '1.2.3' },
-      overrides: { '@google/gemini-cli-core': { 'simple-git': '4.0.2' } },
+      overrides: {
+        '@google/gemini-cli-core': { 'simple-git': '4.0.2', 'shell-quote': '>=1.11.0 <2' },
+      },
     });
   });
 
