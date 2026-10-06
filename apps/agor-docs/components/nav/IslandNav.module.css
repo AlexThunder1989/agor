@@ -48,9 +48,11 @@
 }
 
 .island[data-scrolled="true"] {
-  --open-w: 780px;
+  /* Hug the bar's measured content (--bar-w, set by IslandNav) so nothing
+   * overlaps; open menus get at least 780px for the panels. */
+  --open-w: min(calc(100vw - 48px), max(780px, var(--bar-w, 0px)));
   top: 14px;
-  width: 660px;
+  width: min(calc(100vw - 48px), var(--bar-w, 100vw));
   border-radius: 30px;
 }
 
@@ -83,7 +85,7 @@
 
 .barLeft {
   gap: 14px;
-  min-width: 0;
+  flex: none;
 }
 
 .barRight {
