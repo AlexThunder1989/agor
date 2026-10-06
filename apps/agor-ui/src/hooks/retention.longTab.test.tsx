@@ -184,6 +184,35 @@ it('opening and closing 20 boards and 50 sessions keeps the store on a plateau',
     });
     record();
   }
+  // Another user's branch on the displayed board moves to a board that isn't
+  // loaded and back: its sessions leave with it, return with a reload of the
+  // displayed board, and the store stays on the plateau.
+  const shown = (OPENED_SESSIONS - 1) % BOARDS;
+  const away = boardId((shown + BOARDS / 2) % BOARDS);
+  const moving = branchId(shown, 1);
+  const onBranch = () => rows.sessions.filter((s) => s.branch_id === moving);
+  const moveTo = (target: string) => {
+    rows.branches = rows.branches.map((b) =>
+      b.branch_id === moving ? ({ ...b, board_id: target } as Branch) : b
+    );
+    rows.sessions = rows.sessions.map((s) =>
+      s.branch_id === moving ? ({ ...s, branch_board_id: target } as Session) : s
+    );
+    const branch = rows.branches.find((b) => b.branch_id === moving)!;
+    act(() => branchPatched(branch));
+  };
+  for (let round = 0; round < 5; round++) {
+    moveTo(away);
+    expect(onBranch().some((s) => agorStore.getState().sessionById.has(s.session_id))).toBe(false);
+    moveTo(boardId(shown));
+    await waitFor(() => {
+      const state = agorStore.getState();
+      expect(makeBoardReadySelector(boardId(shown))(state)).toBe(true);
+      expect(onBranch().every((s) => state.sessionById.has(s.session_id))).toBe(true);
+    });
+    record();
+  }
+
   // Close the session and leave for Home.
   rerender({ board: null, session: null });
   record();

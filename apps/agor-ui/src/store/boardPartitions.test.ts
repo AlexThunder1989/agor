@@ -31,6 +31,7 @@ import {
   evictUnloadedBoards,
   loadBoardPartition,
   makeBoardReadySelector,
+  nextPartitionGeneration,
   partitionLoadMark,
   partitionLoadSince,
   partitionsLoadedSince,
@@ -38,6 +39,7 @@ import {
   registerBoardUse,
   retryBoardPartition,
   selectBoardPartition,
+  settleBoardPartition,
 } from './boardPartitions';
 import { captureLoadLifetime, isLoadLifetimeCurrent } from './loadLifetime';
 import {
@@ -268,6 +270,55 @@ describe('loadBoardPartition', () => {
     await load;
     expect(ready()).toBe(true);
     expect(agorStore.getState().sessionById.has('s-1')).toBe(true);
+  });
+
+  it('is not complete once a branch arrives from an unloaded board, even while loading', async () => {
+    // Loaded: a branch arriving from a board that isn't loaded brings no sessions.
+    markBoardLoaded(BOARD);
+    expect(ready()).toBe(true);
+    branchPatched(branch('br-in', { created_by: 'user-b' }));
+    expect(agorStore.getState().branchById.has('br-in')).toBe(true);
+    expect(ready()).toBe(false);
+    // A resync settling the loaded entry in place keeps it incomplete.
+    const fence = beginPartitionLoad();
+    endPartitionLoad();
+    agorStore
+      .getState()
+      .applyMaps(
+        (maps) => maps,
+        settleBoardPartition(
+          BOARD,
+          captureLoadLifetime()!,
+          nextPartitionGeneration(),
+          { ...snapshotOf(), complete: true },
+          fence.startRevisions
+        )
+      );
+    expect(ready()).toBe(false);
+
+    // In flight: the read may predate the arrival, so it settles incomplete.
+    const { client, release } = makePartitionClient({});
+    const load = loadBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true });
+    branchPatched(branch('br-late', { created_by: 'user-b' }));
+    release();
+    await load;
+    expect(selectBoardPartition(agorStore.getState(), BOARD)?.status).toBe('loaded');
+    expect(ready()).toBe(false);
+
+    // From a loaded board, its sessions came along: still complete.
+    const again = makePartitionClient({});
+    const reload = loadBoardPartition(again.client, BOARD, { canUseMemberWorkspaceServices: true });
+    again.release();
+    await reload;
+    expect(ready()).toBe(true);
+    markBoardLoaded('board-2');
+    agorStore
+      .getState()
+      .setMap('branchById', (prev) =>
+        new Map(prev).set('br-moved', branch('br-moved', { board_id: 'board-2' }))
+      );
+    branchPatched(branch('br-moved'));
+    expect(ready()).toBe(true);
   });
 
   it('offers a resync only the loads that started after its mark, in flight or loaded', async () => {

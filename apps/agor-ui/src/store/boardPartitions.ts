@@ -90,7 +90,11 @@ export function makeBoardPartitionSelector(
  * complete as the read says, with its membership (`settledMembers`: rows
  * realtime wrote since `startRevisions` are judged by their current value).
  * The board-scoped first paint runs the same queries as a partition load, so
- * it settles the board the same way.
+ * it settles the board the same way. A branch that arrived from an unloaded
+ * board marks the entry incomplete (`markArrivalIncomplete`): the load's own
+ * `loading` entry, whose read may predate the arrival, or a `loaded` one a
+ * resync settles in place. Either settles incomplete, so the board is read
+ * again; a new partition load starts from a fresh entry.
  */
 export function settleBoardPartition(
   boardId: string,
@@ -100,8 +104,11 @@ export function settleBoardPartition(
   startRevisions: Record<HydratedCollection, number>
 ): CoverageUpdate {
   const scope = boardPartitionScope(boardId);
-  return (maps, coverage) =>
-    withCoverage(coverage, scope.key, {
+  return (maps, coverage) => {
+    const own = coverage.get(scope.key);
+    const raced =
+      own?.complete === false && (own.status === 'loaded' || own.generation === generation);
+    return withCoverage(coverage, scope.key, {
       status: 'loaded',
       authorityScope: lifetime.authorityScope,
       loadEpoch: lifetime.loadEpoch,
@@ -109,8 +116,9 @@ export function settleBoardPartition(
       members: settledMembers(scope, rows, maps, (collection) =>
         touchedIdsSince(collection, startRevisions[collection])
       ),
-      complete: rows.complete,
+      complete: rows.complete && !raced,
     });
+  };
 }
 
 let loadSequence = 0;

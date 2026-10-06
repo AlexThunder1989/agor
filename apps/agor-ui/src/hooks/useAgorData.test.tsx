@@ -22,6 +22,7 @@ import { getRevision } from '../store/agorHydration';
 import { agorStore } from '../store/agorStore';
 import {
   loadBoardPartition,
+  makeBoardReadySelector,
   registerBoardUse,
   selectBoardPartition,
 } from '../store/boardPartitions';
@@ -2123,6 +2124,57 @@ describe('useAgorData — reauthentication reads the displayed board once', () =
     );
     await flush();
     expect(boardReads() - before).toBe(1);
+  });
+});
+
+describe('useAgorData — a branch moved back onto a loaded board', () => {
+  it("restores another user's sessions it lost while on an unloaded board", async () => {
+    window.history.pushState({}, '', '/b/board-one/');
+    onTestFinished(() => window.history.pushState({}, '', '/'));
+    const board = { board_id: 'board-1', slug: 'board-one', name: 'Board one' };
+    const theirs = makeBranch({ branch_id: 'b-x', board_id: 'board-1', created_by: 'user-b' });
+    const server = {
+      branches: [theirs as Row],
+      sessions: [makeSession({ session_id: 's-x', branch_id: 'b-x', created_by: 'user-b' }) as Row],
+    };
+    const { client, emit } = makeMockClient(
+      fakeServer({ boards: [board], 'boards:get': board as never }, server)
+    );
+    const { result } = renderHook(() => {
+      const data = useAgorData(client, {
+        authenticatedUserId: 'user-a',
+        authenticatedUserRole: 'member',
+        authGeneration: 1,
+        connectionReady: true,
+      });
+      useBoardPartition(client, 'board-1', { canUseMemberWorkspaceServices: true });
+      return data;
+    });
+    await waitForInitialLoad(result);
+    await flush();
+    expect(agorStore.getState().sessionById.has('s-x')).toBe(true);
+
+    // Moved to a board that isn't loaded: nothing holds the branch or its session.
+    const away = { ...theirs, board_id: 'board-2' };
+    server.branches = [away];
+    act(() => emit('branches', 'patched', away));
+    expect(agorStore.getState().branchById.has('b-x')).toBe(false);
+    expect(agorStore.getState().sessionById.has('s-x')).toBe(false);
+
+    // Moved back: a branch move emits no session events, yet the board must
+    // not claim to be complete without the session.
+    server.branches = [theirs];
+    act(() => emit('branches', 'patched', theirs));
+    expect(agorStore.getState().branchById.has('b-x')).toBe(true);
+    await waitFor(() => {
+      const state = agorStore.getState();
+      expect(state.sessionById.has('s-x')).toBe(true);
+      expect(state.sessionsByBranch.get('b-x')?.map((s) => s.session_id)).toEqual(['s-x']);
+      expect(makeBoardReadySelector('board-1')(state)).toBe(true);
+    });
+    expect(
+      selectBoardPartition(agorStore.getState(), 'board-1')?.members?.sessions?.has('s-x')
+    ).toBe(true);
   });
 });
 

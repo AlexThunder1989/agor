@@ -60,10 +60,13 @@ import { type AgorState, agorStore } from './agorStore';
 import { isLoadLifetimeCurrent } from './loadLifetime';
 import { admitHeld, forgetAbsentSessions } from './retention';
 import {
+  boardScopeKey,
+  type Coverage,
   type CoverageUpdate,
   liveMembership,
   type WrittenIds,
   withBranchSessions,
+  withCoverage,
 } from './scopeMerge';
 import { pruneSessionMcpLinks } from './sessionMcpLinks';
 
@@ -96,16 +99,44 @@ export const liveCoverage =
       isLoadLifetimeCurrent
     );
 
+/** Whether `boardId`'s partition is loading or loaded under the current lifetime. */
+function holdsBoard(coverage: Coverage, boardId: string | null | undefined): boolean {
+  const entry = boardId ? coverage.get(boardScopeKey(boardId)) : undefined;
+  return !!entry && entry.status !== 'error' && isLoadLifetimeCurrent(entry);
+}
+
+/**
+ * A branch that moves onto a loading or loaded board from a board whose
+ * partition isn't, or that the store didn't hold, arrives without the
+ * sessions nothing held while it was away, and a move emits no session
+ * events. Its board's partition stops claiming to be complete: the mounted
+ * `useBoardPartition` reloads it (a complete replace), and a load in flight
+ * settles incomplete (`settleBoardPartition`), so the board is read again.
+ */
+const markArrivalIncomplete =
+  (from: string | null | undefined, to: string | null | undefined): CoverageUpdate =>
+  (_maps, coverage) => {
+    if (!to || from === to || !holdsBoard(coverage, to) || holdsBoard(coverage, from)) {
+      return coverage;
+    }
+    const key = boardScopeKey(to);
+    const entry = coverage.get(key);
+    return entry && entry.complete !== false
+      ? withCoverage(coverage, key, { ...entry, complete: false })
+      : coverage;
+  };
+
 /**
  * Apply a live write of `written`: the rows it inserts or moves out of every
  * scope that nothing holds leave (`admitHeld`; a moved branch's sessions are
  * judged too), with their sessions' MCP state, and membership follows
- * (`liveCoverage`).
+ * (`liveCoverage`), with `coverage` after it.
  */
 function applyLive(
   update: (prev: DataMaps) => DataMaps,
   written: WrittenIds,
-  branchSessions = false
+  branchSessions = false,
+  coverage?: CoverageUpdate
 ): void {
   let judged = written;
   applyMaps(
@@ -114,7 +145,10 @@ function applyLive(
       judged = branchSessions ? withBranchSessions(written, next) : written;
       return admitHeld(prev, next, judged);
     },
-    liveCoverage(written, branchSessions)
+    (maps, current) => {
+      const live = liveCoverage(written, branchSessions)(maps, current);
+      return coverage ? coverage(maps, live) : live;
+    }
   );
   forgetAbsentSessions(judged.sessions ?? []);
 }
@@ -313,14 +347,16 @@ export function branchPatched(branch: Branch) {
     return;
   }
 
-  const moved = agorStore.getState().branchById.get(branch.branch_id)?.board_id !== branch.board_id;
+  const from = agorStore.getState().branchById.get(branch.branch_id);
+  const moved = from?.board_id !== branch.board_id;
   applyLive(
     (prev) => {
       const branchById = replaceIfChanged(prev.branchById, branch.branch_id, branch);
       return branchById === prev.branchById ? prev : { ...prev, branchById };
     },
     { branches: [branch.branch_id] },
-    moved
+    moved,
+    moved ? markArrivalIncomplete(from?.board_id, branch.board_id) : undefined
   );
 }
 export function branchRemoved(branch: Branch) {
