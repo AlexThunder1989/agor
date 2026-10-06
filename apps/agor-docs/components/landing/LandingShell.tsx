@@ -91,7 +91,7 @@ export function LandingShell({ ctaPrefix, children }: LandingShellProps) {
             <CloudCtaLink placement={`${ctaPrefix}-final-cta`} className={styles.primaryButton} />
             <DemoButton className={styles.secondaryButton}>Book a demo</DemoButton>
             <Link href="/guide/getting-started" className={styles.secondaryButton}>
-              Get started
+              Install Community Edition
             </Link>
           </div>
         </div>
