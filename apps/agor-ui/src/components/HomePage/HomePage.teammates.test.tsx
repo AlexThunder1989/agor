@@ -160,6 +160,24 @@ describe('HomePage teammates', () => {
     await waitFor(() => expect(onSessionClick).toHaveBeenCalledWith('new'));
   });
 
+  it('names the teammate in the phone picker and puts Continue on its own row', async () => {
+    seed({
+      sessions: [session('mine', { branch_id: 'primary', title: 'A long running thread' })],
+      branches: [primary],
+    });
+    renderHome({ client: client({}) });
+    await screen.findByRole('textbox', { name: 'Ask Teammate primary' });
+    const toolbar = document.querySelector<HTMLElement>('[data-home-ask-toolbar]') as HTMLElement;
+    expect(
+      within(toolbar).getByRole('button', { name: 'Teammate to ask: Teammate primary' })
+    ).toHaveTextContent('Teammate primary');
+
+    const resume = screen.getByRole('button', { name: /Continue “A long running thread”/ });
+    expect(toolbar).not.toContainElement(resume);
+    expect(toolbar.compareDocumentPosition(resume) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(resume).getByText(/^Continue/)).toHaveStyle({ textOverflow: 'ellipsis' });
+  });
+
   it('puts both send buttons in the toolbar on desktop, primary last', async () => {
     asDesktop();
     seedTeammates();

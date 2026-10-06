@@ -118,16 +118,19 @@ function AskTargetSelect({
     return (
       <>
         <Button
-          type="text"
           aria-label={value ? `Teammate to ask: ${teammateLabel(value)}` : 'Pick an assistant'}
+          icon={
+            <DownOutlined style={{ fontSize: token.fontSizeSM, color: token.colorTextTertiary }} />
+          }
+          iconPlacement="end"
           onClick={() => {
             openList();
             setSheetOpen(true);
           }}
-          style={{ flex: '0 0 auto', paddingInline: token.paddingXS }}
+          styles={{ content: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' } }}
+          style={{ flex: '0 1 auto', minWidth: 0, maxWidth: HOME_ASK_TARGET_MAX_WIDTH }}
         >
-          {value ? (teammateEmoji(value) ?? '🤖') : 'Pick an assistant'}
-          <DownOutlined style={{ fontSize: token.fontSizeSM, color: token.colorTextTertiary }} />
+          {label ?? 'Pick an assistant'}
         </Button>
         <HomeSheet open={sheetOpen} title="Ask" onClose={() => setSheetOpen(false)}>
           <HomeList
@@ -154,7 +157,6 @@ function AskTargetSelect({
   return (
     <Select
       showSearch
-      variant="borderless"
       value={value?.branch_id}
       placeholder="Pick an assistant"
       aria-label="Teammate to ask"
@@ -264,14 +266,19 @@ export const HomeAskBox = memo(function HomeAskBox({
       iconPlacement="end"
       onClick={() => onOpenSession(latest.sessionId)}
       styles={{ content: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' } }}
-      style={{ minWidth: 0, maxWidth: '100%', justifyContent: 'flex-start' }}
+      style={{
+        alignSelf: compact ? 'stretch' : 'flex-start',
+        maxWidth: '100%',
+        paddingInline: 0,
+        justifyContent: 'space-between',
+      }}
     >
       Continue “{latest.title}”
     </HomeLink>
   );
 
-  // Composer layout: the input on its own row, then one toolbar row whose controls share
-  // a height (32px, or 44px on phones through HomeFrame's touch theme).
+  // Composer layout: the input, one toolbar row whose controls share a height (32px, or
+  // 44px on phones through HomeFrame's touch theme), then the continue row.
   return (
     <HomeCard padded>
       <Flex vertical gap={token.marginXS}>
@@ -288,7 +295,7 @@ export const HomeAskBox = memo(function HomeAskBox({
           }}
           placeholder={`Ask ${name}…`}
           aria-label={`Ask ${name}`}
-          style={{ fontSize: token.fontSizeLG }}
+          style={{ fontSize: token.fontSizeLG, paddingInline: 0 }}
         />
         <Flex align="center" gap={token.marginXS} data-home-ask-toolbar>
           <AskTargetSelect
@@ -301,7 +308,6 @@ export const HomeAskBox = memo(function HomeAskBox({
               setTarget(branch && branch.branch_id !== primary?.branch_id ? branch : null)
             }
           />
-          {!compact && continueLink}
           <Flex gap={token.marginXS} style={{ flex: '0 0 auto', marginInlineStart: 'auto' }}>
             <ComposeSendButtons
               branch={assistant}
@@ -312,7 +318,7 @@ export const HomeAskBox = memo(function HomeAskBox({
             />
           </Flex>
         </Flex>
-        {compact && continueLink}
+        {continueLink}
         {!target && compose.resolveFailed && (
           <HomeSectionError
             message="Couldn’t load your primary assistant."
