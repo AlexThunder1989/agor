@@ -133,7 +133,7 @@ export interface ConversationViewProps {
 
   onOpenAgenticToolSettings?: (tool: AgenticToolName) => void;
 
-  /** The session can take a new prompt now: idle and nothing queued. */
+  /** A prompt sent now would run, not wait in the queue (`canSessionStartTurn`). */
   canStartTurn?: boolean;
 
   /** Use the denser, full-width task treatment for phone-sized session routes. */

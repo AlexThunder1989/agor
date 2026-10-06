@@ -271,18 +271,35 @@ describe('usage-limit rejection that ended the turn', () => {
   const rejected = (index: number) =>
     row(index, 'system', [{ type: 'rate_limit', status: 'rejected', resetsAt: 100 }]);
 
-  it('counts a rejection only when no agent output or tool use followed it', () => {
+  // Shapes observed in real runs: Claude ends a limited run with its own text notice.
+  const notice = (index: number) =>
+    row(index, 'assistant', [
+      { type: 'text', text: "You've hit your session limit · resets 10:40am (America/Sao_Paulo)" },
+    ]);
+
+  it("counts a rejection followed only by the agent's limit notice as the end of the run", () => {
     expect(rejectedRateLimit([row(0, 'user', 'Go'), rejected(1)])).toEqual({ resetsAt: 100 });
+    expect(rejectedRateLimit([row(0, 'user', 'Go'), rejected(1), notice(2)])).toEqual({
+      resetsAt: 100,
+    });
     expect(rejectedRateLimit([rejected(1), row(2, 'system', 'Note')])).toEqual({ resetsAt: 100 });
-    expect(rejectedRateLimit([rejected(1), row(2, 'assistant', [])])).toEqual({ resetsAt: 100 });
-    expect(rejectedRateLimit([rejected(1), row(2, 'assistant', 'Continuing')])).toBeUndefined();
+    expect(rejectedRateLimit([row(0, 'assistant', 'Hi')])).toBeUndefined();
+  });
+
+  it('treats tool activity after the wait as a run that went on', () => {
     expect(
       rejectedRateLimit([
         rejected(1),
         row(2, 'user', [{ type: 'tool_result', tool_use_id: 't', content: 'ok' }]),
+        row(3, 'assistant', 'Done.'),
       ])
     ).toBeUndefined();
-    expect(rejectedRateLimit([row(0, 'assistant', 'Hi')])).toBeUndefined();
+    expect(
+      rejectedRateLimit([
+        rejected(1),
+        row(2, 'assistant', [{ type: 'tool_use', id: 't', name: 'Read', input: {} }]),
+      ])
+    ).toBeUndefined();
   });
 });
 

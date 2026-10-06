@@ -851,26 +851,57 @@ it('keeps the real cause when a restart notice lands on a turn that had already 
   expect(screen.getAllByRole('button', { name: /Resume/ })).toHaveLength(1);
 });
 
-it('names the real failure when the run continued after a usage-limit wait', () => {
+const rejectedLimit = (index: number) =>
+  ({
+    ...message(index, MessageRole.SYSTEM, [
+      {
+        type: 'rate_limit',
+        status: 'rejected',
+        rateLimitType: 'five_hour',
+        resetsAt: Math.floor(Date.now() / 1000) + 3600,
+        text: 'Rate limited (five_hour). Waiting for limit to reset...',
+      },
+    ]),
+    type: 'system',
+  }) as Message;
+
+it("names the usage limit when the agent's own limit notice ended the run", () => {
+  render(
+    view({
+      task: {
+        ...task,
+        status: TaskStatus.FAILED,
+        error_message:
+          'Agor could not confirm a successful response. Review any output and tool activity before retrying.',
+      },
+      agentic_tool: 'claude-code',
+      taskMessages: [
+        messages[0],
+        rejectedLimit(1),
+        message(2, MessageRole.ASSISTANT, [
+          { type: 'text', text: "You've hit your session limit · resets 10:40am" },
+        ]),
+      ],
+      taskMessagesLoaded: true,
+    })
+  );
+  expect(outcome()).toHaveTextContent('Claude Code usage limit reached. Try again after');
+});
+
+it('names the real failure when the run went on using tools after a usage-limit wait', () => {
   render(
     view({
       task: { ...task, status: TaskStatus.FAILED, error_message: ENOENT_SYSTEM_PROMPT },
       agentic_tool: 'claude-code',
       taskMessages: [
         messages[0],
-        {
-          ...message(1, MessageRole.SYSTEM, [
-            {
-              type: 'rate_limit',
-              status: 'rejected',
-              rateLimitType: 'five_hour',
-              resetsAt: Math.floor(Date.now() / 1000) + 3600,
-              text: 'Rate limited (five_hour). Waiting for limit to reset...',
-            },
-          ]),
-          type: 'system',
-        },
-        message(2, MessageRole.ASSISTANT, 'Visible answer'),
+        rejectedLimit(1),
+        message(2, MessageRole.ASSISTANT, [
+          { type: 'tool_use', id: 'read-call', name: 'Read', input: { file_path: 'a.txt' } },
+        ]),
+        message(3, MessageRole.USER, [
+          { type: 'tool_result', tool_use_id: 'read-call', content: 'contents' },
+        ]),
       ],
       taskMessagesLoaded: true,
     })

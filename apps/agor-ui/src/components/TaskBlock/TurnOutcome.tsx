@@ -15,7 +15,7 @@ interface TurnOutcomeProps {
   outcome: TurnOutcomeCopy | null;
   details?: ReturnType<typeof turnOutcomeDetails>;
   isLatestTask?: boolean;
-  /** A new turn may start from this outcome now (settled, session idle, queue empty). */
+  /** A new turn may start from this outcome now: the latest settled turn, and a prompt would run, not queue. */
   canResume?: boolean;
   onOpenSettings?: () => void;
   sessionId?: SessionID | null;

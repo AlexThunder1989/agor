@@ -114,7 +114,7 @@ interface TaskBlockProps {
   client?: AgorClient | null;
   /** Whether this is the most recent task in the session */
   isLatestTask?: boolean;
-  /** The session can take a new prompt now: idle and nothing queued. */
+  /** A prompt sent now would run, not wait in the queue (`canSessionStartTurn`). */
   canStartTurn?: boolean;
   /** Phone-sized transcript presentation without desktop-only indents or gradients. */
   compact?: boolean;
@@ -145,18 +145,17 @@ export function isOutcomeEcho(message: Message, errorMessage?: string): boolean 
   );
 }
 
-/** The provider's usage-limit rejection that ended this turn: no agent output or tool use came after it. */
+/** The provider's usage-limit rejection that ended this turn: no tool use came after it. */
 export function rejectedRateLimit(messages: Message[]): { resetsAt?: number } | undefined {
   for (const message of [...messages].sort((a, b) => b.index - a.index)) {
-    const blocks = Array.isArray(message.content) ? message.content : [];
-    const block = blocks.find(
-      (content) => content.type === 'rate_limit' && content.status === 'rejected'
-    );
+    const block = Array.isArray(message.content)
+      ? message.content.find(
+          (content) => content.type === 'rate_limit' && content.status === 'rejected'
+        )
+      : undefined;
     if (block) return { resetsAt: typeof block.resetsAt === 'number' ? block.resetsAt : undefined };
-    const hasOutput =
-      message.role === MessageRole.ASSISTANT &&
-      (typeof message.content === 'string' ? !!message.content.trim() : blocks.length > 0);
-    if (hasOutput || messagesHaveTools([message])) return undefined;
+    // Only tool activity proves the run went on; Claude ends a limited run with its own text notice.
+    if (messagesHaveTools([message])) return undefined;
   }
   return undefined;
 }
