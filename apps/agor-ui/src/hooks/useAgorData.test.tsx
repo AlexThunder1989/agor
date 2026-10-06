@@ -31,6 +31,7 @@ import {
   selectHomeBranchesLoaded,
   selectMySessionsLoaded,
   selectTeammatesLoaded,
+  selectTeammatesTruncated,
 } from '../store/userScope';
 import { markBoardLoaded } from '../test/userScopeCoverage';
 import { setGlobalHydrationForTests, useAgorData } from './useAgorData';
@@ -2714,5 +2715,176 @@ describe('useAgorData — scoped reconnect (global hydration off)', () => {
     ]) {
       expect(globalReads(reads)).toEqual([]);
     }
+  });
+
+  const mate = (overrides: Record<string, unknown>) =>
+    makeBranch({ custom_context: { teammate: { kind: 'teammate' } }, ...overrides });
+
+  /** Every user scope and the displayed board loaded, then rows changed while disconnected. */
+  function workspace() {
+    const server = {
+      branches: [
+        makeBranch({ branch_id: 'b-A', board_id: 'board-A', created_by: 'user-other' }),
+        makeBranch({ branch_id: 'b-A-del', board_id: 'board-A', created_by: 'user-other' }),
+        makeBranch({ branch_id: 'b-A-moved', board_id: 'board-A', created_by: 'user-other' }),
+        makeBranch({ branch_id: 'b-mine', board_id: 'board-C', created_by: 'user-me' }),
+        makeBranch({ branch_id: 'b-mine-del', board_id: 'board-C', created_by: 'user-me' }),
+        makeBranch({ branch_id: 'b-mine-A', board_id: 'board-A', created_by: 'user-me' }),
+        mate({ branch_id: 'mate-1', board_id: 'board-D', created_by: 'user-other' }),
+        mate({ branch_id: 'mate-unmarked', board_id: 'board-D', created_by: 'user-other' }),
+        makeBranch({ branch_id: 'b-ref', board_id: 'board-E', created_by: 'user-other' }),
+        makeBranch({ branch_id: 'b-ref-keep', board_id: 'board-E', created_by: 'user-other' }),
+      ] as Row[],
+      sessions: [
+        makeSession({ session_id: 's-A', branch_id: 'b-A', created_by: 'user-other' }),
+        makeSession({ session_id: 's-A-arch', branch_id: 'b-A', created_by: 'user-other' }),
+        makeSession({ session_id: 's-mine', branch_id: 'b-mine', created_by: 'user-me' }),
+        makeSession({ session_id: 's-mine-arch', branch_id: 'b-mine', created_by: 'user-me' }),
+        makeSession({ session_id: 's-mine-A', branch_id: 'b-A', created_by: 'user-me' }),
+        makeSession({ session_id: 's-ref', branch_id: 'b-ref', created_by: 'user-me' }),
+        makeSession({ session_id: 's-ref-keep', branch_id: 'b-ref-keep', created_by: 'user-me' }),
+      ] as Row[],
+    };
+    const disconnect = () => {
+      const archive = new Set(['s-A-arch', 's-mine-arch']);
+      server.sessions = server.sessions.map((row) =>
+        archive.has(row.session_id as string) ? { ...row, archived: true } : row
+      );
+      server.branches = server.branches
+        .filter((row) => row.branch_id !== 'b-A-del' && row.branch_id !== 'b-mine-del')
+        .map((row) => {
+          switch (row.branch_id) {
+            case 'b-A-moved':
+            case 'b-mine-A':
+              return { ...row, board_id: 'board-C' };
+            case 'mate-unmarked':
+              return { ...row, custom_context: {} };
+            case 'b-ref':
+              return { ...row, archived: true };
+            case 'b-ref-keep':
+              return { ...row, name: 'renamed' };
+            default:
+              return row;
+          }
+        });
+    };
+    return { server, disconnect };
+  }
+
+  async function connectedWorkspace(server: ReturnType<typeof workspace>['server']) {
+    window.history.pushState({}, '', '/b/displayed/');
+    onTestFinished(() => window.history.pushState({}, '', '/'));
+    const seed = fakeServer({ boards: [boardA], 'boards:get': boardA as never }, server);
+    const mock = makeMockClient(seed);
+    const hook = renderHook(
+      ({ generation }) =>
+        useAgorData(mock.client, { ...authenticated, authGeneration: generation }),
+      { initialProps: { generation: 1 } }
+    );
+    await waitForInitialLoad(hook.result);
+    await waitFor(() => {
+      const state = agorStore.getState();
+      expect(selectMySessionsLoaded(state)).toBe(true);
+      expect(selectTeammatesLoaded(state)).toBe(true);
+      expect(selectHomeBranchesLoaded(state)).toBe(true);
+    });
+    await flush();
+    return { ...mock, ...hook, seed };
+  }
+
+  const resyncs = {
+    'socket reconnect': (emitIo: (event: string) => void) => act(() => emitIo('connect')),
+    'authority change': (_emitIo: unknown, rerender: (props: { generation: number }) => void) =>
+      rerender({ generation: 2 }),
+  };
+
+  for (const [name, resync] of Object.entries(resyncs)) {
+    it(`after a ${name}, every user scope and the displayed board reconcile without global reads`, async () => {
+      withoutGlobalHydration();
+      const { server, disconnect } = workspace();
+      const { emitIo, rerender, fetchArguments } = await connectedWorkspace(server);
+      const has = (map: 'sessionById' | 'branchById', id: string) =>
+        agorStore.getState()[map].has(id);
+      const loaded = [...server.sessions, ...server.branches].every((row) =>
+        has(
+          row.session_id ? 'sessionById' : 'branchById',
+          (row.session_id ?? row.branch_id) as string
+        )
+      );
+      expect(loaded).toBe(true);
+      markBoardLoaded('board-B');
+      const boardReads = () =>
+        [...fetchArguments('branches', 'findAll'), ...fetchArguments('sessions', 'findAll')].length;
+      const before = boardReads();
+
+      disconnect();
+      resync(emitIo, rerender);
+      await waitFor(() => expect(has('sessionById', 's-mine-arch')).toBe(false));
+      await waitFor(() => expect(has('branchById', 'b-ref')).toBe(false));
+      await flush();
+
+      const state = agorStore.getState();
+      // Deleted, archived and moved off the displayed board.
+      for (const id of ['s-A-arch', 's-mine-arch']) expect(has('sessionById', id)).toBe(false);
+      for (const id of ['b-A-del', 'b-A-moved', 'b-mine-del', 'mate-unmarked', 'b-ref']) {
+        expect(has('branchById', id)).toBe(false);
+      }
+      expect(state.absentBranchIds.has('b-ref')).toBe(true);
+      // Kept, refreshed from the server.
+      for (const id of ['s-A', 's-mine', 's-mine-A', 's-ref', 's-ref-keep']) {
+        expect(has('sessionById', id)).toBe(true);
+      }
+      for (const id of ['b-A', 'b-mine', 'mate-1']) expect(has('branchById', id)).toBe(true);
+      expect(state.branchById.get('b-ref-keep')?.name).toBe('renamed');
+      // Moved off the displayed board, but still mine: my branches hold it.
+      expect(state.branchById.get('b-mine-A')?.board_id).toBe('board-C');
+      // The displayed board is loaded again; the other board is unloaded and not read.
+      expect(selectBoardPartition(state, 'board-A')?.status).toBe('loaded');
+      expect(state.coverage.has(boardScopeKey('board-B'))).toBe(false);
+      expect(
+        [...fetchArguments('branches', 'findAll'), ...fetchArguments('sessions', 'findAll')]
+          .slice(before)
+          .map((args) => (args as { query: Record<string, unknown> }).query.board_id)
+          .filter((boardId) => boardId && boardId !== 'board-A')
+      ).toEqual([]);
+      expect(boardReads()).toBeGreaterThan(before);
+      expect(selectMySessionsLoaded(state)).toBe(true);
+      expect(selectTeammatesLoaded(state)).toBe(true);
+      expect(selectHomeBranchesLoaded(state)).toBe(true);
+      expect(state.globallyHydrated.size).toBe(0);
+      for (const reads of [
+        fetchArguments('sessions', 'findAll'),
+        fetchArguments('sessions', 'find'),
+        fetchArguments('branches', 'findAll'),
+        fetchArguments('branches', 'find'),
+      ]) {
+        expect(globalReads(reads)).toEqual([]);
+      }
+    });
+  }
+
+  it('a capped teammate read removes nothing on reconnect', async () => {
+    withoutGlobalHydration();
+    const { server, disconnect } = workspace();
+    const { emitIo, seed } = await connectedWorkspace(server);
+    // The teammate read now reports more teammates than it returned.
+    const find = seed['branches:find'] as unknown as (query: Record<string, unknown>) => {
+      data: Row[];
+      total: number;
+    };
+    seed['branches:find'] = ((query: Record<string, unknown>) => {
+      const page = find(query);
+      return query.teammate ? { ...page, total: page.total + 5_000 } : page;
+    }) as never;
+
+    disconnect();
+    act(() => emitIo('connect'));
+    await waitFor(() => expect(agorStore.getState().branchById.has('b-mine-del')).toBe(false));
+    await flush();
+    const state = agorStore.getState();
+    expect(selectTeammatesTruncated(state)).toBe(true);
+    // Unmarked, but the capped read can't prove it: it stays.
+    expect(state.branchById.has('mate-unmarked')).toBe(true);
+    expect(state.branchById.has('mate-1')).toBe(true);
   });
 });

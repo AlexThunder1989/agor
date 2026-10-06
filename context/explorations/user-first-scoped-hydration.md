@@ -219,6 +219,11 @@ The stack's contracts are preserved: counts wait, rows render immediately, teamm
   - untouched rows missing from the snapshot are removed;
   - touched rows keep their live value.
 - **Other partitions** are unloaded (§4.5).
+- **Step 3 batch C1 (implemented).** Every resync already runs the scoped replace: U1–U3 replace their pieces,
+  the displayed board replaces its branches and sessions with its annotations, and then every present referenced
+  branch is re-read through the `$in` queue (omitted ids leave and become absent). `otherCommittedMembers` keeps rows
+  other scopes hold; a capped read removes nothing. Global hydration is the backstop until 3.3. It can be turned off
+  in tests (`setGlobalHydrationForTests`) to prove the scoped path alone.
 
 ## 4. Board partitions (commit 1.2, adjusted)
 
