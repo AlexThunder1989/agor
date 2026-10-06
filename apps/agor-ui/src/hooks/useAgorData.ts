@@ -83,13 +83,14 @@ import {
   tombstoneSession,
   untombstoneSession,
 } from '../store/realtimeBatch';
-import { boardPartitionScope, replaceScope } from '../store/scopeMerge';
+import { boardPartitionScope, boardScopeKey, replaceScope } from '../store/scopeMerge';
 import { resetSessionMcpLinks } from '../store/sessionMcpLinks';
 import {
   fillOnDemand,
   isUnsupportedQueryError,
   MY_SESSIONS_GATED_LIMIT,
   mySessionsQuery,
+  otherCommittedMembers,
   startUserScope,
   stopUserScope,
 } from '../store/userScope';
@@ -148,6 +149,16 @@ const RECENT_SESSIONS_LIMIT = 50;
 // Longest the global snapshots wait for the user scope (U1 and its follow-up
 // id reads) before starting anyway; see `hydrateGlobalSets`' start below.
 const GLOBAL_SETS_SCOPE_HOLD_MS = 10_000;
+
+// Global session and branch hydration (Steps 1–2): the background full sets
+// after first paint, and a reconnect resync's full reads. Off, a reconnect
+// resyncs through the scope replaces alone — the user scope and the
+// displayed board — which is the path 3.3 keeps. Test-only switch until 3.3
+// deletes the global loops.
+let globalHydrationEnabled = true;
+export function setGlobalHydrationForTests(enabled: boolean): void {
+  globalHydrationEnabled = enabled;
+}
 
 // Items the Home first paint gates on. Board objects and cards are only needed
 // to paint a canvas, so Home does not read them at all; a board loads its own
@@ -555,6 +566,10 @@ export function useAgorData(
       // The scope and the partition record carry this same lifetime, never
       // whatever authority is current when they run (a remount can swap it).
       const loadLifetime = captureLoadLifetime(fetchAuthorityScope) as LoadLifetime;
+      // A reconnect resync reads the global session and branch sets, or
+      // (global hydration off) only the scopes it replaces.
+      const globalResync = silent && globalHydrationEnabled;
+      const scopedResync = silent && !globalHydrationEnabled;
       const authorityIsCurrent = () =>
         isLoadLifetimeCurrent(loadLifetime, authorityScopeKeyRef.current);
       const runAuthorityHydration = (
@@ -724,16 +739,19 @@ export function useAgorData(
           track(
             'sessions',
             silent
-              ? // Reconnect resyncs must fully repopulate every board, so they stay
-                // GLOBAL/full (mirrors the heavy + hydration paths below).
-                client.service('sessions').findAll({
-                  query: {
-                    archived: false,
-                    lean: true,
-                    $limit: PAGINATION.DEFAULT_LIMIT,
-                    $sort: { updated_at: -1 },
-                  },
-                })
+              ? globalResync
+                ? // Reconnect resyncs must fully repopulate every board, so they stay
+                  // GLOBAL/full (mirrors the heavy + hydration paths below).
+                  client.service('sessions').findAll({
+                    query: {
+                      archived: false,
+                      lean: true,
+                      $limit: PAGINATION.DEFAULT_LIMIT,
+                      $sort: { updated_at: -1 },
+                    },
+                  })
+                : // A scoped resync: the user scope's U1 and the displayed board read them.
+                  Promise.resolve([] as Session[])
               : authenticatedUserId
                 ? // My newest sessions (user scope, design r3 §3.1), served from
                   // SQL by `created_by`: correct however busy the rest of the
@@ -805,6 +823,7 @@ export function useAgorData(
         // Older responses without branch_board_id use global background hydration.
         if (
           directSessionId &&
+          !scopedResync &&
           !hasIdMatchingPrefix(directSessionId, sessionsList, (s) => s.session_id)
         ) {
           try {
@@ -930,8 +949,9 @@ export function useAgorData(
         // workspace this trims thousands of rows to one board's. A silent
         // reconnect fetches branches GLOBAL/full to resync; sessions were
         // already fetched full in the silent light batch above, so the extra
-        // board-session fetch is skipped there. Board objects and cards stay
-        // board-scoped on a reconnect too.
+        // board-session fetch is skipped there. A scoped resync reads the
+        // board's branches and sessions like first paint does. Board objects
+        // and cards stay board-scoped on a reconnect too.
         const [
           branchesList,
           boardSessionsList,
@@ -942,7 +962,7 @@ export function useAgorData(
         ] = await Promise.all([
           track(
             'branches',
-            silent
+            globalResync
               ? client.service('branches').findAll({
                   query: { archived: false, $limit: PAGINATION.DEFAULT_LIMIT },
                 })
@@ -957,9 +977,9 @@ export function useAgorData(
                 : Promise.resolve([] as Branch[])
           ),
           // Board-scoped sessions: only when a board is displayed and we didn't
-          // already fetch the full set (silent path). Merged with the recent
+          // already fetch the full set (global resync). Merged with the recent
           // slice below. Not tracked — not part of the loading checklist.
-          !silent && boardScope
+          !globalResync && boardScope
             ? client.service('sessions').findAll({
                 query: {
                   archived: false,
@@ -1134,23 +1154,24 @@ export function useAgorData(
         // Boards loaded after this resync started (a reused partition load
         // among them) are already reconciled: they stay loaded.
         if (silent) agorStore.getState().resetBoardPartitions(sparedBoardIds);
-        // The displayed board's board objects and cards reconcile
-        // (`replaceScope`, fenced like everything above): rows written live
-        // during this load keep their live value, and rows the board no
-        // longer has (deleted, moved or hidden while disconnected) leave.
-        // Other boards' rows are untouched (Home reads none).
+        // The displayed board reconciles (`replaceScope`, fenced like
+        // everything above): rows written live during this load keep their
+        // live value, and rows the board no longer has (deleted, moved or
+        // hidden while disconnected) leave unless another scope's committed
+        // membership holds them. Other boards' rows are untouched (Home reads
+        // none).
         const touchedInLoad = (collection: PartitionCollection, id: string) =>
           touchedSince(collection, id, firstPaintFence.startRevisions[collection]);
         // The displayed board's read (every query an unbounded `findAll`; a
-        // reconnect reads branches and sessions globally, so they are
-        // narrowed to the board). It reconciles the board's annotations and,
-        // when the full record arrived, settles its partition in the same
-        // update, with this membership.
+        // global resync reads branches and sessions globally, so they are
+        // narrowed to the board). It reconciles the board and, when the full
+        // record arrived, settles its partition in the same update, with this
+        // membership.
         const boardRows =
           boardScope && !reusedPartitionLoad
             ? {
                 branches: branchesList.filter((branch) => branch.board_id === boardScope),
-                sessions: (silent ? sessionsList : boardSessionsList).filter(
+                sessions: (globalResync ? sessionsList : boardSessionsList).filter(
                   (session) => boardIdForSession(session, branchesMap) === boardScope
                 ),
                 boardObjects: canUseMemberWorkspaceServices ? (boardObjectsList ?? []) : null,
@@ -1162,27 +1183,29 @@ export function useAgorData(
           (prev) => {
             const maps = {
               ...prev,
-              sessionById: sessionsById,
-              sessionsByBranch: sessionsByBranchId,
+              // A scoped resync keeps the session and branch sets: the
+              // displayed board's replace below and the user scope's
+              // reconcile the rows they claim.
+              ...(scopedResync
+                ? {}
+                : {
+                    sessionById: sessionsById,
+                    sessionsByBranch: sessionsByBranchId,
+                    branchById: branchesMap,
+                  }),
               boardById: boardsMap,
               commentById: commentsMap,
               cardTypeById: cardTypesMap,
               repoById: reposMap,
-              branchById: branchesMap,
               userById: usersMap,
             };
             if (!boardScope || !boardRows) return maps;
             return replaceScope(
               maps,
               boardPartitionScope(boardScope),
-              {
-                boardObjects: boardRows.boardObjects,
-                cards: boardRows.cards,
-                complete: boardRows.complete,
-              },
+              boardRows,
               touchedInLoad,
-              // An annotation belongs to one board: no other scope holds it.
-              []
+              otherCommittedMembers({ ...agorStore.getState(), ...maps }, boardScopeKey(boardScope))
             );
           },
           boardScope && boardRows && displayedBoardFull && isLoadLifetimeCurrent(loadLifetime)
@@ -1204,11 +1227,11 @@ export function useAgorData(
         // The background hydrations kicked off below re-snapshot AFTER this bump,
         // so they're unaffected.
         bumpFirstPaintMergeRevisions();
-        // A silent resync reads the session and branch sets in full: a
+        // A global resync reads the session and branch sets in full: a
         // complete global snapshot, exactly like the background hydrations'
         // applies. Board objects, cards and full board records are complete
         // only per board (its partition).
-        if (silent) agorStore.getState().markGloballyHydrated(['sessions', 'branches']);
+        if (globalResync) agorStore.getState().markGloballyHydrated(['sessions', 'branches']);
         // User scope (design r3 §3): the rest of my sessions, my branches, every
         // teammate I can view, and the branches my sessions and comment
         // threads reference. Started BEFORE the background global hydrations
@@ -1218,8 +1241,8 @@ export function useAgorData(
         // surfaces must not wait for a transcript. Starting after first paint
         // keeps the small reads behind the transcript's stream/get/tasks reads
         // (sent with the board-scoped batch); only its messages page, which
-        // needs the tasks response, can follow them. Re-run fill-only on every
-        // silent resync so the scope recovers anything missed while
+        // needs the tasks response, can follow them. Re-run as a replace on
+        // every silent resync so the scope reconciles anything missed while
         // disconnected.
         let userScopeSettled: Promise<void> | null = null;
         if (authenticatedUserId) {
@@ -1228,6 +1251,9 @@ export function useAgorData(
             lifetime: loadLifetime,
             gatedMineComplete: !silent && gatedMineComplete,
             unsupported: !silent && gatedUnsupported,
+            // A resync reconciles the scope: rows deleted, archived or moved
+            // out while disconnected leave.
+            replace: silent,
             // On a session route only the bulk U1 read waits for the opened
             // transcript (up to 10,000 rows could queue ahead of its first
             // messages page); Home has no transcript, and small reads stay early.
@@ -1271,7 +1297,7 @@ export function useAgorData(
           // coupling could leave the board empty forever. On independent loops,
           // branches apply on their own quiet window (almost immediately)
           // regardless of session churn.
-          if (!silent) {
+          if (!silent && globalHydrationEnabled) {
             void runAuthorityHydration(
               'sessions',
               ['sessions'],

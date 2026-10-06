@@ -1,7 +1,7 @@
 import type { AgorClient, BoardComment, Branch, Session } from '@agor-live/client';
 import { hasFullSessionDetails, toLeanSessionListRow } from '@agor-live/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { userScopeCoverage } from '../test/userScopeCoverage';
+import { boardCoverage, userScopeCoverage } from '../test/userScopeCoverage';
 import {
   bumpFirstPaintMergeRevisions,
   cancelAllHydrations,
@@ -14,7 +14,6 @@ import {
   sessionRemoved,
 } from './agorRealtimeActions';
 import { agorStore } from './agorStore';
-import { otherCommittedMembers } from './boardPartitions';
 import { captureLoadLifetime } from './loadLifetime';
 import { discardRealtimeNow, setRealtimeAuthorityScope } from './realtimeBatch';
 import {
@@ -28,6 +27,7 @@ import {
 } from './scopeMerge';
 import {
   MY_SESSIONS_FULL_LIMIT,
+  otherCommittedMembers,
   referencedBranchIds,
   referenceMembers,
   selectHomeBranchesLoaded,
@@ -78,6 +78,8 @@ function makeClient(handlers: {
   mine?: (limit: number) => Session[] | Promise<Session[]>;
   myBranches?: () => Branch[] | Promise<Branch[]>;
   teammates?: () => Branch[] | Promise<Branch[]>;
+  /** The teammate total the daemon reports (default: the rows returned). */
+  teammateTotal?: number;
   byIds?: (ids: string[]) => Branch[] | Promise<Branch[]>;
 }) {
   const calls: Call[] = [];
@@ -89,7 +91,10 @@ function makeClient(handlers: {
     const query = args.query;
     calls.push({ service, method, query });
     if (service === 'sessions') return (await handlers.mine?.(query.$limit as number)) ?? [];
-    if (query.teammate) return { data: (await handlers.teammates?.()) ?? [] };
+    if (query.teammate) {
+      const data = (await handlers.teammates?.()) ?? [];
+      return { data, total: handlers.teammateTotal ?? data.length };
+    }
     if (query.created_by) return (await handlers.myBranches?.()) ?? [];
     const ids = (query.branch_id as { $in: string[] }).$in;
     return { data: (await handlers.byIds?.(ids)) ?? [] };
@@ -933,5 +938,100 @@ describe('user scope', () => {
     release();
     await rerun;
     expect(flags()).toMatchObject({ mySessionsLoaded: true, homeBranchesLoaded: true });
+  });
+});
+
+describe('user scope — reconnect replace', () => {
+  const mate = (id: string) =>
+    branch(id, { custom_context: { teammate: { kind: 'teammate' } } } as Partial<Branch>);
+  const mine = (id: string) => branch(id, { created_by: ME } as Partial<Branch>);
+  const has = (map: 'sessionById' | 'branchById', id: string) => agorStore.getState()[map].has(id);
+
+  /** A first (fill) run that loads every piece, then board-2 loaded holding `s-board`. */
+  async function loadScope() {
+    const first = makeClient({
+      mine: () => [
+        session('s-keep', 'br-mine'),
+        session('s-gone', 'br-mine'),
+        session('s-board', 'br-other', { branch_board_id: 'board-2' }),
+      ],
+      myBranches: () => [mine('br-mine'), mine('br-gone')],
+      teammates: () => [mate('mate-1'), mate('mate-gone')],
+      byIds: (ids) => ids.map((id) => branch(id, { board_id: 'board-2' })),
+    });
+    await startUserScope(first.client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: false,
+    });
+    await vi.waitFor(() => expect(flags().homeBranchesLoaded).toBe(true));
+    agorStore.getState().setCoverage(boardScopeKey('board-2'), {
+      ...boardCoverage('loaded', lifetime()),
+      members: { sessions: new Set(['s-board']), branches: new Set(['br-other']) },
+    });
+  }
+
+  it('reconciles my sessions, my branches and teammates, keeping rows another scope holds', async () => {
+    await loadScope();
+    // While disconnected: s-gone and s-board archived, br-gone deleted,
+    // mate-gone lost its marker, s-keep renamed.
+    const resync = makeClient({
+      mine: () => [session('s-keep', 'br-mine', { title: 'renamed' } as Partial<Session>)],
+      myBranches: () => [mine('br-mine')],
+      teammates: () => [mate('mate-1')],
+      byIds: (ids) => ids.map((id) => branch(id, { board_id: 'board-2' })),
+    });
+    await startUserScope(resync.client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: false,
+      replace: true,
+    });
+    expect(has('sessionById', 's-gone')).toBe(false);
+    expect(has('branchById', 'br-gone')).toBe(false);
+    expect(has('branchById', 'mate-gone')).toBe(false);
+    expect(agorStore.getState().sessionById.get('s-keep')?.title).toBe('renamed');
+    // board-2's committed membership still holds it.
+    expect(has('sessionById', 's-board')).toBe(true);
+    expect(has('branchById', 'mate-1')).toBe(true);
+    expect(flags()).toMatchObject({ mySessionsLoaded: true, teammatesLoaded: true });
+  });
+
+  it('a capped read removes nothing', async () => {
+    await loadScope();
+    const capped = Array.from({ length: MY_SESSIONS_FULL_LIMIT }, (_, i) =>
+      session(`s-new-${i}`, 'br-mine')
+    );
+    const resync = makeClient({
+      mine: () => capped,
+      myBranches: () => [mine('br-mine'), mine('br-gone')],
+      teammates: () => [mate('mate-1')],
+      teammateTotal: 5,
+      byIds: (ids) => ids.map((id) => branch(id, { board_id: 'board-2' })),
+    });
+    await startUserScope(resync.client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: false,
+      replace: true,
+    });
+    expect(flags()).toMatchObject({ mySessionsTruncated: true });
+    expect(selectTeammatesTruncated(agorStore.getState())).toBe(true);
+    expect(has('sessionById', 's-gone')).toBe(true);
+    expect(has('sessionById', 's-keep')).toBe(true);
+    expect(has('branchById', 'mate-gone')).toBe(true);
+  });
+
+  it('a fill run (no replace) removes nothing', async () => {
+    await loadScope();
+    const resync = makeClient({ mine: () => [], myBranches: () => [], teammates: () => [] });
+    await startUserScope(resync.client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: false,
+    });
+    expect(has('sessionById', 's-gone')).toBe(true);
+    expect(has('branchById', 'br-gone')).toBe(true);
+    expect(has('branchById', 'mate-gone')).toBe(true);
   });
 });

@@ -30,7 +30,6 @@ import { agorStore } from './agorStore';
 import {
   loadBoardPartition,
   makeBoardReadySelector,
-  otherCommittedMembers,
   partitionLoadMark,
   partitionLoadSince,
   partitionsLoadedSince,
@@ -52,6 +51,7 @@ import {
   replaceScope,
   USER_SCOPE_KEYS,
 } from './scopeMerge';
+import { otherCommittedMembers } from './userScope';
 
 const AUTHORITY = 'user-a:member:1';
 const BOARD = 'board-1';

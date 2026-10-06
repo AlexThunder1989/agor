@@ -33,7 +33,7 @@ import {
   selectTeammatesLoaded,
 } from '../store/userScope';
 import { markBoardLoaded } from '../test/userScopeCoverage';
-import { useAgorData } from './useAgorData';
+import { setGlobalHydrationForTests, useAgorData } from './useAgorData';
 import { useBoardPartition } from './useBoardPartition';
 
 // The opened-transcript prefetch retains a real reactive session; the mock
@@ -68,7 +68,8 @@ type Listener = (payload: unknown) => void;
  * `findAll` and `find`. For the background-hydration tests the gated first-paint
  * fetch (`find`) and the full hydration fetch (`findAll`) need DIFFERENT data,
  * so a method-specific key (`sessions:findAll`, `sessions:find`) takes
- * precedence over the bare name when present. `name:get` seeds `get`.
+ * precedence over the bare name when present. `name:get` seeds `get`. A seed
+ * may also be a function of the call's query (a scoped server, see `fakeServer`).
  */
 function makeMockClient(seed: Record<string, unknown[]> = {}) {
   const serviceListeners = new Map<string, Map<string, Listener[]>>();
@@ -84,12 +85,16 @@ function makeMockClient(seed: Record<string, unknown[]> = {}) {
   const fetchCounts = new Map<string, number>();
   const fetchArguments = new Map<string, unknown[]>();
 
-  const respond = async (name: string, method: 'findAll' | 'find') => {
+  const respond = async (name: string, method: 'findAll' | 'find', args?: unknown) => {
     const key = `${name}:${method}`;
     const call = (fetchCounts.get(key) ?? 0) + 1;
     fetchCounts.set(key, call);
     const gate = fetchHooks.get(key)?.(call);
-    const data = seed[key] ?? seed[name] ?? [];
+    const entry: unknown = seed[key] ?? seed[name] ?? [];
+    const data =
+      typeof entry === 'function'
+        ? entry((args as { query?: Record<string, unknown> } | undefined)?.query ?? {})
+        : entry;
     if (gate && typeof (gate as { then?: unknown }).then === 'function') {
       await gate;
     }
@@ -99,7 +104,7 @@ function makeMockClient(seed: Record<string, unknown[]> = {}) {
   const recordAndRespond = (name: string, method: 'findAll' | 'find', args: unknown) => {
     const key = `${name}:${method}`;
     fetchArguments.set(key, [...(fetchArguments.get(key) ?? []), args]);
-    return respond(name, method);
+    return respond(name, method, args);
   };
 
   const service = (name: string) => ({
@@ -172,6 +177,63 @@ function makeMockClient(seed: Record<string, unknown[]> = {}) {
       fetchArguments.get(`${name}:${method}`) ?? [],
   };
 }
+
+type Row = Record<string, unknown>;
+
+/**
+ * A daemon that answers branch and session reads by their query (the keys
+ * the scoped loaders send: `archived`, `created_by`, `board_id`, `teammate`,
+ * `branch_id.$in`, `$limit`), over rows a test mutates between calls.
+ * `find` answers a page (`{ data, total }`), `findAll` the rows.
+ */
+function fakeServer(seed: Record<string, unknown[]>, rows: { branches: Row[]; sessions: Row[] }) {
+  const boardOf = (session: Row) =>
+    rows.branches.find((branch) => branch.branch_id === session.branch_id)?.board_id;
+  const matches = (row: Row, query: Record<string, unknown>, boardId: unknown) => {
+    const ids = (query.branch_id as { $in?: string[] } | undefined)?.$in;
+    const teammate = (row.custom_context as { teammate?: { kind?: string } } | undefined)?.teammate;
+    return (
+      (query.archived === undefined || !!row.archived === query.archived) &&
+      (query.created_by === undefined || row.created_by === query.created_by) &&
+      (query.board_id === undefined || boardId === query.board_id) &&
+      (!query.teammate || teammate?.kind === 'teammate') &&
+      (!ids || ids.includes(row.branch_id as string))
+    );
+  };
+  const read = (collection: 'branches' | 'sessions', query: Record<string, unknown>) => {
+    const found =
+      collection === 'branches'
+        ? rows.branches.filter((branch) => matches(branch, query, branch.board_id))
+        : rows.sessions
+            .map((session) => ({ ...session, branch_board_id: boardOf(session) }))
+            .filter((session) => matches(session, query, session.branch_board_id));
+    return found.slice(0, (query.$limit as number | undefined) ?? found.length);
+  };
+  const total = (collection: 'branches' | 'sessions', query: Record<string, unknown>) =>
+    read(collection, { ...query, $limit: undefined }).length;
+  for (const collection of ['branches', 'sessions'] as const) {
+    seed[`${collection}:findAll`] = ((query: Record<string, unknown>) =>
+      read(collection, query)) as never;
+    seed[`${collection}:find`] = ((query: Record<string, unknown>) => ({
+      data: read(collection, query),
+      total: total(collection, query),
+    })) as never;
+  }
+  return seed;
+}
+
+/** Run the test with global session and branch hydration off (the Step 3 path). */
+function withoutGlobalHydration() {
+  setGlobalHydrationForTests(false);
+  onTestFinished(() => setGlobalHydrationForTests(true));
+}
+
+/** Whether a branch or session read was unscoped (read the global set). */
+const globalReads = (reads: unknown[]) =>
+  reads.filter((args) => {
+    const query = (args as { query?: Record<string, unknown> }).query ?? {};
+    return !query.board_id && !query.created_by && !query.teammate && !query.branch_id;
+  });
 
 /**
  * Put the hook on board `board-1`'s route: board objects and cards load only
@@ -2539,6 +2601,68 @@ describe('branch creation on an already-open board', () => {
       expect(fetchCount('board-objects', 'findAll')).toBe(beforePlacements);
     } finally {
       unmount();
+    }
+  });
+});
+
+describe('useAgorData — scoped reconnect (global hydration off)', () => {
+  const boardA = { board_id: 'board-A', slug: 'displayed', name: 'Displayed' };
+  const authenticated = {
+    authenticatedUserId: 'user-me',
+    authenticatedUserRole: 'member',
+    authGeneration: 1,
+    connectionReady: true,
+  } as const;
+
+  it("replaces the displayed board's branches and sessions and my sessions, reading no global set", async () => {
+    withoutGlobalHydration();
+    window.history.pushState({}, '', '/b/displayed/');
+    onTestFinished(() => window.history.pushState({}, '', '/'));
+    const server = {
+      branches: [
+        makeBranch({ branch_id: 'b-A', board_id: 'board-A', created_by: 'user-other' }),
+        makeBranch({ branch_id: 'b-moved', board_id: 'board-A', created_by: 'user-other' }),
+        makeBranch({ branch_id: 'b-mine', board_id: 'board-C', created_by: 'user-me' }),
+      ],
+      sessions: [
+        makeSession({ session_id: 's-other', branch_id: 'b-A', created_by: 'user-other' }),
+        makeSession({ session_id: 's-gone', branch_id: 'b-A', created_by: 'user-other' }),
+        makeSession({ session_id: 's-mine', branch_id: 'b-mine', created_by: 'user-me' }),
+      ],
+    };
+    const seed = fakeServer({ boards: [boardA], 'boards:get': boardA as never }, server);
+    const { client, emitIo, fetchArguments } = makeMockClient(seed);
+    const { result } = renderHook(() => useAgorData(client, authenticated));
+    await waitForInitialLoad(result);
+    await waitFor(() => expect(selectMySessionsLoaded(agorStore.getState())).toBe(true));
+    const has = (map: 'sessionById' | 'branchById', id: string) =>
+      agorStore.getState()[map].has(id);
+    expect(['s-other', 's-gone', 's-mine'].every((id) => has('sessionById', id))).toBe(true);
+    expect(has('branchById', 'b-moved')).toBe(true);
+
+    // While disconnected: a session on the board archived, a branch moved
+    // to an unloaded board, one of my sessions archived.
+    server.sessions = server.sessions.map((row) =>
+      row.session_id === 's-gone' || row.session_id === 's-mine' ? { ...row, archived: true } : row
+    );
+    server.branches = server.branches.map((row) =>
+      row.branch_id === 'b-moved' ? { ...row, board_id: 'board-C' } : row
+    );
+    act(() => emitIo('connect'));
+    await waitFor(() => expect(has('sessionById', 's-mine')).toBe(false));
+    await flush();
+    expect(has('sessionById', 's-gone')).toBe(false);
+    expect(has('branchById', 'b-moved')).toBe(false);
+    expect(has('sessionById', 's-other')).toBe(true);
+    expect(has('branchById', 'b-mine')).toBe(true);
+    expect(selectBoardPartition(agorStore.getState(), 'board-A')?.status).toBe('loaded');
+    for (const reads of [
+      fetchArguments('sessions', 'findAll'),
+      fetchArguments('sessions', 'find'),
+      fetchArguments('branches', 'findAll'),
+      fetchArguments('branches', 'find'),
+    ]) {
+      expect(globalReads(reads)).toEqual([]);
     }
   });
 });

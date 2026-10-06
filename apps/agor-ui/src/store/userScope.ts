@@ -20,6 +20,10 @@
  *
  * Every read applies with the fill-only merge and per-id touched fence
  * (`applyEntityFill`), under the lifetime of the load that started the run.
+ * A reconnect run (`replace`) reconciles instead: U1, U2 and U3 apply as
+ * complete replaces of their piece (`replaceScope`), so rows deleted, archived
+ * or moved out while disconnected leave, unless another scope's committed
+ * membership holds them; a capped read removes nothing.
  * U1, U2 and U3 each commit a coverage entry (`USER_SCOPE_KEYS`) in the update
  * that applies their rows, with the run's generation, their membership
  * (`settledMembers`, then kept live by realtime) and whether the read was
@@ -58,6 +62,10 @@ import { captureLoadLifetime, isLoadLifetimeCurrent, type LoadLifetime } from '.
 import {
   type CoverageMembers,
   type CoverageUpdate,
+  globalSetsMembers,
+  type LoadScope,
+  type MemberLookup,
+  replaceScope,
   type ScopeCoverage,
   type ScopeRows,
   settledMembers,
@@ -192,6 +200,28 @@ export function referenceMembers(
   return members;
 }
 
+/**
+ * The memberships a replace of `exceptKey` must respect: every other scope
+ * loaded under the current lifetime (a row that belongs to one of them is
+ * never removed), and the global sets while they exist. Loading, failed and
+ * stale scopes (another authority or lifetime) hold nothing. Overlapping
+ * scopes are normal: my session on a loaded board belongs to the user scope
+ * and to that partition.
+ */
+export function otherCommittedMembers(state: AgorState, exceptKey?: string): MemberLookup[] {
+  const members: MemberLookup[] = [];
+  for (const [key, entry] of state.coverage) {
+    if (key === exceptKey || entry.status !== 'loaded' || !isLoadLifetimeCurrent(entry)) continue;
+    if (key === USER_SCOPE_KEYS.references && entry.userId) {
+      members.push({ branches: referenceMembers(state, entry.userId) });
+    } else if (entry.members) {
+      members.push(entry.members);
+    }
+  }
+  members.push(globalSetsMembers(state.globallyHydrated));
+  return members;
+}
+
 interface ScopeRun {
   client: AgorClient;
   userId: string;
@@ -213,6 +243,8 @@ interface ScopeRun {
   referencesKnown: boolean;
   /** The daemon does not support the scope reads; no more of them are sent. */
   degraded: boolean;
+  /** A reconnect run: every read reconciles its scope instead of filling it. */
+  replace: boolean;
   /**
    * A scope read was unsupported or failed: the global snapshots (Steps 1–2)
    * may complete the flags it left unset (`applyGlobalCompatibility`).
@@ -241,7 +273,9 @@ export type FillRows = { branches?: Branch[]; sessions?: Session[] };
  * rows; with `commitIf`, the rows apply at once and the piece commits once it
  * resolves true (false resolves null). Its membership is the rows it returned,
  * with the rows realtime wrote meanwhile judged by their current value
- * (`settledMembers`).
+ * (`settledMembers`). With `replace`, the rows reconcile that scope
+ * (`replaceScope`, complete unless the piece says the read was capped) instead
+ * of filling it.
  */
 async function fillRead(
   current: () => boolean,
@@ -255,9 +289,10 @@ async function fillRead(
       complete: (rows: FillRows) => boolean;
       commitIf?: () => Promise<boolean>;
     };
+    replace?: LoadScope;
   } = {}
 ): Promise<FillRows | null> {
-  const { violatesFilter, piece } = options;
+  const { violatesFilter, piece, replace } = options;
   for (let attempt = 0; ; attempt++) {
     const fence = beginPartitionLoad();
     try {
@@ -276,6 +311,7 @@ async function fillRead(
       }
       const touched = (collection: HydratedCollection, id: string) =>
         touchedSince(collection, id, fence.startRevisions[collection]);
+      const complete = piece ? piece.complete(rows) : true;
       const settle: CoverageUpdate | undefined =
         piece &&
         ((maps, coverage) =>
@@ -290,10 +326,19 @@ async function fillRead(
                 maps,
                 (collection) => touchedIdsSince(collection, fence.startRevisions[collection])
               ),
-              complete: piece.complete(rows),
+              complete,
             })
           ));
-      let update = (prev: DataMaps) => applyEntityFill(prev, rows, touched);
+      let update = (prev: DataMaps) =>
+        replace
+          ? replaceScope(
+              prev,
+              replace,
+              { ...rows, complete },
+              touched,
+              otherCommittedMembers(agorStore.getState(), replace.key)
+            )
+          : applyEntityFill(prev, rows, touched);
       if (piece?.commitIf) {
         // A deferred commit publishes the rows now and the coverage once allowed.
         agorStore.getState().applyMaps(update);
@@ -641,6 +686,8 @@ export async function startUserScope(
      * referenced branches) never wait for it.
      */
     deferBulkRead?: Promise<void>;
+    /** A reconnect resync: reconcile every piece instead of filling it. */
+    replace?: boolean;
   }
 ): Promise<void> {
   if (!isLoadLifetimeCurrent(options.lifetime)) return;
@@ -657,6 +704,7 @@ export async function startUserScope(
     inflight: 0,
     referencesKnown: false,
     degraded: false,
+    replace: options.replace ?? false,
     compat: false,
     referenceTimer: null,
     retryTimers: new Set(),
@@ -665,6 +713,8 @@ export async function startUserScope(
   };
   currentRun = run;
   const store = () => agorStore.getState();
+  const reconcile = (key: UserScopeKey) =>
+    run.replace ? userScopePiece(key, run.userId) : undefined;
   if (options.gatedMineComplete) {
     commitPiece(run, USER_SCOPE_KEYS.sessions, {
       status: 'loaded',
@@ -706,6 +756,7 @@ export async function startUserScope(
       violatesFilter: ({ branches }) =>
         (branches ?? []).some((row) => row.created_by !== run.userId),
       piece: { run, key: USER_SCOPE_KEYS.branches, complete: () => true },
+      replace: reconcile(USER_SCOPE_KEYS.branches),
     }
   ).then((rows) => !!rows);
   // The daemon reports the real total, so a capped read is never "all teammates".
@@ -732,6 +783,7 @@ export async function startUserScope(
         // once U2 proved the keys are honoured.
         commitIf: async () => (await u2.catch(() => false)) && !run.degraded,
       },
+      replace: reconcile(USER_SCOPE_KEYS.teammates),
     }
   ).then((rows) => !!rows);
 
@@ -762,6 +814,7 @@ export async function startUserScope(
             key: USER_SCOPE_KEYS.sessions,
             complete: (rows) => (rows.sessions?.length ?? 0) < MY_SESSIONS_FULL_LIMIT,
           },
+          replace: reconcile(USER_SCOPE_KEYS.sessions),
         }
       ).then((rows) => !!rows);
 
