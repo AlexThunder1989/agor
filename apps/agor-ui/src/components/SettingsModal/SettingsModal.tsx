@@ -409,7 +409,6 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
             branchById={branchById}
             repoById={repoById}
             boardById={boardById}
-            sessionsByBranch={sessionsByBranch}
             userById={userById}
             onArchiveOrDelete={onArchiveOrDeleteBranch}
             onRowClick={handleBranchRowClick}

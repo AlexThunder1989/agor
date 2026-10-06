@@ -162,7 +162,7 @@ export const BranchesTable: React.FC<BranchesTableProps> = ({
     ? teammates.slice((page - 1) * pageSize, page * pageSize)
     : branchPage.rows;
   const total = teammatesFilter ? teammates.length : branchPage.total;
-  const loading = teammatesFilter ? !teammatesLoaded : branchPage.loading;
+  const loading = teammatesFilter ? !teammatesLoaded && teammates.length === 0 : branchPage.loading;
   const sessionCounts = useSessionCounts(
     client,
     'branch_id',
