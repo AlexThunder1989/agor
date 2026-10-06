@@ -139,6 +139,8 @@ export function pinRows(ids: PinnedIds): () => void {
       sessions: (session) => unpinned.sessions.has(session.session_id),
       branches: (branch) => unpinned.branches.has(branch.branch_id),
     });
+    // Links of a pinned session that never loaded (`holdsSession`).
+    if (!globalHydrationEnabled()) forgetAbsentSessions(unpinned.sessions);
   };
 }
 
@@ -218,4 +220,17 @@ export function forgetAbsentSessions(sessionIds: Iterable<string>): void {
   const { sessionById, forgetSessionMcp } = agorStore.getState();
   const absent = [...new Set(sessionIds)].filter((id) => !sessionById.has(id));
   if (absent.length > 0) forgetSessionMcp(absent);
+}
+
+/**
+ * Whether something holds session `id`, so its MCP links may enter: it is in
+ * the store (admitted, `admitHeld`), or a pin holds it. While the global sets
+ * exist (Steps 1–2), every session.
+ */
+export function holdsSession(id: string): boolean {
+  return (
+    globalHydrationEnabled() ||
+    agorStore.getState().sessionById.has(id) ||
+    !!pinnedMembers.sessions?.has(id)
+  );
 }

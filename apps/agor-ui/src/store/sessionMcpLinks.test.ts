@@ -1,10 +1,17 @@
-import type { AgorClient } from '@agor-live/client';
+import type { AgorClient, Session } from '@agor-live/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setGlobalHydrationForTests } from '../hooks/useAgorData';
 import { updateSessionMcpServers } from '../utils/sessionMcpServers';
 import { cancelAllHydrations, resetHydrationRevisions } from './agorHydration';
-import { branchRemoved, mcpServerRemoved, sessionRemoved } from './agorRealtimeActions';
+import {
+  branchRemoved,
+  mcpServerRemoved,
+  sessionCreated,
+  sessionRemoved,
+} from './agorRealtimeActions';
 import { agorStore } from './agorStore';
 import { setRealtimeAuthorityScope } from './realtimeBatch';
+import { pinRows } from './retention';
 import { sessionMcpCreated, sessionMcpPatched, sessionMcpRemoved } from './sessionMcpActions';
 import {
   loadSessionMcpServerIds,
@@ -268,5 +275,61 @@ describe('session MCP links of deleted sessions', () => {
     await load;
     expect(agorStore.getState().sessionMcpLoaded.has('s-3')).toBe(false);
     expect(agorStore.getState().sessionMcpServerIds.has('s-3')).toBe(false);
+  });
+});
+
+describe('links of sessions nothing holds (global hydration off)', () => {
+  beforeEach(() => {
+    agorStore.getState().reset();
+    resetHydrationRevisions();
+    setRealtimeAuthorityScope(AUTHORITY);
+    setGlobalHydrationForTests(false);
+  });
+  afterEach(() => {
+    setGlobalHydrationForTests(true);
+    setRealtimeAuthorityScope(null);
+    agorStore.getState().reset();
+  });
+
+  const other = (id: string) =>
+    ({
+      session_id: id,
+      branch_id: 'br-9',
+      branch_board_id: 'b9',
+      created_by: 'user-b',
+      archived: false,
+      genealogy: { children: [] },
+    }) as unknown as Session;
+
+  it('never enter: 100 rejected creates leave no links', () => {
+    for (let i = 0; i < 100; i++) {
+      sessionCreated(other(`s-${i}`));
+      sessionMcpCreated({ session_id: `s-${i}`, mcp_server_id: 'mcp-1' });
+      sessionMcpPatched({ session_id: `s-${i}`, mcp_server_ids: ['mcp-2'] });
+    }
+    expect(agorStore.getState().sessionById.size).toBe(0);
+    expect(agorStore.getState().sessionMcpServerIds.size).toBe(0);
+  });
+
+  it("a held session's links enter, a pinned one's too", () => {
+    sessionCreated({ ...other('s-mine'), created_by: 'user-a' } as Session);
+    const release = pinRows({ sessions: ['s-open'] });
+    sessionMcpCreated({ session_id: 's-mine', mcp_server_id: 'mcp-1' });
+    sessionMcpPatched({ session_id: 's-open', mcp_server_ids: ['mcp-2'] });
+    expect(agorStore.getState().sessionMcpServerIds.get('s-mine')).toEqual(['mcp-1']);
+    expect(agorStore.getState().sessionMcpServerIds.get('s-open')).toEqual(['mcp-2']);
+    release();
+    expect(agorStore.getState().sessionMcpServerIds.has('s-open')).toBe(false);
+  });
+
+  it('a read that lands after its session left applies nothing', async () => {
+    const { client, responses } = makeClient();
+    const release = pinRows({ sessions: ['s-open'] });
+    const load = loadSessionMcpServerIds(client, 's-open');
+    release();
+    responses[0].resolve([{ session_id: 's-open', mcp_server_id: 'mcp-1' }]);
+    await load;
+    expect(agorStore.getState().sessionMcpServerIds.has('s-open')).toBe(false);
+    expect(agorStore.getState().sessionMcpLoaded.has('s-open')).toBe(false);
   });
 });

@@ -26,6 +26,7 @@ import {
 } from './agorHydration';
 import { agorStore } from './agorStore';
 import { captureLoadLifetime, isLoadLifetimeCurrent } from './loadLifetime';
+import { holdsSession } from './retention';
 
 /** Touched-fence id of one (session, server) link. */
 export function sessionMcpPairKey(sessionId: string, mcpServerId: string): string {
@@ -122,6 +123,8 @@ export function loadSessionMcpServerIds(client: AgorClient, sessionId: string): 
       const collection: HydratedCollection = 'sessionMcp';
       const start = fence.startRevisions[collection];
       if (touchedSince(collection, deletedKey(sessionId), start)) return;
+      // Its session left meanwhile (unpinned, evicted): its links don't enter.
+      if (!holdsSession(sessionId)) return;
       const rows = Array.isArray(result) ? result : result.data;
       const snapshotIds = rows
         .filter((row) => row.session_id === sessionId)
