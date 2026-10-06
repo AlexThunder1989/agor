@@ -55,6 +55,8 @@ export interface TurnOutcomeContext {
   restarted?: boolean;
   /** Who asked for the stop, when a person in the UI did. */
   stoppedBy?: 'you' | { name: string };
+  /** The viewer; only their own typed prompt may be replayed as Try again. */
+  currentUserId?: string;
   now?: Date;
 }
 
@@ -98,6 +100,19 @@ function formatReset(resetsAt: number, now: Date): string | undefined {
   return `${at.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${time}`;
 }
 
+/** A prompt the viewer typed themselves, so replaying it as them sends nothing new. */
+function isViewersOwnPrompt(task: Task, currentUserId: string | undefined): boolean {
+  const metadata = task.metadata;
+  return (
+    !!currentUserId &&
+    task.created_by === currentUserId &&
+    !!task.full_prompt?.trim() &&
+    metadata?.source === 'agor' &&
+    !metadata.is_agor_callback &&
+    !metadata.system_authored
+  );
+}
+
 /** Friendly one-line outcome for a finished or stopping turn; null when nothing needs saying. */
 export function describeTurnOutcome(
   task: Task,
@@ -108,6 +123,7 @@ export function describeTurnOutcome(
     rateLimit,
     restarted = false,
     stoppedBy,
+    currentUserId,
     now = new Date(),
   }: TurnOutcomeContext = {}
 ): TurnOutcomeCopy | null {
@@ -221,7 +237,7 @@ export function describeTurnOutcome(
       cause: 'never_started',
       type: 'error',
       message: `The agent couldn't start. ${NO_FILES_CHANGED}`,
-      action: 'retry',
+      action: isViewersOwnPrompt(task, currentUserId) ? 'retry' : 'resume',
     };
   }
   if (lostConnection) {

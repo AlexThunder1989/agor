@@ -780,6 +780,7 @@ export const TaskBlock = React.memo<TaskBlockProps>(
       rateLimit: rejectedRateLimit(messages),
       restarted: messages.some(isRestartNotice),
       stoppedBy: stopRequester(task, currentUserId, userById),
+      currentUserId,
     });
     const outcomeCause = outcome?.cause;
 

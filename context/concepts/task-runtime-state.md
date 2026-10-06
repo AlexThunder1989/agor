@@ -361,8 +361,10 @@ dispatched rather than left queued (`canSessionStartTurn`): the queue is empty
 and the drainer's `sessionCanStartTask` holds, or the session is `failed`, which
 the prompt route repairs even after opening it cleared `ready_for_prompt`. An
 opened `timed_out` session gets no action, because nothing repairs it. Try again (replay the
-prompt) is offered only when the run never started; every other outcome,
-including an unconfirmed provider result, offers Resume.
+prompt) is offered only when the run never started and the viewer typed that
+non-empty prompt themselves (`created_by`, `metadata.source === 'agor'`, not a
+callback or system-authored prompt); otherwise a run that never started offers
+Resume, as does every other outcome, including an unconfirmed provider result.
 
 `heartbeat_lost` has two producers: a stale
 heartbeat found by the reconciler, and any local/authoritative executor

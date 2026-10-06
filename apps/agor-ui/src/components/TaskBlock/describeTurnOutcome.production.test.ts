@@ -29,6 +29,8 @@ function toTask(fixture: ProductionFixture, index: number): Task {
     status: fixture.status,
     created_at: '2026-09-20T00:00:00.000Z',
     git_state: { ref_at_start: 'main', sha_at_start: 'abc' },
+    // The viewer's own typed prompt, so a run that never started may offer Try again.
+    metadata: { source: 'agor' },
     ...(fixture.example !== null ? { error_message: fixture.example } : {}),
     ...(fixture.executor_connected ? { executor_connected_at: '2026-09-20T00:00:01.000Z' } : {}),
     ...(fixture.recorded_tool_count !== null
@@ -148,7 +150,7 @@ describe('describeTurnOutcome on production error data', () => {
   it.each(rows)('#$index $fixture.status $fixture.example', ({ fixture, index, expected }) => {
     const task = toTask(fixture, index);
     const agentName = (AGENTIC_TOOL_DISPLAY_NAMES as Record<string, string>)[fixture.tool];
-    const outcome = describeTurnOutcome(task, { agentName });
+    const outcome = describeTurnOutcome(task, { agentName, currentUserId: 'user' });
     const { action, ...shape } = expected;
     expect(outcome).toMatchObject(shape);
     expect(outcome?.action).toBe(action);

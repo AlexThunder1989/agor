@@ -372,12 +372,15 @@ it('retries the original prompt when startup proves nothing ran, as one new turn
     view({
       task: {
         ...task,
+        created_by: 'viewer',
+        metadata: { source: 'agor' },
         status: TaskStatus.FAILED,
         recorded_tool_count: 0,
         error_message: 'Local executor did not connect before the startup deadline.',
         sdk_failure: { termination: 'verified' },
         termination_request: { cause: 'startup_timeout' },
       } as Task,
+      currentUserId: 'viewer',
       isLatestTask: true,
       canStartTurn: true,
       sessionId: task.session_id,
@@ -390,6 +393,34 @@ it('retries the original prompt when startup proves nothing ran, as one new turn
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
   await waitFor(() => expect(prompt).toHaveBeenCalledWith(task.session_id, 'Retained prompt'));
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull());
+});
+
+it('resumes instead of replaying a prompt the viewer did not type', async () => {
+  const prompt = vi.fn().mockResolvedValue(undefined);
+  render(
+    view({
+      task: {
+        ...task,
+        created_by: 'teammate',
+        metadata: { source: 'agor' },
+        status: TaskStatus.FAILED,
+        recorded_tool_count: 0,
+        sdk_failure: { termination: 'verified' },
+        termination_request: { cause: 'startup_timeout' },
+      } as Task,
+      currentUserId: 'viewer',
+      isLatestTask: true,
+      canStartTurn: true,
+      sessionId: task.session_id,
+      client: { sessions: { prompt } } as unknown as NonNullable<
+        React.ComponentProps<typeof TaskBlock>['client']
+      >,
+    })
+  );
+  expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
+  await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+  expect(prompt.mock.calls[0][1]).not.toBe('Retained prompt');
 });
 
 it('tells the user when Resume fails instead of failing silently', async () => {

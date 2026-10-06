@@ -22,6 +22,7 @@ function task(overrides: Partial<Task> = {}): Task {
     task_id: 'task-1',
     session_id: 'session-1',
     created_by: 'user-1',
+    metadata: { source: 'agor' },
     full_prompt: 'Do the thing',
     status: TaskStatus.FAILED,
     created_at: '2026-10-01T00:00:00.000Z',
@@ -44,8 +45,9 @@ const cause = (value: NonNullable<Task['termination_request']>['cause']) => ({
   termination_request: { cause: value, requested_at: '' },
 });
 
+// The viewer typed this turn's prompt unless a test says otherwise.
 const describe3 = (overrides: Partial<Task>, context?: TurnOutcomeContext) =>
-  describeTurnOutcome(task(overrides), context);
+  describeTurnOutcome(task(overrides), { currentUserId: 'user-1', ...context });
 
 const ENOENT_SYSTEM_PROMPT =
   "ENOENT: no such file or directory, open '/usr/lib/node_modules/agor-live/dist/core/templates/agor-system-prompt.md'";
@@ -229,6 +231,27 @@ describe('describeTurnOutcome v3', () => {
         recorded_tool_count: 3,
       })?.cause
     ).toBe('lost_connection');
+  });
+
+  it('6. replays only a prompt the viewer typed; anything else resumes', () => {
+    const startup = cause('startup_timeout');
+    expect(describe3(startup)?.action).toBe('retry');
+    for (const [overrides, context] of [
+      [startup, { currentUserId: 'someone-else' }],
+      [startup, { currentUserId: undefined }],
+      [{ ...startup, metadata: { source: 'agor', is_agor_callback: true } }, {}],
+      [{ ...startup, metadata: { source: 'agor', system_authored: true } }, {}],
+      [{ ...startup, metadata: { source: 'gateway' } }, {}],
+      [{ ...startup, metadata: undefined }, {}],
+      [{ ...startup, full_prompt: '  ' }, {}],
+    ] as const) {
+      expect(describe3(overrides as Partial<Task>, context)).toEqual({
+        cause: 'never_started',
+        type: 'error',
+        message: "The agent couldn't start. No files changed.",
+        action: 'resume',
+      });
+    }
   });
 
   it('6b. a failure proven never to connect could not start; legacy rows prove nothing', () => {
