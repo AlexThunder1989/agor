@@ -60,9 +60,19 @@ import {
 } from './agorHydration';
 import { applyEntityFill, type DataMaps } from './agorMaps';
 import { type AgorState, agorStore, type LoadMetaUpdate } from './agorStore';
-import { captureLoadLifetime, isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
+import {
+  authorityIdentity,
+  captureLoadLifetime,
+  isLoadLifetimeCurrent,
+  type LoadLifetime,
+} from './loadLifetime';
+import { getRealtimeAuthorityScope } from './realtimeBatch';
+import { admitHeld, type RowHold } from './retention';
 import { pinnedMembers } from './rowPins';
 import {
+  BOARD_SCOPE_PREFIX,
+  boardPartitionScope,
+  type Coverage,
   type CoverageMembers,
   type CoverageUpdate,
   globalSetsMembers,
@@ -232,6 +242,43 @@ export function otherCommittedMembers(
   return members;
 }
 
+/**
+ * The scopes a row entering the store may belong to (`admitHeld`): every
+ * board partition loading or loaded under the current lifetime, and the
+ * caller's user scope — every load of the authority starts it — with the
+ * branches its references name judged on the maps the row enters.
+ */
+export function joinableScopes(coverage: Coverage): LoadScope[] {
+  const scopes: LoadScope[] = [];
+  for (const [key, entry] of coverage) {
+    if (!key.startsWith(BOARD_SCOPE_PREFIX) || entry.status === 'error') continue;
+    if (isLoadLifetimeCurrent(entry)) {
+      scopes.push(boardPartitionScope(key.slice(BOARD_SCOPE_PREFIX.length)));
+    }
+  }
+  const authority = getRealtimeAuthorityScope();
+  if (!authority) return scopes;
+  const userId = authorityIdentity(authority);
+  let referenced: { maps: DataMaps; ids: Set<string> } | null = null;
+  scopes.push(
+    userScopePiece(USER_SCOPE_KEYS.sessions, userId),
+    userScopePiece(USER_SCOPE_KEYS.branches, userId),
+    userScopePiece(USER_SCOPE_KEYS.teammates, userId),
+    {
+      key: USER_SCOPE_KEYS.references,
+      claims: {
+        branches: (branch, maps) => {
+          if (referenced?.maps !== maps) {
+            referenced = { maps, ids: referencedBranchIds(maps, userId) };
+          }
+          return referenced.ids.has(branch.branch_id);
+        },
+      },
+    }
+  );
+  return scopes;
+}
+
 interface ScopeRun {
   client: AgorClient;
   userId: string;
@@ -302,9 +349,11 @@ async function fillRead(
     };
     replace?: LoadScope;
     meta?: (rows: FillRows) => LoadMetaUpdate;
+    /** An on-demand fill: rows pinned in `hold`, if any, and only held rows inserted. */
+    onDemand?: { hold?: RowHold };
   } = {}
 ): Promise<FillRows | null> {
-  const { violatesFilter, piece, replace } = options;
+  const { violatesFilter, piece, replace, onDemand } = options;
   for (let attempt = 0; ; attempt++) {
     const fence = beginPartitionLoad();
     try {
@@ -352,6 +401,15 @@ async function fillRead(
             )
           : applyEntityFill(prev, rows, touched);
       let meta = options.meta?.(rows);
+      if (onDemand) {
+        const ids = {
+          sessions: rows.sessions?.map((session) => session.session_id),
+          branches: rows.branches?.map((branch) => branch.branch_id),
+        };
+        onDemand.hold?.pin(ids);
+        const fill = update;
+        update = (prev) => admitHeld(prev, fill(prev), ids);
+      }
       if (piece?.commitIf && replace) {
         // A deferred reconcile applies its rows and coverage together once
         // allowed: applied earlier, its removals would be judged against the
@@ -378,15 +436,23 @@ async function fillRead(
 }
 
 /**
- * Read rows on demand — search results, a deep link's target, genealogy
- * links — and fill-merge them under the current load lifetime. They join no
- * scope: no coverage is committed. Null without an authority or once the
- * lifetime ends; read errors propagate.
+ * Read rows on demand — search results, a deep link's target, the rows a
+ * view ensures — and fill-merge them under the current load lifetime. They
+ * join no scope: a row is inserted only while something holds it
+ * (`admitHeld`) — the consumer's pins, taken before the read, or `hold`,
+ * which pins every returned row as it applies. Null without an authority,
+ * once the lifetime ends or once `hold` is released: a reply that outlives
+ * its consumer inserts nothing. Read errors propagate.
  */
-export async function fillOnDemand(read: () => Promise<FillRows>): Promise<FillRows | null> {
+export async function fillOnDemand(
+  read: () => Promise<FillRows>,
+  hold?: RowHold
+): Promise<FillRows | null> {
   const lifetime = captureLoadLifetime();
   if (!lifetime) return null;
-  return fillRead(() => isLoadLifetimeCurrent(lifetime), read);
+  return fillRead(() => isLoadLifetimeCurrent(lifetime) && !hold?.released, read, {
+    onDemand: { hold },
+  });
 }
 
 /**

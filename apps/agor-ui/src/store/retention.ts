@@ -10,19 +10,27 @@
  * disconnect or an authority change must not free rows my scopes still
  * describe) leaves, in one store update with the coverage it drops. Rows
  * outside the released set are never swept.
+ *
+ * Rows enter by the same rule (`admitHeld`): an on-demand fill or a realtime
+ * write inserts a row only when a pin or a scope that is loading or loaded
+ * would hold it; any other row is never inserted.
  */
-import type { DataMaps } from './agorMaps';
+import { applySessionPatchToMaps, type DataMaps, removeBoardObjectFromMaps } from './agorMaps';
 import { agorStore } from './agorStore';
-import { acquirePins, type PinnedIds, releasePins } from './rowPins';
+import { acquirePins, type PinnedIds, pinnedMembers, releasePins } from './rowPins';
 import {
+  belongs,
   type Coverage,
+  type CoverageCollection,
+  globalHydrationEnabled,
   type LoadScope,
   replaceScope,
   type ScopeKey,
   type ScopeRows,
+  type WrittenIds,
   withCoverage,
 } from './scopeMerge';
-import { otherCommittedMembers } from './userScope';
+import { joinableScopes, otherCommittedMembers } from './userScope';
 
 const NOTHING: ScopeRows = {
   branches: [],
@@ -104,4 +112,78 @@ export function pinRows(ids: PinnedIds): () => void {
       branches: (branch) => unpinned.branches.has(branch.branch_id),
     });
   };
+}
+
+/** Pins a consumer takes as rows arrive, all released together (search results, deep links). */
+export interface RowHold {
+  readonly released: boolean;
+  /** Pin `ids` until `release`; a no-op once released. */
+  pin(ids: PinnedIds): void;
+  release(): void;
+}
+
+export function holdRows(): RowHold {
+  const releases: (() => void)[] = [];
+  let released = false;
+  return {
+    get released() {
+      return released;
+    },
+    pin(ids) {
+      if (!released) releases.push(pinRows(ids));
+    },
+    release() {
+      if (released) return;
+      released = true;
+      for (const release of releases) release();
+    },
+  };
+}
+
+/**
+ * `next` without the `written` rows it inserted over `prev` that nothing
+ * holds: no pin, and no scope loading or loaded under the current lifetime
+ * that claims them (`joinableScopes`). While the global sets exist (Steps
+ * 1–2) they hold every row, so everything is admitted.
+ */
+export function admitHeld(prev: DataMaps, next: DataMaps, written: WrittenIds): DataMaps {
+  if (next === prev || globalHydrationEnabled()) return next;
+  let scopes: LoadScope[] | null = null;
+  const held = (collection: CoverageCollection, id: string) => {
+    if (pinnedMembers[collection]?.has(id)) return true;
+    scopes ??= joinableScopes(agorStore.getState().coverage);
+    return scopes.some((scope) => belongs(scope, collection, id, next));
+  };
+  const inserted = <T>(
+    collection: CoverageCollection,
+    before: Map<string, T>,
+    after: Map<string, T>
+  ) =>
+    before === after
+      ? []
+      : [...new Set(written[collection] ?? [])].flatMap((id) => {
+          const row = after.get(id);
+          return row && !before.has(id) && !held(collection, id) ? [row] : [];
+        });
+
+  let maps = next;
+  const branches = inserted('branches', prev.branchById, next.branchById);
+  if (branches.length > 0) {
+    const branchById = new Map(maps.branchById);
+    for (const branch of branches) branchById.delete(branch.branch_id);
+    maps = { ...maps, branchById };
+  }
+  for (const session of inserted('sessions', prev.sessionById, next.sessionById)) {
+    maps = applySessionPatchToMaps(maps, { ...session, archived: true });
+  }
+  for (const boardObject of inserted('boardObjects', prev.boardObjectById, next.boardObjectById)) {
+    maps = removeBoardObjectFromMaps(maps, boardObject);
+  }
+  const cards = inserted('cards', prev.cardById, next.cardById);
+  if (cards.length > 0) {
+    const cardById = new Map(maps.cardById);
+    for (const card of cards) cardById.delete(card.card_id);
+    maps = { ...maps, cardById };
+  }
+  return maps;
 }

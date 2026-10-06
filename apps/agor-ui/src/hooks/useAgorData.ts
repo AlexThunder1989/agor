@@ -91,12 +91,15 @@ import {
   tombstoneSession,
   untombstoneSession,
 } from '../store/realtimeBatch';
+import { holdRows } from '../store/retention';
 import {
   BOARD_SCOPE_PREFIX,
   boardPartitionScope,
   boardScopeKey,
   type Coverage,
+  globalHydrationEnabled,
   replaceScope,
+  setGlobalHydrationEnabled,
   withoutBoardPartitions,
 } from '../store/scopeMerge';
 import { resetSessionMcpLinks } from '../store/sessionMcpLinks';
@@ -181,10 +184,7 @@ const markGlobalSet =
 // resyncs through the scope replaces alone — the user scope and the
 // displayed board — which is the path 3.3 keeps. Test-only switch until 3.3
 // deletes the global loops.
-let globalHydrationEnabled = true;
-export function setGlobalHydrationForTests(enabled: boolean): void {
-  globalHydrationEnabled = enabled;
-}
+export const setGlobalHydrationForTests = setGlobalHydrationEnabled;
 
 // Items the Home first paint gates on. Board objects and cards are only needed
 // to paint a canvas, so Home does not read them at all; a board loads its own
@@ -594,8 +594,8 @@ export function useAgorData(
       const loadLifetime = captureLoadLifetime(fetchAuthorityScope) as LoadLifetime;
       // A reconnect resync reads the global session and branch sets, or
       // (global hydration off) only the scopes it replaces.
-      const globalResync = silent && globalHydrationEnabled;
-      const scopedResync = silent && !globalHydrationEnabled;
+      const globalResync = silent && globalHydrationEnabled();
+      const scopedResync = silent && !globalHydrationEnabled();
       const authorityIsCurrent = () =>
         isLoadLifetimeCurrent(loadLifetime, authorityScopeKeyRef.current);
       const runAuthorityHydration = (
@@ -1372,7 +1372,7 @@ export function useAgorData(
           // coupling could leave the board empty forever. On independent loops,
           // branches apply on their own quiet window (almost immediately)
           // regardless of session churn.
-          if (!silent && globalHydrationEnabled) {
+          if (!silent && globalHydrationEnabled()) {
             void runAuthorityHydration(
               'sessions',
               ['sessions'],
@@ -1651,6 +1651,9 @@ export function useAgorData(
     }
 
     let cancelled = false;
+    // Holds what the link reads until it is left (the route's pins take over
+    // the opened rows by full id); a read it outlived inserts nothing.
+    const hold = holdRows();
     const missed = () => {
       if (cancelled || !authorityIsCurrent()) return;
       const { missingLinkTargets, setUserScope } = agorStore.getState();
@@ -1658,9 +1661,12 @@ export function useAgorData(
       setUserScope({ missingLinkTargets: new Set(missingLinkTargets).add(target.token) });
     };
     const fillBranch = (id: string) =>
-      fillOnDemand(async () => ({
-        branches: [(await client.service('branches').get(id)) as Branch].filter(Boolean),
-      }));
+      fillOnDemand(
+        async () => ({
+          branches: [(await client.service('branches').get(id)) as Branch].filter(Boolean),
+        }),
+        hold
+      );
     (async () => {
       try {
         if (target.kind === 'branch') {
@@ -1671,11 +1677,14 @@ export function useAgorData(
         }
         // The get runs inside the fill's fence, so a removal that lands while
         // it is in flight keeps its stale row out.
-        const rows = await fillOnDemand(async () => ({
-          sessions: [(await client.service('sessions').get(target.token)) as Session].filter(
-            Boolean
-          ),
-        }));
+        const rows = await fillOnDemand(
+          async () => ({
+            sessions: [(await client.service('sessions').get(target.token)) as Session].filter(
+              Boolean
+            ),
+          }),
+          hold
+        );
         if (!rows) return;
         const directSession = rows.sessions?.[0];
         if (!directSession || !agorStore.getState().sessionById.has(directSession.session_id)) {
@@ -1698,6 +1707,7 @@ export function useAgorData(
 
     return () => {
       cancelled = true;
+      hold.release();
     };
   }, [authorityScopeKey, client, directBranchId, directSessionId, enabled, hasInitiallyFetched]);
 

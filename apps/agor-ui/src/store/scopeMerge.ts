@@ -233,7 +233,7 @@ function liveRow(collection: CoverageCollection, id: string, maps: DataMaps): ob
 }
 
 /** Whether row `id` of `collection` is live (`liveRow`) and `scope` claims it. */
-function belongs(
+export function belongs(
   scope: LoadScope,
   collection: CoverageCollection,
   id: string,
@@ -330,6 +330,14 @@ export function liveMembership(
 }
 
 const EVERY_ID: Pick<ReadonlySet<string>, 'has'> = { has: () => true };
+
+// Steps 1–2: whether the global session and branch loops run. Test-only
+// switch (`setGlobalHydrationForTests`) until 3.3 deletes them.
+let globalHydration = true;
+export const globalHydrationEnabled = () => globalHydration;
+export function setGlobalHydrationEnabled(enabled: boolean): void {
+  globalHydration = enabled;
+}
 
 /**
  * Steps 1–2 only: once a global session or branch snapshot has applied, the

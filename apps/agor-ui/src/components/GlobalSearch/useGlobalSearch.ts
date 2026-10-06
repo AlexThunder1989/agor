@@ -7,9 +7,9 @@ import {
   type Session,
   tokenizeSearchQuery,
 } from '@agor-live/client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useEnsureBranches } from '../../hooks/useEnsureRows';
-import { usePinnedRows } from '../../hooks/usePinnedRows';
+import { holdRows, type RowHold } from '../../store/retention';
 import { sessionListQuery } from '../../store/sessionListQuery';
 import { fillOnDemand, rowsOf } from '../../store/userScope';
 import {
@@ -54,25 +54,33 @@ export function useDebouncedSearchQuery(query: string) {
  * The server half of a search: read the sessions and branches matching
  * `query` from the daemon (its `search` key, under the caller's visibility)
  * and fill them into the store, so the local pass below finds rows the store
- * never loaded. Display only: the rows join no scope, and are pinned until the
- * next query's results replace them or the search closes. Rows the query
- * can't have matched (a daemon that ignores `search`) are dropped.
+ * never loaded. Display only: the rows join no scope, and are held
+ * (`holdRows`) until the next query's results replace them or the search
+ * closes; a read the search outlived inserts nothing. Rows the query can't
+ * have matched (a daemon that ignores `search`) are dropped.
  */
 function useServerSearch(
   client: AgorClient | null | undefined,
   query: string,
   createdBy: string | undefined
 ) {
-  const [results, setResults] = useState<{ sessions: string[]; branches: string[] }>();
-  usePinnedRows(results ?? {});
+  const shown = useRef<RowHold | null>(null);
+  useEffect(
+    () => () => {
+      shown.current?.release();
+      shown.current = null;
+    },
+    []
+  );
   useEffect(() => {
     const search = query.trim();
     const tokens = tokenizeSearchQuery(search);
     if (!client || search.length < MIN_QUERY_LENGTH || tokens.length === 0) {
-      setResults(undefined);
+      shown.current?.release();
+      shown.current = null;
       return;
     }
-    let current = true;
+    const hold = holdRows();
     const filter = {
       search,
       archived: false,
@@ -93,17 +101,15 @@ function useServerSearch(
           matchSearchTokens(tokens, SEARCHABLE_FIELDS.branch(b))
         ),
       };
-    })
+    }, hold)
       .then((rows) => {
-        if (!current || !rows) return;
-        setResults({
-          sessions: (rows.sessions ?? []).map((session) => session.session_id),
-          branches: (rows.branches ?? []).map((branch) => branch.branch_id),
-        });
+        if (!rows || hold.released) return;
+        shown.current?.release();
+        shown.current = hold;
       })
       .catch((err) => console.warn('[GlobalSearch] server search failed:', err));
     return () => {
-      current = false;
+      if (shown.current !== hold) hold.release();
     };
   }, [client, query, createdBy]);
 }

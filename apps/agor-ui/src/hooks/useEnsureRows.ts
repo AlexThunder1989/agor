@@ -20,11 +20,13 @@ const ENSURE: Record<
   EnsureKind,
   {
     has: (maps: DataMaps, id: string) => boolean;
+    ids: (rows: FillRows) => string[];
     read: (client: AgorClient, chunk: string[]) => Promise<FillRows>;
   }
 > = {
   sessions: {
     has: (maps, id) => maps.sessionById.has(id),
+    ids: (rows) => (rows.sessions ?? []).map((session) => session.session_id),
     read: async (client, chunk) => ({
       sessions: rowsOf<Session>(
         await client.service('sessions').find({
@@ -40,6 +42,7 @@ const ENSURE: Record<
   },
   branches: {
     has: (maps, id) => maps.branchById.has(id),
+    ids: (rows) => (rows.branches ?? []).map((branch) => branch.branch_id),
     read: async (client, chunk) => ({
       branches: rowsOf<Branch>(
         await client.service('branches').find({
@@ -67,8 +70,9 @@ interface EnsureState {
  * Make sure the store holds the rows of `ids` that a view refers to without
  * global data: the ones it lacks are read by id (`$in`, in chunks of
  * `PAGINATION.MAX_ID_LIST`) once first paint settled, and filled with no
- * scope. Archived rows stay unloaded (a fill skips them). Driven by the ids
- * the store is missing: a pending id is not asked for again, an absent one
+ * scope while their pins hold them (a reply after unmount inserts nothing).
+ * Archived rows stay unloaded (a fill skips them). Driven by the ids the
+ * store is missing: a pending id is not asked for again, an absent one
  * not again under this authority, a failed read retries with the user
  * scope's capped backoff up to `MAX_REFERENCE_READ_ATTEMPTS`, and an id the
  * store evicts after loading it is read again. With `debounceMs`, a burst of
@@ -131,10 +135,13 @@ function useEnsureRows(
               if (captureLoadLifetime()) setRetries((n) => n + 1);
               return;
             }
+            // Absent only when the server didn't return it: a returned row
+            // the store lacks (unpinned meanwhile, or removed live) is not.
             const maps = agorStore.getState();
+            const returned = new Set(ENSURE[kind].ids(rows));
             for (const id of chunk) {
               run.attempts.delete(id);
-              if (ENSURE[kind].has(maps, id)) run.status.delete(id);
+              if (ENSURE[kind].has(maps, id) || returned.has(id)) run.status.delete(id);
               else run.status.set(id, 'absent');
             }
           })

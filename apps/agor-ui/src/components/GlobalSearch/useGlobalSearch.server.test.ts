@@ -6,6 +6,7 @@
 import type { AgorClient, Artifact, Board, Branch, MCPServer, Session } from '@agor-live/client';
 import { cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setGlobalHydrationForTests } from '../../hooks/useAgorData';
 import { resetHydrationRevisions } from '../../store/agorHydration';
 import { agorStore, useAgorStore } from '../../store/agorStore';
 import { discardRealtimeNow, setRealtimeAuthorityScope } from '../../store/realtimeBatch';
@@ -149,5 +150,42 @@ describe('parent-branch labels', () => {
     unmount();
     expect(agorStore.getState().sessionById.has('s-remote')).toBe(false);
     expect(agorStore.getState().branchById.has('br-remote')).toBe(false);
+  });
+
+  it('a reply that lands after the search closed fills nothing', async () => {
+    setGlobalHydrationForTests(false);
+    try {
+      let answer: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        answer = resolve;
+      });
+      const rows = {
+        sessions: [session('s-late', 'Fix login', { created_by: 'user-other' })],
+        branches: [branch('br-late', 'login-fix')],
+      };
+      const finds = {
+        sessions: vi.fn(async () => {
+          await gate;
+          return rows.sessions;
+        }),
+        branches: vi.fn(async () => {
+          await gate;
+          return { data: rows.branches };
+        }),
+      };
+      const client = {
+        service: (name: 'sessions' | 'branches') => ({ find: finds[name] }),
+      } as unknown as AgorClient;
+      const { unmount } = renderSearch(client, 'login');
+      await waitFor(() => expect(finds.branches).toHaveBeenCalled());
+      unmount();
+      answer();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(agorStore.getState().sessionById.has('s-late')).toBe(false);
+      expect(agorStore.getState().branchById.has('br-late')).toBe(false);
+      expect(pinnedMembers.sessions?.has('s-late')).toBe(false);
+    } finally {
+      setGlobalHydrationForTests(true);
+    }
   });
 });
