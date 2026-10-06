@@ -40,7 +40,7 @@ export function formatActionError(
   error: unknown,
   { idempotent }: { idempotent: boolean }
 ): string {
-  if (isNotConnectedError(error) || (idempotent && isInFlightConnectionLossError(error))) {
+  if (isNotConnectedError(error)) {
     return withConnectionErrorDetail(
       `Couldn't ${action}. The connection to Agor dropped. Try again once it's back.`,
       error
@@ -48,7 +48,9 @@ export function formatActionError(
   }
   if (isInFlightConnectionLossError(error)) {
     return withConnectionErrorDetail(
-      `The connection to Agor dropped before this was confirmed. Refresh to see if it went through before you try to ${action} again.`,
+      idempotent
+        ? `The connection to Agor dropped before this was confirmed. If it didn't go through, try to ${action} again once the connection is back.`
+        : `The connection to Agor dropped before this was confirmed. Refresh to see if it went through before you try to ${action} again.`,
       error
     );
   }

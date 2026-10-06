@@ -8,16 +8,14 @@ import {
 } from './connectionErrors';
 
 describe('isInFlightConnectionLossError', () => {
-  it.each([SOCKET_DISCONNECTED_ERROR, SOCKET_ACK_TIMEOUT_ERROR])('recognises %j', (message) => {
-    expect(isInFlightConnectionLossError(new Error(message))).toBe(true);
-    expect(isInFlightConnectionLossError(message)).toBe(true);
-    expect(isInFlightConnectionLossError({ message })).toBe(true);
-  });
-
-  it('pins the exact socket.io-client strings', () => {
-    expect(SOCKET_DISCONNECTED_ERROR).toBe('socket has been disconnected');
-    expect(SOCKET_ACK_TIMEOUT_ERROR).toBe('operation has timed out');
-  });
+  it.each(['socket has been disconnected', 'operation has timed out'])(
+    'recognises socket.io-client %j',
+    (message) => {
+      expect(isInFlightConnectionLossError(new Error(message))).toBe(true);
+      expect(isInFlightConnectionLossError(message)).toBe(true);
+      expect(isInFlightConnectionLossError({ message })).toBe(true);
+    }
+  );
 
   it.each([
     'Session is busy',
@@ -45,13 +43,13 @@ describe('formatActionError', () => {
     }
   });
 
-  it('advises a retry after an in-flight loss only when repeating is harmless', () => {
+  it('suggests a retry after an in-flight loss only when repeating is harmless', () => {
     expect(
       formatActionError('archive the branch', new Error(SOCKET_DISCONNECTED_ERROR), {
         idempotent: true,
       })
     ).toBe(
-      "Couldn't archive the branch. The connection to Agor dropped. Try again once it's back. (socket has been disconnected)"
+      "The connection to Agor dropped before this was confirmed. If it didn't go through, try to archive the branch again once the connection is back. (socket has been disconnected)"
     );
   });
 
