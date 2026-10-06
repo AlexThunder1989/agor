@@ -442,6 +442,7 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
       case 'artifacts':
         return (
           <ArtifactsTable
+            client={client}
             userById={userById}
             artifactById={artifactById}
             branchById={branchById}
