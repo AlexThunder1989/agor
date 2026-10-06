@@ -17,6 +17,7 @@ import { useConnectionState } from '../../contexts/ConnectionContext';
 import type { NewSessionConfig, SessionCreationResult } from '../../domain/sessionCreation';
 import { useAppNavigation } from '../../hooks/useAppNavigation';
 import { useBoardPartition } from '../../hooks/useBoardPartition';
+import { useBranchSessions } from '../../hooks/useBranchSessions';
 import { useCommentsForYou } from '../../hooks/useCommentsForYou';
 import { useIdentityGuardedAsync } from '../../hooks/useIdentityGuardedAsync';
 import { reducedMotionSurface, usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
@@ -175,6 +176,8 @@ export const MobileApp: React.FC<MobileAppProps> = ({
   } | null>(null);
   const selectedBranch = branchEditor ? (branchById.get(branchEditor.branchId) ?? null) : null;
   const selectedRepo = selectedBranch ? (repoById.get(selectedBranch.repo_id) ?? null) : null;
+  // The desktop BranchModal's on-open read: the store holds only the loaded scopes' sessions.
+  const branchSessions = useBranchSessions(client, branchEditor?.branchId ?? null);
 
   // The caller's primary assistant: Home shows its name and emoji, and Ask starts its session.
   const {
@@ -682,7 +685,7 @@ export const MobileApp: React.FC<MobileAppProps> = ({
         onClose={() => setBranchEditor(null)}
         branch={selectedBranch}
         repo={selectedRepo}
-        sessions={selectedBranch ? (sessionsByBranch.get(selectedBranch.branch_id) ?? []) : []}
+        sessions={branchSessions}
         boardObjects={
           selectedBranch?.board_id ? (boardObjectsByBoardId.get(selectedBranch.board_id) ?? []) : []
         }
