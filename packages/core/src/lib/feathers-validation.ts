@@ -345,7 +345,8 @@ export const branchQuerySchema = createQuerySchema(
     created_by: Type.Optional(CommonSchemas.uuid),
     // Teammate marker filter (`BranchRepository.findTeammateBranches`).
     teammate: Type.Optional(CommonSchemas.boolean),
-    // Every token in `SEARCHABLE_FIELDS.branch` (SQL page only).
+    // Every token, over `SEARCHABLE_FIELDS.branch`, the branch id, unique id and
+    // path, and its repo's slug and name (SQL page only; `BranchRepository.findPage`).
     search: Type.Optional(Type.String({ maxLength: 255 })),
     repo_id: Type.Optional(CommonSchemas.uuid),
     board_id: Type.Optional(CommonSchemas.uuid),

@@ -240,6 +240,16 @@ export async function exerciseUserScopeReads(db: Database) {
   expect(await branchSearch('mate', owner)).toEqual(new Set([ids.mate, ids.privateMate]));
   expect(await branchSearch('priv mate', owner)).toEqual(new Set([ids.privateMate]));
   expect(await branchSearch('%', owner)).toEqual(new Set());
+  // The branch's repo (slug, name), path, id and unique id, as Settings searched them.
+  const active = { owner: [ids.public, ids.private, ids.mate, ids.privateMate, ids.hiddenBoard] };
+  expect(await branchSearch(repo.slug, owner)).toEqual(new Set(active.owner));
+  expect(await branchSearch('user SCOPE', viewer)).toEqual(
+    new Set([ids.public, ids.mate, ids.hiddenBoard])
+  );
+  expect(await branchSearch('user-scope/privateMate', owner)).toEqual(new Set([ids.privateMate]));
+  expect(await branchSearch('user-scope/private', viewer)).toEqual(new Set());
+  expect(await branchSearch(ids.public, owner)).toEqual(new Set([ids.public]));
+  expect(await branchSearch('7000 public', owner)).toEqual(new Set([ids.public]));
   const titled = await sessionRepo.create({
     branch_id: ids.public,
     created_by: owner,

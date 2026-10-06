@@ -45,6 +45,10 @@ describe.skipIf(!url || process.env.AGOR_DB_DIALECT !== 'postgresql')(
             ...(await branches.findPage({ visibleToUserId, search: 'mate' })).data.map(
               (b) => b.branch_id
             ),
+            // Both tenants name their repo "User scope": the repo match stays in-tenant.
+            ...(await branches.findPage({ visibleToUserId, search: 'user scope' })).data.map(
+              (b) => b.branch_id
+            ),
             ...(await sessions.findPage({ visibleToUserId, search: 'login', limit: 10 })).data.map(
               (s) => s.session_id
             ),

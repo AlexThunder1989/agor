@@ -151,7 +151,7 @@ export const BranchesTable: React.FC<BranchesTableProps> = ({
               .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
             search,
             [
-              (b) => [b.name, b.ref, b.path, String(b.branch_unique_id)],
+              (b) => [b.name, b.ref, b.path, b.branch_id, String(b.branch_unique_id)],
               (b) => [repoById.get(b.repo_id)?.name, repoById.get(b.repo_id)?.slug],
             ]
           )

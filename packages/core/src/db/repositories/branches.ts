@@ -37,6 +37,7 @@ import {
   like,
   or,
   type SQL,
+  type SQLWrapper,
   sql,
 } from 'drizzle-orm';
 import { getBaseUrl } from '../../config/config-manager';
@@ -73,6 +74,7 @@ import {
   branchPermissionEntries,
   groupMemberships,
   messages,
+  repos,
   schedules,
   sessions,
   uploads,
@@ -489,7 +491,10 @@ export class BranchRepository implements BaseRepository<Branch, Partial<Branch>>
     branchIds?: BranchID[];
     /** Restrict to branches created by this user (a filter, never an access grant). */
     createdBy?: UUID;
-    /** Restrict to branches matching this search (`SEARCHABLE_FIELDS.branch`). */
+    /**
+     * Restrict to branches matching this search: `SEARCHABLE_FIELDS.branch`
+     * plus the branch id, unique id, path, and its repo's slug and name.
+     */
     search?: string;
     visibleToUserId?: UUID;
     limit?: number;
@@ -513,10 +518,18 @@ export class BranchRepository implements BaseRepository<Branch, Partial<Branch>>
     if (opts.createdBy) conditions.push(eq(branches.created_by, opts.createdBy));
     if (opts.search !== undefined) {
       const data = (path: string) => jsonExtract(this.db, branches.data, path);
+      // The branch's own repo, correlated by its FK (same tenant scope and RLS).
+      const ofRepo = (field: SQLWrapper) =>
+        sql`(select ${field} from ${repos} where ${repos.repo_id} = ${branches.repo_id})`;
       conditions.push(
         searchTokensCondition(opts.search, [
           branches.name,
           branches.ref,
+          branches.branch_id,
+          sql`cast(${branches.branch_unique_id} as text)`,
+          data('path'),
+          ofRepo(repos.slug),
+          ofRepo(jsonExtract(this.db, repos.data, 'name')),
           data('notes'),
           data('issue_url'),
           data('pull_request_url'),
