@@ -260,7 +260,7 @@ describe('recovery turn eligibility', () => {
         },
         true
       )
-    ).toBe(true);
+    ).toBe(false);
   });
 });
 

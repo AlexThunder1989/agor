@@ -352,7 +352,7 @@ it('alerts on a live failure, offers Resume only when the session can start a tu
   expect(screen.getByRole('status')).toHaveTextContent(
     'Agor stopped the agent after an access change.'
   );
-  expect(screen.getByRole('button', { name: 'Resume' })).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull();
 });
 
 it('uses a polite status for a failure that was already settled on load', () => {

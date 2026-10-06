@@ -199,7 +199,6 @@ export function describeTurnOutcome(
       cause: 'access_changed',
       type: 'warning',
       message: 'Agor stopped the agent after an access change.',
-      action: 'resume',
     };
   }
   if (status === TaskStatus.TIMED_OUT) {

@@ -157,15 +157,17 @@ function rejectedRateLimit(messages: Message[]): { resetsAt?: number } | undefin
   return undefined;
 }
 
-/** A new turn may follow: latest, settled by the agent or verified stopped, not a user stop. */
+/** A new turn may follow: the latest settled turn, not ended by a user stop or an access change. */
 export function canOfferRecoveryTurn(task: Task, isLatestTask = false): boolean {
   const termination = task.sdk_failure?.termination;
+  const cause = task.termination_request?.cause;
   return (
     isLatestTask &&
     (task.status === TaskStatus.FAILED || task.status === TaskStatus.TIMED_OUT) &&
     termination !== 'requested' &&
     termination !== 'unverified' &&
-    task.termination_request?.cause !== 'user_stop'
+    cause !== 'user_stop' &&
+    cause !== 'authorization_revoked'
   );
 }
 

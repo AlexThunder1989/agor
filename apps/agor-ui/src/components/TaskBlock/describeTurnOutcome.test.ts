@@ -301,12 +301,11 @@ describe('describeTurnOutcome v3', () => {
     });
   });
 
-  it('9. an access change is amber and resumes', () => {
+  it('9. an access change is amber and offers no action', () => {
     expect(describe3(cause('authorization_revoked'))).toEqual({
       cause: 'access_changed',
       type: 'warning',
       message: 'Agor stopped the agent after an access change.',
-      action: 'resume',
     });
   });
 
