@@ -15,7 +15,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { trackEvent } from '../../lib/analytics';
-import { DISCORD_INVITE_URL, GITHUB_REPO_URL } from '../../lib/links';
+import { AGOR_CLOUD_LOGIN_URL, DISCORD_INVITE_URL, GITHUB_REPO_URL } from '../../lib/links';
 import { getBasePath, LOGO_MARK_PATH } from '../../lib/siteMetadata';
 import { DiscordIcon, GitHubIcon } from '../BrandIcons';
 import { CloudCtaLink } from '../CloudCtaLink';
@@ -372,6 +372,13 @@ export function IslandNav() {
               >
                 Talk to Us
               </button>
+              <a
+                href={AGOR_CLOUD_LOGIN_URL}
+                className={styles.ctaSecondary}
+                onClick={() => trackNav({ href: AGOR_CLOUD_LOGIN_URL }, 'navbar')}
+              >
+                Login
+              </a>
               <CloudCtaLink placement="navbar" compact className={styles.cta} />
             </span>
             <button
@@ -534,6 +541,13 @@ export function IslandNav() {
               <DiscordIcon size={17} aria-hidden /> Discord
             </a>
           </div>
+          <a
+            href={AGOR_CLOUD_LOGIN_URL}
+            className={styles.sheetLogin}
+            onClick={() => trackNav({ href: AGOR_CLOUD_LOGIN_URL }, 'mobile-nav')}
+          >
+            Login
+          </a>
           <CloudCtaLink placement="mobile-nav" className={styles.sheetCta} />
         </div>
       </div>
