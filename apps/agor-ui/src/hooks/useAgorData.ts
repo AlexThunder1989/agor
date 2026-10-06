@@ -113,6 +113,7 @@ import {
   otherCommittedMembers,
   startUserScope,
   stopUserScope,
+  userScopeRunGeneration,
 } from '../store/userScope';
 import { boardIdForSession } from '../utils/boardIdForSession';
 import { createInitialLoadDebugTimer, isInitialLoadDebugEnabled } from '../utils/initialLoadDebug';
@@ -1334,12 +1335,14 @@ export function useAgorData(
             deferBulkRead: openedTranscriptReady ?? undefined,
           });
         }
+        // The run just started (`startUserScope` sets it synchronously).
+        const userScopeRun = userScopeRunGeneration();
         // Retention, once the user scope is replaced under this lifetime (so
         // my rows stay): the rows of the boards this resync unloaded leave
         // unless a scope holds them — a board displayed or loaded again
-        // meanwhile keeps its rows — and so do the scopes of earlier
-        // lifetimes this one didn't replace (a failed read), with the rows
-        // only they held.
+        // meanwhile keeps its rows — and so do the scopes this load didn't
+        // replace (a failed read: an earlier lifetime's, or an earlier run's
+        // after a plain reconnect), with the rows only they held.
         void (userScopeSettled ?? Promise.resolve())
           .catch(() => undefined)
           .then(() => {
@@ -1348,7 +1351,7 @@ export function useAgorData(
             evictUnloadedBoards(
               unloadedBoardIds.filter((id) => id !== boardScope && id !== displayed)
             );
-            releaseStaleScopes();
+            releaseStaleScopes(userScopeRun);
           });
 
         debugTimer?.endIndexing();

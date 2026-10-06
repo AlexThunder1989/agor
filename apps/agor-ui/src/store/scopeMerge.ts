@@ -76,6 +76,9 @@ export const USER_SCOPE_KEYS = {
 } as const;
 
 export type UserScopeKey = (typeof USER_SCOPE_KEYS)[keyof typeof USER_SCOPE_KEYS];
+/** Whether coverage key `key` is a piece of the user scope. */
+export const isUserScopeKey = (key: string): key is UserScopeKey =>
+  (Object.values(USER_SCOPE_KEYS) as string[]).includes(key);
 /** A coverage key: one board's partition or one piece of the user scope. */
 export type ScopeKey = `board:${string}` | UserScopeKey;
 

@@ -3013,6 +3013,30 @@ describe('useAgorData — scoped reconnect (global hydration off)', () => {
     expect(state.sessionById.has('s-mine')).toBe(true);
   });
 
+  it('a piece a plain reconnect fails to replace is retired once the resync settles', async () => {
+    withoutGlobalHydration();
+    const { server } = workspace();
+    const { emitIo, seed } = await connectedWorkspace(server);
+    const has = (id: string) => agorStore.getState().branchById.has(id);
+    expect(has('mate-1')).toBe(true);
+    const find = seed['branches:find'] as unknown as (query: Record<string, unknown>) => unknown;
+    seed['branches:find'] = ((query: Record<string, unknown>) => {
+      if (query.teammate) throw new Error('teammates unavailable');
+      return find(query);
+    }) as never;
+    // Same authority and lifetime: only the run's generation tells the pieces apart.
+    act(() => emitIo('connect'));
+    await waitFor(() => expect(has('mate-1')).toBe(false));
+    await flush();
+    const state = agorStore.getState();
+    expect(state.coverage.has(USER_SCOPE_KEYS.teammates)).toBe(false);
+    expect(selectTeammatesLoaded(state)).toBe(false);
+    // The replaced pieces stay loaded with their rows.
+    expect(selectMySessionsLoaded(state)).toBe(true);
+    expect(has('b-mine')).toBe(true);
+    expect(state.sessionById.has('s-mine')).toBe(true);
+  });
+
   it("a reconnect evicts the unloaded boards' rows that no scope holds", async () => {
     withoutGlobalHydration();
     const { server } = workspace();

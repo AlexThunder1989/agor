@@ -24,6 +24,7 @@ import {
   type Coverage,
   type CoverageCollection,
   globalHydrationEnabled,
+  isUserScopeKey,
   type LoadScope,
   replaceScope,
   type ScopeKey,
@@ -31,7 +32,7 @@ import {
   type WrittenIds,
   withCoverage,
 } from './scopeMerge';
-import { joinableScopes, otherCommittedMembers } from './userScope';
+import { joinableScopes, otherCommittedMembers, userScopeRunGeneration } from './userScope';
 
 const NOTHING: ScopeRows = {
   branches: [],
@@ -83,15 +84,22 @@ export function evictRows(claims: Claims, dropKeys: readonly ScopeKey[] = []): v
 }
 
 /**
- * Release every scope of an earlier lifetime, once the current lifetime's
- * replace has settled: its entry goes, with the rows only it held. Until
- * then (disconnected, or while the resync runs) it keeps them (`evictRows`
- * counts stale members); a piece the new lifetime failed to read is
- * unloaded rather than left complete over rows it no longer holds.
+ * Release every scope the settled load did not replace, once it has
+ * settled: every scope of an earlier lifetime and, while `run` (the user
+ * scope run the load started, `userScopeRunGeneration`) is still the current
+ * one, every user-scope piece it did not commit — a plain reconnect keeps
+ * the lifetime, so only the run tells its pieces apart. Their entries go,
+ * with the rows only they held. Until then (disconnected, or while the
+ * resync runs) they keep them (`evictRows` counts stale members); a piece
+ * the load failed to read is unloaded rather than left complete over rows
+ * it no longer holds.
  */
-export function releaseStaleScopes(): void {
+export function releaseStaleScopes(run?: number | null): void {
+  const retireUnreplaced = run != null && userScopeRunGeneration() === run;
   const stale = [...agorStore.getState().coverage].filter(
-    ([, entry]) => !isLoadLifetimeCurrent(entry)
+    ([key, entry]) =>
+      !isLoadLifetimeCurrent(entry) ||
+      (retireUnreplaced && isUserScopeKey(key) && entry.generation !== run)
   );
   if (stale.length === 0) return;
   const member =

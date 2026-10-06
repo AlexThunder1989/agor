@@ -760,6 +760,11 @@ function subscribeToReferences(run: ScopeRun): void {
   });
 }
 
+/** The generation of the user scope run in progress under the current lifetime, if any. */
+export function userScopeRunGeneration(): number | null {
+  return currentRun && isCurrent(currentRun) ? currentRun.generation : null;
+}
+
 /** Stop the current run: unsubscribe, cancel its timers, and drop its pending applies. */
 export function stopUserScope(): void {
   const run = currentRun;
