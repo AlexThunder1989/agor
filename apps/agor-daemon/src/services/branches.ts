@@ -8,7 +8,6 @@ import type { ReposService } from './repos.js';
 
 import type { ChildProcess } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
-import { SEARCHABLE_FIELDS } from '@agor/core';
 import { analyticsLogger } from '@agor/core/analytics';
 import {
   assertAsyncEnvironmentCommandConfig,
@@ -295,7 +294,6 @@ export type EnvironmentHealthCheckOptions =
  * Extended branches service with custom methods
  */
 export class BranchesService extends DrizzleService<Branch, Partial<Branch>, BranchParams> {
-  protected searchFields = SEARCHABLE_FIELDS.branch;
   private branchRepo: BranchRepository;
   private boardRepo: BoardRepository;
   private db: TenantScopeAwareDatabase;
@@ -1857,6 +1855,10 @@ export class BranchesService extends DrizzleService<Branch, Partial<Branch>, Bra
         skip,
         data: enriched,
       };
+    }
+
+    if (query?.search !== undefined) {
+      throw new BadRequest('search is supported only for SQL-paginated branch queries');
     }
 
     // Use default find to ensure all hooks and scoping are applied (including repo_id filter)

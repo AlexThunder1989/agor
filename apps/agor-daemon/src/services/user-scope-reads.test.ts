@@ -4,10 +4,12 @@
  * find hooks scope every read to what a regular caller can view.
  */
 import {
+  BranchRepository,
   createTenantScopedDatabaseProxy,
   type Database,
   generateId,
   ScheduleRepository,
+  SessionRepository,
   UsersRepository,
 } from '@agor/core/db';
 import { type Application, feathers } from '@agor/core/feathers';
@@ -194,31 +196,72 @@ describe('user-scope reads through transport hooks', () => {
       } as never)
     ).map((b) => b.branch_id);
     expect(branches).toEqual([fixture.branchIds[2]]);
-    // A shape the SQL page doesn't model (`$select`) falls back to the generic
-    // path, which matches `search` the same way, before counting and paging.
-    for (const [service, query, idKey, expected] of [
-      ['sessions', { search: 'login FIX' }, 'session_id', [fixture.titledSessionIds[0]]],
-      [
-        'sessions',
-        { search: 'login', board_id: fixture.boardIds[0] },
-        'session_id',
-        [fixture.titledSessionIds[0]],
-      ],
-      [
-        'sessions',
-        { search: 'login', branch_id: fixture.branchIds[0] },
-        'session_id',
-        [fixture.titledSessionIds[0]],
-      ],
-      ['branches', { search: 'mate' }, 'branch_id', [fixture.branchIds[2]]],
+    // `search` is served only by the SQL pages: a shape they don't model
+    // (`$select`) is rejected rather than matched by a second implementation.
+    for (const [service, query] of [
+      ['sessions', { search: 'login' }],
+      ['sessions', { search: 'login', board_id: fixture.boardIds[0] }],
+      ['sessions', { search: 'login', branch_id: fixture.branchIds[0] }],
+      ['branches', { search: 'mate' }],
+      ['branches', { search: 'mate', zone_id: 'zone-1' }],
     ] as const) {
-      const found = (await app.service(service).find({
-        provider: 'rest',
-        user: viewer,
-        query: { ...query, archived: false, $select: [idKey] },
-      } as never)) as { total: number; data: Array<Record<string, string>> };
-      expect(found.data.map((row) => row[idKey])).toEqual(expected);
-      expect(found.total).toBe(expected.length);
+      await expect(
+        app.service(service).find({
+          provider: 'rest',
+          user: viewer,
+          query: { ...query, archived: false, $select: ['name'] },
+        } as never)
+      ).rejects.toThrow(/search is supported only/);
+    }
+    // Every search shape a caller can send takes the same SQL match, so
+    // non-ASCII case folding and legacy teammate keys agree across scopes.
+    const owner = (await new UsersRepository(db).findById(fixture.owner)) as User;
+    const cafe = await new SessionRepository(db).create({
+      branch_id: fixture.branchIds[0],
+      created_by: fixture.owner,
+      status: 'idle',
+      title: 'CAFÉ menu',
+    });
+    const sessionHits = async (search: string, scope: Record<string, unknown>) =>
+      rows<Session>(
+        await app.service('sessions').find({
+          provider: 'rest',
+          user: owner,
+          query: { search, archived: false, $count: false, ...scope },
+        } as never)
+      ).map((s) => s.session_id);
+    for (const search of ['menu', 'café', 'CAFÉ']) {
+      const unscoped = await sessionHits(search, {});
+      if (search === 'menu') expect(unscoped).toEqual([cafe.session_id]);
+      for (const scope of [
+        { board_id: fixture.boardIds[0] },
+        { branch_id: fixture.branchIds[0] },
+      ]) {
+        expect(await sessionHits(search, scope)).toEqual(unscoped);
+      }
+    }
+    const legacy = await new BranchRepository(db).create({
+      repo_id: (await new BranchRepository(db).findById(fixture.branchIds[0]))!.repo_id,
+      board_id: fixture.boardIds[0],
+      created_by: fixture.owner,
+      name: 'helper',
+      ref: 'helper',
+      path: '/tmp/user-scope/helper',
+      branch_unique_id: 7999,
+      custom_context: {
+        teammate: { kind: 'teammate', displayName: 'Helper' },
+        agent: { displayName: 'Legacy Bot' },
+      },
+    });
+    for (const query of [{}, { board_id: fixture.boardIds[0] }, { created_by: fixture.owner }]) {
+      const found = rows<Branch>(
+        await app.service('branches').find({
+          provider: 'rest',
+          user: owner,
+          query: { search: 'legacy bot', archived: false, ...query },
+        } as never)
+      ).map((b) => b.branch_id);
+      expect(found).toEqual([legacy.branch_id]);
     }
     await expect(
       app.service('sessions').find({

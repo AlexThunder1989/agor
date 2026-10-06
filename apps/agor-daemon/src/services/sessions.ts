@@ -10,7 +10,6 @@ import {
   isResolvedAgenticToolModelConfiguration,
   materializeAgenticToolConfiguration,
 } from '@agor/agentic-tools/config';
-import { SEARCHABLE_FIELDS } from '@agor/core';
 import {
   isTenantAgenticToolEnabled,
   PAGINATION,
@@ -371,7 +370,6 @@ export type SessionBulkArchiveResult = SessionArchiveBatchResult & {
  * Extended sessions service with custom methods
  */
 export class SessionsService extends DrizzleService<Session, SessionUpdate, SessionParams> {
-  protected searchFields = SEARCHABLE_FIELDS.session;
   private sessionRepo: SessionRepository;
   private app: Application;
   private sessionMCPRepo: SessionMCPServerRepository;
@@ -2066,6 +2064,9 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
     );
     if (query?.$count !== undefined && !sqlPage) {
       throw new BadRequest('$count is supported only for SQL-paginated session queries');
+    }
+    if (query?.search !== undefined && !sqlPage) {
+      throw new BadRequest('search is supported only for SQL-paginated session queries');
     }
     if (sqlPage) {
       if (
