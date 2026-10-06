@@ -211,6 +211,7 @@ function makeGatewayHarness(args: {
     session_id: mapping?.session_id ?? 'sess-new',
     status: 'running',
   }));
+  const stopCreate = vi.fn(async () => ({ success: true, outcome: 'stopped' }));
   const sessionsCreate = vi.fn(async () => ({
     session_id: 'sess-new',
     branch_id: channel.target_branch_id,
@@ -231,6 +232,7 @@ function makeGatewayHarness(args: {
         return { create: sessionsCreate, get: sessionsGet, setMCPServers };
       }
       if (name === '/sessions/:id/prompt') return { create: promptCreate };
+      if (name === '/sessions/:id/stop') return { create: stopCreate };
       throw new Error(`Unexpected service: ${name}`);
     },
   };
@@ -406,6 +408,7 @@ function makeGatewayHarness(args: {
     service,
     createUnscoped: create,
     promptCreate,
+    stopCreate,
     sessionsCreate,
     sessionsGet,
     setMCPServers,
@@ -1471,6 +1474,49 @@ describe('GatewayService mapped-thread follow-ups', () => {
     const prompt = promptCreate.mock.calls[0][0].prompt as string;
     expect(prompt).toContain('any update?');
     expect(prompt).not.toContain('This Slack thread began from a proactive Agor gateway message');
+  });
+});
+
+describe('GatewayService stop keyword', () => {
+  it('stops the mapped session instead of queueing a prompt', async () => {
+    const sendMessage = vi.fn(async () => '104.000000');
+    const { service, promptCreate, stopCreate } = makeGatewayHarness({
+      existingMapping: makeMapping(),
+      connector: { sendMessage },
+    });
+
+    const result = await service.create({
+      channel_key: 'slack-key',
+      thread_id: 'C123-100.000000',
+      text: ' Stop. ',
+      metadata: { channel: 'C123', channel_type: 'im', slack_message_ts: '103.000000' },
+    });
+
+    expect(result).toMatchObject({ success: true, sessionId: 'sess-1', created: false });
+    expect(stopCreate).toHaveBeenCalledOnce();
+    expect(stopCreate.mock.calls[0][1]).toMatchObject({ route: { id: 'sess-1' } });
+    expect(promptCreate).not.toHaveBeenCalled();
+  });
+
+  it('stops the mapped session and then prompts the instruction that follows', async () => {
+    const sendMessage = vi.fn(async () => '104.000000');
+    const { service, promptCreate, stopCreate } = makeGatewayHarness({
+      existingMapping: makeMapping(),
+      connector: { sendMessage },
+    });
+
+    await service.create({
+      channel_key: 'slack-key',
+      thread_id: 'C123-100.000000',
+      text: 'STOP! Run the tests instead.',
+      metadata: { channel: 'C123', channel_type: 'im', slack_message_ts: '103.000000' },
+    });
+
+    expect(stopCreate).toHaveBeenCalledOnce();
+    expect(promptCreate).toHaveBeenCalledOnce();
+    const prompt = promptCreate.mock.calls[0][0].prompt as string;
+    expect(prompt).toContain('Run the tests instead.');
+    expect(prompt).not.toContain('STOP');
   });
 });
 

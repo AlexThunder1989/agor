@@ -168,6 +168,10 @@ seed is recorded durably; the first eligible human reply to any seed chunk
 consumes that seed and starts the mapped session. Replies to later response
 chunks continue the same session.
 
+## Stopping a running session
+
+Send `stop` in a mapped thread, or start a message with `stop` followed by a new line or punctuation (any case, for example `stop.` or `STOP!`), to stop its session. In Slack channels the bot still needs the `@mention`.
+
 ## Slack thread behavior
 
 In Slack channels, Agor uses a hard mention rule:

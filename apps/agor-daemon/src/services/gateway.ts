@@ -4953,6 +4953,22 @@ export class GatewayService {
         await this.sendPromptAuthorizationDenied(channel, data, error.userMessage);
         return { success: false, sessionId: '', created: false };
       }
+      // "stop" alone, or followed by a new line or punctuation, stops the mapped
+      // Session; the rest of the message is then prompted as is.
+      const stopCommand = /^stop\s*(\n|[.,;:!?]+|$)/i.exec(data.text.trim());
+      if (channel.channel_type !== 'github' && channel.channel_type !== 'shortcut' && stopCommand) {
+        const tenantId = getCurrentTenantId();
+        await this.app.service('/sessions/:id/stop').create({}, {
+          route: { id: existingMapping.session_id },
+          user,
+          ...(tenantId ? { tenant: { tenant_id: tenantId, source: 'explicit' as const } } : {}),
+        } as AuthenticatedParams);
+        await this.sendSystemMessage(channel, data.thread_id, 'Stopped.');
+        data.text = data.text.trim().slice(stopCommand[0].length);
+        if (!data.text) {
+          return { success: true, sessionId: existingMapping.session_id, created: false };
+        }
+      }
     } else {
       await this.requireInboundSessionCreateAccess(channel, user.user_id);
     }
