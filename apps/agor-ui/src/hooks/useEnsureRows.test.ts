@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetHydrationRevisions } from '../store/agorHydration';
 import { agorStore } from '../store/agorStore';
 import { discardRealtimeNow, setRealtimeAuthorityScope } from '../store/realtimeBatch';
+import { MAX_REFERENCE_READ_ATTEMPTS } from '../store/userScope';
 import { useEnsureBranches } from './useEnsureRows';
 
 const AUTHORITY = 'me:member:1';
@@ -71,5 +72,45 @@ describe('useEnsureBranches', () => {
     });
     expect(find).toHaveBeenCalledTimes(1);
     expect(find.mock.calls[0][0].query.branch_id.$in).toEqual(['a', 'b', 'c']);
+  });
+
+  it('retries a failed read with backoff, a bounded number of times', async () => {
+    vi.useFakeTimers();
+    const { client, find } = makeClient([branch('b-1')]);
+    const real = find.getMockImplementation();
+    find.mockRejectedValueOnce(new Error('offline'));
+    renderHook(() => useEnsureBranches(client, ['b-1']));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(find).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(find).toHaveBeenCalledTimes(2);
+    expect(agorStore.getState().branchById.has('b-1')).toBe(true);
+
+    find.mockImplementation(async () => {
+      throw new Error('down');
+    });
+    renderHook(() => useEnsureBranches(client, ['b-2']));
+    for (let i = 0; i < 2 * MAX_REFERENCE_READ_ATTEMPTS; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+    }
+    expect(
+      find.mock.calls.filter(([{ query }]) => query.branch_id.$in.includes('b-2'))
+    ).toHaveLength(MAX_REFERENCE_READ_ATTEMPTS);
+    find.mockImplementation(real as never);
+  });
+
+  it('reads a row again once the store evicts it', async () => {
+    const { client, find } = makeClient([branch('b-1')]);
+    renderHook(() => useEnsureBranches(client, ['b-1']));
+    await waitFor(() => expect(agorStore.getState().branchById.has('b-1')).toBe(true));
+    act(() => agorStore.setState({ branchById: new Map() }));
+    await waitFor(() => expect(find).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(agorStore.getState().branchById.has('b-1')).toBe(true));
   });
 });

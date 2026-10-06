@@ -1,10 +1,16 @@
 import type { AgorClient, Branch, Session } from '@agor-live/client';
 import { PAGINATION } from '@agor-live/client';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DataMaps } from '../store/agorMaps';
 import { agorStore, useAgorStore } from '../store/agorStore';
 import { sessionListQuery } from '../store/sessionListQuery';
-import { type FillRows, fillOnDemand, rowsOf } from '../store/userScope';
+import {
+  type FillRows,
+  fillOnDemand,
+  MAX_REFERENCE_READ_ATTEMPTS,
+  referenceRetryDelayMs,
+  rowsOf,
+} from '../store/userScope';
 
 type EnsureKind = 'sessions' | 'branches';
 
@@ -43,13 +49,28 @@ const ENSURE: Record<
 };
 
 /**
+ * The read state of a missing id under one authority: `pending` while a read
+ * (or its retry) is outstanding, `absent` once the server didn't return it
+ * (or every attempt failed). A loaded id has no state, so one the store later
+ * evicts is read again.
+ */
+interface EnsureState {
+  authority: string;
+  status: Map<string, 'pending' | 'absent'>;
+  attempts: Map<string, number>;
+  timers: Set<ReturnType<typeof setTimeout>>;
+}
+
+/**
  * Make sure the store holds the rows of `ids` that a view refers to without
  * global data: the ones it lacks are read by id (`$in`, in chunks of
  * `PAGINATION.MAX_ID_LIST`) once first paint settled, and filled with no
- * scope. Archived rows stay unloaded (a fill skips them). Each id is read at
- * most once per authority (again only after a failed read), so an absent id
- * is not asked for again; with `debounceMs`, a burst of id changes is read
- * once it settles.
+ * scope. Archived rows stay unloaded (a fill skips them). Driven by the ids
+ * the store is missing: a pending id is not asked for again, an absent one
+ * not again under this authority, a failed read retries with the user
+ * scope's capped backoff up to `MAX_REFERENCE_READ_ATTEMPTS`, and an id the
+ * store evicts after loading it is read again. With `debounceMs`, a burst of
+ * id changes is read once it settles.
  */
 function useEnsureRows(
   kind: EnsureKind,
@@ -58,27 +79,70 @@ function useEnsureRows(
   debounceMs = 0
 ): void {
   const key = [...new Set(ids)].filter(Boolean).sort().join(',');
+  const missing = useAgorStore(
+    useCallback(
+      (s: DataMaps) =>
+        key
+          ? key
+              .split(',')
+              .filter((id) => !ENSURE[kind].has(s, id))
+              .join(',')
+          : '',
+      [kind, key]
+    )
+  );
   const firstPaintSettled = useAgorStore((s) => !s.loading);
   const authority = useAgorStore((s) => s.dataAuthority);
-  const requested = useRef({ authority, ids: new Set<string>() });
+  const state = useRef<EnsureState | null>(null);
+  // Bumped by a retry timer to read the ids it released.
+  const [retries, setRetries] = useState(0);
 
+  useEffect(
+    () => () => {
+      for (const timer of state.current?.timers ?? []) clearTimeout(timer);
+    },
+    []
+  );
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: retries is a re-read trigger
   useEffect(() => {
-    if (!client || !key || !firstPaintSettled || !authority) return;
+    if (!client || !missing || !firstPaintSettled || !authority) return;
     const run = () => {
-      if (requested.current.authority !== authority) {
-        requested.current = { authority, ids: new Set() };
+      if (state.current?.authority !== authority) {
+        for (const timer of state.current?.timers ?? []) clearTimeout(timer);
+        state.current = { authority, status: new Map(), attempts: new Map(), timers: new Set() };
       }
-      const seen = requested.current.ids;
-      const maps = agorStore.getState();
-      const missing = key.split(',').filter((id) => !seen.has(id) && !ENSURE[kind].has(maps, id));
-      for (const id of missing) seen.add(id);
-      for (let i = 0; i < missing.length; i += PAGINATION.MAX_ID_LIST) {
-        const chunk = missing.slice(i, i + PAGINATION.MAX_ID_LIST);
-        fillOnDemand(() => ENSURE[kind].read(client, chunk)).catch((err) => {
-          // A failed read may be asked for again.
-          for (const id of chunk) seen.delete(id);
-          console.warn(`[ensure] ${kind} by id failed:`, err);
-        });
+      const run = state.current;
+      const toRead = missing.split(',').filter((id) => !run.status.has(id));
+      for (const id of toRead) run.status.set(id, 'pending');
+      for (let i = 0; i < toRead.length; i += PAGINATION.MAX_ID_LIST) {
+        const chunk = toRead.slice(i, i + PAGINATION.MAX_ID_LIST);
+        fillOnDemand(() => ENSURE[kind].read(client, chunk))
+          .then(() => {
+            if (state.current !== run) return;
+            const maps = agorStore.getState();
+            for (const id of chunk) {
+              run.attempts.delete(id);
+              if (ENSURE[kind].has(maps, id)) run.status.delete(id);
+              else run.status.set(id, 'absent');
+            }
+          })
+          .catch((err) => {
+            if (state.current !== run) return;
+            console.warn(`[ensure] ${kind} by id failed:`, err);
+            const attempt = Math.max(...chunk.map((id) => (run.attempts.get(id) ?? 0) + 1));
+            for (const id of chunk) run.attempts.set(id, attempt);
+            if (attempt >= MAX_REFERENCE_READ_ATTEMPTS) {
+              for (const id of chunk) run.status.set(id, 'absent');
+              return;
+            }
+            const timer = setTimeout(() => {
+              run.timers.delete(timer);
+              for (const id of chunk) run.status.delete(id);
+              setRetries((n) => n + 1);
+            }, referenceRetryDelayMs(attempt));
+            run.timers.add(timer);
+          });
       }
     };
     if (!debounceMs) {
@@ -87,7 +151,7 @@ function useEnsureRows(
     }
     const timer = setTimeout(run, debounceMs);
     return () => clearTimeout(timer);
-  }, [kind, client, key, firstPaintSettled, authority, debounceMs]);
+  }, [kind, client, missing, firstPaintSettled, authority, debounceMs, retries]);
 }
 
 /** `useEnsureRows` for sessions (`session_id $in`, lean rows). */
