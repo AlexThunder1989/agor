@@ -820,7 +820,33 @@ describe('partition LRU', () => {
     expect(loadedBoards()).toEqual(['b2', 'b3', 'b4', 'slow']);
     pending.release();
     await slow;
-    expect(has('sessionById', 's-slow')).toBe(true);
+    // Once it settles, the LRU runs again: it was the least recently used.
+    expect(loadedBoards()).toEqual(['b2', 'b3', 'b4']);
+    expect(has('sessionById', 's-slow')).toBe(false);
+  });
+
+  it('boards visited and left while loading are evicted once their loads settle', async () => {
+    const pending = [];
+    for (let i = 0; i < 8; i++) {
+      const boardId = `d${i}`;
+      const deferred = makePartitionClient({
+        ...boardRows(boardId),
+        board: fullBoard({ board_id: boardId }),
+      });
+      const release = registerBoardUse(boardId);
+      const load = loadBoardPartition(deferred.client, boardId, {
+        canUseMemberWorkspaceServices: true,
+      });
+      release();
+      pending.push({ deferred, load });
+    }
+    for (const { deferred, load } of pending) {
+      deferred.release();
+      await load;
+    }
+    expect(loadedBoards()).toEqual(['d5', 'd6', 'd7']);
+    expect(agorStore.getState().sessionById.size).toBe(RETAINED_BACKGROUND_PARTITIONS);
+    expect(agorStore.getState().branchById.size).toBe(RETAINED_BACKGROUND_PARTITIONS);
   });
 
   it("drops an evicted session's MCP links and loaded mark", async () => {

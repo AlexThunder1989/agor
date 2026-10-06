@@ -163,7 +163,8 @@ export function getDisplayedBoardId(): string | undefined {
 /**
  * The LRU: keep every displayed board, and of the other partitions the
  * `RETAINED_BACKGROUND_PARTITIONS` most recently used (mounted ones first);
- * evict the rest that are not mounted or loading. Evicting a partition drops
+ * evict the rest that are not mounted or loading. Runs when a use is
+ * registered or released, and when a load settles or is cleaned up. Evicting a partition drops
  * its coverage and the rows it claims that no other scope holds (`evictRows`).
  */
 export function evictInactivePartitions(): void {
@@ -430,6 +431,8 @@ export function loadBoardPartition(
     // Cancelled or dropped while still loading: release the entry so the
     // board counts as unloaded and the next mount/authority loads it again.
     if (ownsLoading(boardId, generation)) setBoardPartition(boardId, null);
+    // The LRU skipped this board while it loaded: judge it now.
+    evictInactivePartitions();
   });
   inflight.set(key, promise);
   if (!options.background) holdBackgroundReads(promise);
