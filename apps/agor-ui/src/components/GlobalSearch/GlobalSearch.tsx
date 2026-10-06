@@ -161,6 +161,7 @@ export const GlobalSearch: React.FC<GlobalSearchProps> = ({
   });
 
   const recents = useRecents({
+    client,
     currentUserId,
     sessionById,
     branchById,

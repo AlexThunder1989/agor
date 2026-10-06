@@ -112,3 +112,28 @@ describe('useGlobalSearch server results', () => {
     expect(agorStore.getState().sessionById.has('s-other')).toBe(false);
   });
 });
+
+describe('parent-branch labels', () => {
+  it('reads the parent branches of the shown results the store lacks', async () => {
+    agorStore.getState().setLoading(false); // first paint settled
+    const parent = branch('br-parent', 'parent-branch');
+    const branchesFind = vi.fn(async ({ query }: { query: Record<string, unknown> }) =>
+      query.branch_id ? [parent] : { data: [] }
+    );
+    const client = {
+      service: (name: string) => ({
+        find:
+          name === 'sessions'
+            ? async () => [session('s-remote', 'Fix login', { branch_id: 'br-parent' })]
+            : branchesFind,
+      }),
+    } as unknown as AgorClient;
+    const { result } = renderSearch(client, 'login');
+    await waitFor(() =>
+      expect(result.current.results.session[0]?.parentBranch?.name).toBe('parent-branch')
+    );
+    expect(branchesFind).toHaveBeenCalledWith({
+      query: { branch_id: { $in: ['br-parent'] }, archived: false, $limit: 1 },
+    });
+  });
+});

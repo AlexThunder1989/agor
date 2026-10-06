@@ -8,6 +8,7 @@ import {
   tokenizeSearchQuery,
 } from '@agor-live/client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEnsureBranches } from '../../hooks/useEnsureRows';
 import { sessionListQuery } from '../../store/sessionListQuery';
 import { fillOnDemand, rowsOf } from '../../store/userScope';
 import {
@@ -23,7 +24,7 @@ import {
   type SearchCounts,
   type SearchResultItem,
 } from './types';
-import { byTimestamp, hasAnyEntries } from './utils';
+import { byTimestamp, hasAnyEntries, parentBranchIds } from './utils';
 
 interface UseGlobalSearchInput extends GlobalSearchEntityMaps {
   /** Also search the daemon's sessions and branches (see `useServerSearch`). */
@@ -228,6 +229,9 @@ export function useGlobalSearch({
     boardById,
     mcpServerById,
   ]);
+
+  // Parent-branch labels come from the map: read the shown rows' parents it lacks.
+  useEnsureBranches(client, parentBranchIds(results));
 
   const hasAnyResults = hasAnyEntries(results);
 
