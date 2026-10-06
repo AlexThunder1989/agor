@@ -11,7 +11,7 @@ import {
   type TaskID,
   TaskStatus,
 } from '@agor-live/client';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { App, ConfigProvider, theme } from 'antd';
 import { useState } from 'react';
 import { afterEach, expect, it } from 'vitest';
@@ -37,7 +37,8 @@ function task(n: number, status: Task['status'] = TaskStatus.COMPLETED): Task {
   } as Task;
 }
 
-function messages(n: number): Message[] {
+/** `long` answers collapse as history unless the turn arrived live or the reader expanded them. */
+function messages(n: number, long = false): Message[] {
   const base = {
     session_id: SESSION_ID,
     task_id: taskId(n),
@@ -59,7 +60,9 @@ function messages(n: number): Message[] {
       index: n * 2 + 1,
       role: MessageRole.ASSISTANT,
       type: 'assistant',
-      content: `Answer ${n}. ${'A line of synthetic transcript text. '.repeat(4)}`,
+      content: long
+        ? `Answer ${n}.\n${'A line of synthetic transcript text.\n'.repeat(20)}`
+        : `Answer ${n}. ${'A line of synthetic transcript text. '.repeat(4)}`,
     },
   ] as Message[];
 }
@@ -85,7 +88,7 @@ function events() {
 }
 
 /** A fresh client per test: shared handles are cached per client. */
-function transport(persisted: number) {
+function transport(persisted: number, { long = false } = {}) {
   let turns = persisted;
   const tasks = Object.assign(events(), {
     find: async ({ query }: { query: Record<string, unknown> }) => {
@@ -104,7 +107,7 @@ function transport(persisted: number) {
   const messageService = Object.assign(events(), {
     findAll: async ({ query }: { query: { task_id: string | { $in: string[] } } }) => {
       const ids = typeof query.task_id === 'string' ? [query.task_id] : query.task_id.$in;
-      return ids.flatMap((id) => messages(turnOf(id)));
+      return ids.flatMap((id) => messages(turnOf(id), long));
     },
   });
   const session = () => ({
@@ -133,7 +136,7 @@ function transport(persisted: number) {
       tasks.emit('created', task(n, TaskStatus.RUNNING));
       // Dispatch appends the turn to Session.tasks.
       sessions.emit('patched', session());
-      for (const message of messages(n)) messageService.emit('created', message);
+      for (const message of messages(n, long)) messageService.emit('created', message);
       tasks.emit('patched', task(n));
     });
     await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve)));
@@ -227,6 +230,38 @@ it('never trims under a scrolled-up reader, keeps its place, and trims on return
   await addTurn();
   await waitFor(() => expect(mountedTurns(viewport)).toEqual(range(21, 50)));
   await waitFor(() => expect(distanceFromBottom(viewport)).toBeLessThan(2));
+});
+
+it('trims as soon as a reader wheels back to the latest turns, before another turn arrives', async () => {
+  const { client, addTurn } = transport(10);
+  const viewport = await mount(client);
+  for (let i = 0; i < 25; i++) await addTurn();
+  await waitFor(() => expect(mountedTurns(viewport)).toEqual(range(5, 34)));
+  viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+  await scrollTo(viewport, Math.floor((viewport.scrollHeight - viewport.clientHeight) / 2));
+  for (let i = 0; i < 15; i++) await addTurn();
+  await screen.findByText(/Answer 49\./, undefined, { timeout: 5_000 });
+
+  // Wheel back down a step at a time, stopping short of the hook's 70px
+  // near-bottom zone: nothing is trimmed while still scrolled up.
+  while (distanceFromBottom(viewport) > 150) {
+    expect(mountedTurns(viewport)).toEqual(range(5, 49));
+    const step = Math.min(100, distanceFromBottom(viewport) - 120);
+    viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: step, bubbles: true }));
+    await scrollTo(viewport, viewport.scrollTop + step);
+  }
+  expect(mountedTurns(viewport)).toEqual(range(5, 49));
+  const latest = screen.getByText(/Answer 49\./);
+  const remaining = distanceFromBottom(viewport);
+  const latestTop = latest.getBoundingClientRect().top;
+  viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: remaining, bubbles: true }));
+  await scrollTo(viewport, viewport.scrollTop + remaining);
+
+  // Back at the latest turn with no new one: trimmed above the viewport, and
+  // the latest turn moved only by the reader's own scroll.
+  await waitFor(() => expect(mountedTurns(viewport)).toEqual(range(20, 49)), { timeout: 5_000 });
+  expect(Math.abs(latest.getBoundingClientRect().top - (latestTop - remaining))).toBeLessThan(2);
+  expect(distanceFromBottom(viewport)).toBeLessThan(2);
 });
 
 /**
@@ -352,6 +387,52 @@ it('keeps a reader who scrolls up right after jump-to-bottom where they went', a
   expect(mountedTurns(viewport)).toEqual(range(5, 49));
 });
 
+it('keeps a reader who pages up or drags the scrollbar right after jump-to-bottom where they went', async () => {
+  // Within one window, so the jump itself trims nothing and its pending
+  // scroll to the bottom is the only thing in the reader's way.
+  const { client, addTurn } = transport(10);
+  let jumpToBottom: (() => void) | undefined;
+  const viewport = await mount(client, (toBottom) => {
+    jumpToBottom = toBottom;
+  });
+  for (let i = 0; i < 10; i++) await addTurn();
+  await scrollTo(viewport, Math.floor((viewport.scrollHeight - viewport.clientHeight) / 2));
+  // Keyboard focus inside the transcript.
+  const focused = viewport.querySelector<HTMLElement>('[data-task-block]')!;
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
+
+  // PageUp and its default scroll land in the same frame as the jump.
+  act(() => {
+    jumpToBottom!();
+    focused.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }));
+    viewport.scrollTop -= viewport.clientHeight / 2;
+  });
+  await settle();
+  expect(distanceFromBottom(viewport)).toBeGreaterThan(viewport.clientHeight / 4);
+
+  // So does a drag on the scrollbar, which belongs to the scroller itself.
+  act(() => {
+    jumpToBottom!();
+    viewport.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, buttons: 1 }));
+    viewport.scrollTop -= viewport.clientHeight / 2;
+  });
+  await settle();
+  act(() => viewport.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })));
+  expect(distanceFromBottom(viewport)).toBeGreaterThan(viewport.clientHeight / 4);
+  expect(mountedTurns(viewport)).toEqual(range(0, 19));
+
+  // End agrees with the jump: the reader stays parked, following and trimmed.
+  act(() => {
+    jumpToBottom!();
+    focused.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    viewport.scrollTop = viewport.scrollHeight;
+  });
+  await settle();
+  for (let i = 0; i < 11; i++) await addTurn();
+  await waitFor(() => expect(mountedTurns(viewport)).toEqual(range(1, 30)), { timeout: 5_000 });
+  await waitFor(() => expect(distanceFromBottom(viewport)).toBeLessThan(2), { timeout: 5_000 });
+});
+
 it('trims again once the panel is reactivated after the reader scrolled away', async () => {
   const { client, addTurn } = transport(10);
   let setActive!: (active: boolean) => void;
@@ -387,4 +468,39 @@ it('trims again once the panel is reactivated after the reader scrolled away', a
   for (let i = 0; i < 30; i++) await addTurn();
   await waitFor(() => expect(mountedTurns(viewport())).toEqual(range(50, 79)), { timeout: 5_000 });
   await waitFor(() => expect(distanceFromBottom(viewport())).toBeLessThan(2), { timeout: 5_000 });
+});
+
+it('forgets the reading state of trimmed turns and keeps it for turns still loaded', async () => {
+  const { client, addTurn } = transport(10, { long: true });
+  const viewport = await mount(client);
+  const toggle = (n: number) =>
+    within(viewport.querySelector<HTMLElement>(`[data-task-block="${taskId(n)}"]`)!).getByRole(
+      'button',
+      { name: /^show (more|less)$/ }
+    );
+  // History arrives collapsed and the reader expands turn 5; turn 9 arrived
+  // as the latest turn and stays expanded.
+  expect(toggle(5)).toHaveAttribute('aria-expanded', 'false');
+  act(() => toggle(5).click());
+  expect(toggle(5)).toHaveAttribute('aria-expanded', 'true');
+  expect(toggle(9)).toHaveAttribute('aria-expanded', 'true');
+
+  // Trimmed up to turn 5: both turns are still loaded and keep their state.
+  for (let i = 0; i < 25; i++) await addTurn();
+  await waitFor(() => expect(mountedTurns(viewport)).toEqual(range(5, 34)), { timeout: 5_000 });
+  expect(toggle(5)).toHaveAttribute('aria-expanded', 'true');
+  expect(toggle(9)).toHaveAttribute('aria-expanded', 'true');
+
+  // Many more trims drop them; paged back in, they are plain history again.
+  for (let i = 0; i < 35; i++) await addTurn();
+  await waitFor(() => expect(mountedTurns(viewport)).toEqual(range(40, 69)), { timeout: 5_000 });
+  while (!mountedTurns(viewport).includes(5)) {
+    const before = mountedTurns(viewport)[0];
+    // Its fading loading icon can linger in the accessible name; match the label.
+    const loadOlder = screen.getByText('Load older history').closest('button')!;
+    act(() => loadOlder.click());
+    await waitFor(() => expect(mountedTurns(viewport)[0]).toBeLessThan(before), { timeout: 5_000 });
+  }
+  await waitFor(() => expect(toggle(5)).toHaveAttribute('aria-expanded', 'false'));
+  expect(toggle(9)).toHaveAttribute('aria-expanded', 'false');
 });
