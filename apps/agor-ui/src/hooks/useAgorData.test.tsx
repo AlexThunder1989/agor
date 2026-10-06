@@ -556,6 +556,24 @@ describe('useAgorData — socket-event bailouts', () => {
     expect(agorStore.getState().missingLinkTargets.has('gone')).toBe(true);
   });
 
+  it('keeps only the current link target among the missed ones', async () => {
+    const { client, onFetch } = makeMockClient({ sessions: [] });
+    onFetch('sessions', 'get', () => Promise.reject(new Error('NotFound')));
+    const { result, rerender } = renderHook(
+      ({ target }) => useAgorData(client, { directSessionId: target }),
+      { initialProps: { target: 'gone-0' } }
+    );
+    await waitForInitialLoad(result);
+    await waitFor(() => expect(agorStore.getState().missingLinkTargets.has('gone-0')).toBe(true));
+    for (let i = 1; i < 5; i++) {
+      rerender({ target: `gone-${i}` });
+      await waitFor(() =>
+        expect(agorStore.getState().missingLinkTargets.has(`gone-${i}`)).toBe(true)
+      );
+    }
+    expect([...agorStore.getState().missingLinkTargets]).toEqual(['gone-4']);
+  });
+
   it('asks the server for an ambiguous short id instead of waiting forever', async () => {
     const { client, fetchCount, onFetch } = makeMockClient({
       sessions: [makeSession({ session_id: 'abc-1' }), makeSession({ session_id: 'abc-2' })],

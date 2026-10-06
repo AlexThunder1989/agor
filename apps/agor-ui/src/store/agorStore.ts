@@ -79,11 +79,15 @@ export function withGloballyHydrated(
  * piece is loaded or capped lives in `coverage` (`USER_SCOPE_KEYS`).
  */
 export interface UserScopeMeta {
-  /** Referenced branch ids the server did not return (archived, deleted or invisible). */
+  /**
+   * Referenced branch ids the server did not return (archived, deleted or
+   * invisible); a mark leaves once nothing references the branch.
+   */
   absentBranchIds: Set<string>;
   /**
-   * Deep-link targets (`/s/`, `/m/session/`, `/w/` tokens) whose targeted read
-   * returned nothing displayable: "not found" is shown only for these.
+   * The deep-link target (`/s/`, `/m/session/`, `/w/` token) whose targeted
+   * read returned nothing displayable, if any: "not found" is shown only for
+   * it. Holds the current link's miss only.
    */
   missingLinkTargets: Set<string>;
   /**

@@ -523,11 +523,19 @@ function withAbsent(
   return same ? absent : next;
 }
 
-/** Add absent marks and drop the marks of branches that are present now (current run only). */
+/**
+ * Add absent marks and drop the marks of branches that are present now, or
+ * that nothing references any more: the marks follow current references, not
+ * history (current run only).
+ */
 function updateAbsent(run: ScopeRun, add: readonly string[]): void {
   if (!isCurrent(run)) return;
   const state = agorStore.getState();
-  const absentBranchIds = withAbsent(state.absentBranchIds, add, state.branchById);
+  let absentBranchIds = withAbsent(state.absentBranchIds, add, state.branchById);
+  const referenced = referencedBranchIds(state, run.userId);
+  if ([...absentBranchIds].some((id) => !referenced.has(id))) {
+    absentBranchIds = new Set([...absentBranchIds].filter((id) => referenced.has(id)));
+  }
   if (absentBranchIds !== state.absentBranchIds) state.setUserScope({ absentBranchIds });
 }
 

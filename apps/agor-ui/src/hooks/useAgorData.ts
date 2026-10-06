@@ -1657,9 +1657,10 @@ export function useAgorData(
     const hold = holdRows();
     const missed = () => {
       if (cancelled || !authorityIsCurrent()) return;
+      // Only the current target: the marks never grow with history.
       const { missingLinkTargets, setUserScope } = agorStore.getState();
-      if (missingLinkTargets.has(target.token)) return;
-      setUserScope({ missingLinkTargets: new Set(missingLinkTargets).add(target.token) });
+      if (missingLinkTargets.size === 1 && missingLinkTargets.has(target.token)) return;
+      setUserScope({ missingLinkTargets: new Set([target.token]) });
     };
     const fillBranch = (id: string) =>
       fillOnDemand(

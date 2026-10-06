@@ -60,6 +60,21 @@ describe('useEnsureBranches', () => {
     expect(find.mock.calls[1][0].query.branch_id.$in).toEqual(['new']);
   });
 
+  it('forgets an absent id once no view asks for it, so it never grows with history', async () => {
+    const { client, find } = makeClient([]);
+    const { rerender } = renderHook(({ ids }) => useEnsureBranches(client, ids), {
+      initialProps: { ids: ['gone-0'] },
+    });
+    await waitFor(() => expect(find).toHaveBeenCalledTimes(1));
+    for (let i = 1; i < 5; i++) {
+      rerender({ ids: [`gone-${i}`] });
+      await waitFor(() => expect(find).toHaveBeenCalledTimes(i + 1));
+    }
+    // Asked for again after it was dropped: read again, not remembered as absent.
+    rerender({ ids: ['gone-0'] });
+    await waitFor(() => expect(find).toHaveBeenCalledTimes(6));
+  });
+
   it('waits out a burst of id changes with a debounce', async () => {
     vi.useFakeTimers();
     const { client, find } = makeClient([]);

@@ -73,7 +73,7 @@ interface EnsureState {
  * scope while their pins hold them (a reply after unmount inserts nothing).
  * Archived rows stay unloaded (a fill skips them). Driven by the ids the
  * store is missing: a pending id is not asked for again, an absent one
- * not again under this authority, a failed read retries with the user
+ * not again under this authority while a view still asks for it, a failed read retries with the user
  * scope's capped backoff up to `MAX_REFERENCE_READ_ATTEMPTS`, and an id the
  * store evicts after loading it is read again. With `debounceMs`, a burst of
  * id changes is read once it settles. The ids are pinned while the view is
@@ -114,6 +114,14 @@ function useEnsureRows(
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: retries is a re-read trigger
   useEffect(() => {
+    // The read state follows current demand: an id no view asks for any more
+    // is forgotten (absent included), so it never grows with history.
+    const wanted = new Set(key.split(','));
+    for (const id of state.current?.status.keys() ?? []) {
+      if (wanted.has(id)) continue;
+      state.current?.status.delete(id);
+      state.current?.attempts.delete(id);
+    }
     if (!client || !missing || !firstPaintSettled || !authority) return;
     const run = () => {
       if (state.current?.authority !== authority) {
@@ -169,7 +177,7 @@ function useEnsureRows(
     }
     const timer = setTimeout(run, debounceMs);
     return () => clearTimeout(timer);
-  }, [kind, client, missing, firstPaintSettled, authority, debounceMs, retries]);
+  }, [kind, key, client, missing, firstPaintSettled, authority, debounceMs, retries]);
 }
 
 /** `useEnsureRows` for sessions (`session_id $in`, lean rows). */

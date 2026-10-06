@@ -747,7 +747,31 @@ describe('user scope', () => {
     expect(calls.filter((c) => c.query.branch_id)).toHaveLength(5);
   });
 
+  it('drops an absent mark once nothing references the branch', async () => {
+    agorStore.getState().applyMaps((prev) => ({
+      ...prev,
+      sessionById: new Map([
+        ['s-1', session('s-1', 'br-gone')],
+        ['s-2', session('s-2', 'br-other')],
+      ]),
+    }));
+    const { client } = makeClient({ byIds: () => [] });
+    await startUserScope(client, { userId: ME, lifetime: lifetime(), gatedMineComplete: true });
+    await vi.waitFor(() =>
+      expect([...agorStore.getState().absentBranchIds].sort()).toEqual(['br-gone', 'br-other'])
+    );
+    sessionRemoved(session('s-1', 'br-gone'));
+    await vi.waitFor(() => expect([...agorStore.getState().absentBranchIds]).toEqual(['br-other']));
+  });
+
   it('revalidates absent marks under the new run', async () => {
+    agorStore.getState().applyMaps((prev) => ({
+      ...prev,
+      sessionById: new Map([
+        ['s-1', session('s-1', 'br-gone')],
+        ['s-2', session('s-2', 'br-back')],
+      ]),
+    }));
     agorStore.getState().setUserScope({ absentBranchIds: new Set(['br-gone', 'br-back']) });
     const { client } = makeClient({
       byIds: (ids) => ids.filter((id) => id === 'br-back').map((id) => branch(id)),
