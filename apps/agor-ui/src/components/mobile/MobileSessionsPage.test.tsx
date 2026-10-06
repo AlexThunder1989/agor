@@ -1,7 +1,12 @@
-import type { Branch, Session, User } from '@agor-live/client';
+import type { AgorClient, Branch, Session, User } from '@agor-live/client';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetHydrationRevisions } from '../../store/agorHydration';
+import { agorStore, useAgorStore } from '../../store/agorStore';
+import { getDisplayedBoardId } from '../../store/boardPartitions';
+import { discardRealtimeNow, setRealtimeAuthorityScope } from '../../store/realtimeBatch';
+import { selectSessionsByBranch } from '../../store/selectors';
 import { MobileSessionsPage } from './MobileSessionsPage';
 
 const ownSession = {
@@ -73,5 +78,59 @@ describe('MobileSessionsPage scope', () => {
     renderPage('/m/sessions', false);
     expect(screen.getByText('My own task')).toBeInTheDocument();
     expect(screen.queryByText('Fable')).not.toBeInTheDocument();
+  });
+});
+
+describe('MobileSessionsPage assistant scope with the store empty (Step 3)', () => {
+  beforeEach(() => {
+    agorStore.getState().reset();
+    resetHydrationRevisions();
+    discardRealtimeNow();
+    setRealtimeAuthorityScope('u1:member:1');
+    agorStore.getState().setLoading(false);
+    agorStore
+      .getState()
+      .setMap('boardById', new Map([['board-1', { board_id: 'board-1', name: 'B' } as never]]));
+  });
+  afterEach(() => {
+    setRealtimeAuthorityScope(null);
+    agorStore.getState().reset();
+  });
+
+  it("loads the assistant's board in the background and lists its sessions", async () => {
+    const client = {
+      io: { on: vi.fn(), off: vi.fn() },
+      service: (name: string) => ({
+        findAll: vi.fn(async () => (name === 'sessions' ? [assistantSession] : [])),
+        get: vi.fn(async () => ({ board_id: 'board-1', name: 'B', objects: {} })),
+      }),
+    } as unknown as AgorClient;
+    function Page() {
+      const sessionsByBranch = useAgorStore(selectSessionsByBranch);
+      return (
+        <MobileSessionsPage
+          sessionById={new Map()}
+          branchById={new Map()}
+          userById={new Map()}
+          sessionsByBranch={sessionsByBranch}
+          currentUser={{ user_id: 'u1', role: 'member' } as User}
+          client={client}
+          primaryBranch={{ ...primaryBranch, board_id: 'board-1' } as Branch}
+          primaryTeammateName="Fable"
+          onForkSession={vi.fn(async () => {})}
+          onSpawnSession={vi.fn(async () => {})}
+          onCreateSessionOnBranch={vi.fn()}
+        />
+      );
+    }
+    render(
+      <MemoryRouter initialEntries={['/m/sessions?scope=assistant']}>
+        <Routes>
+          <Route path="/m/sessions" element={<Page />} />
+        </Routes>
+      </MemoryRouter>
+    );
+    expect(await screen.findByText('Assistant task')).toBeInTheDocument();
+    expect(getDisplayedBoardId()).toBeUndefined();
   });
 });

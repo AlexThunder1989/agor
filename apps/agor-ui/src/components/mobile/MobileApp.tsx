@@ -664,6 +664,8 @@ export const MobileApp: React.FC<MobileAppProps> = ({
       <MobileMoreSheet
         open={moreOpen}
         onClose={() => setMoreOpen(false)}
+        client={client}
+        canUseMemberWorkspaceServices={hasMinimumRole(user?.role, ROLES.MEMBER)}
         boardById={boardById}
         branchById={branchById}
         sessionsByBranch={sessionsByBranch}

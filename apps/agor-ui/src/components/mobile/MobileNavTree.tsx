@@ -1,4 +1,4 @@
-import type { Board, BoardComment, Branch, Session } from '@agor-live/client';
+import type { AgorClient, Board, BoardComment, Branch, Session } from '@agor-live/client';
 import {
   AppstoreOutlined,
   BulbOutlined,
@@ -12,18 +12,21 @@ import {
   UserOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
-import { Badge, Button, Collapse, Divider, Menu, Space, Typography, theme } from 'antd';
+import { Badge, Button, Collapse, Divider, Menu, Space, Spin, Typography, theme } from 'antd';
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { resolveExternalAppLink } from '@/utils/externalAppLink';
 import { mapToArray } from '@/utils/mapHelpers';
 import { getSessionDisplayTitle } from '@/utils/sessionTitle';
+import { useBoardPartition } from '../../hooks/useBoardPartition';
 import { BoardCollapse } from '../BoardCollapse';
 import { getBoardEmoji } from '../BoardTile';
 
 const { Text } = Typography;
 
 interface MobileNavTreeProps {
+  client: AgorClient | null;
+  canUseMemberWorkspaceServices: boolean;
   boardById: Map<string, Board>;
   branchById: Map<string, Branch>;
   sessionsByBranch: Map<string, Session[]>; // O(1) branch filtering
@@ -37,7 +40,27 @@ interface MobileNavTreeProps {
   externalAppLabel?: string;
 }
 
+/**
+ * An expanded board's body. Mounting it (boards are collapsed and destroyed
+ * when hidden) loads the board's partition in the background, so its branches
+ * and sessions come from that load rather than from workspace-wide data.
+ */
+const BoardPanel: React.FC<{
+  client: AgorClient | null;
+  boardId: string;
+  canUseMemberWorkspaceServices: boolean;
+  children: React.ReactNode;
+}> = ({ client, boardId, canUseMemberWorkspaceServices, children }) => {
+  const { boardReady } = useBoardPartition(client, boardId, {
+    canUseMemberWorkspaceServices,
+    background: true,
+  });
+  return boardReady ? children : <Spin size="small" style={{ display: 'block' }} />;
+};
+
 export const MobileNavTree: React.FC<MobileNavTreeProps> = ({
+  client,
+  canUseMemberWorkspaceServices,
   boardById,
   branchById,
   sessionsByBranch,
@@ -199,94 +222,105 @@ export const MobileNavTree: React.FC<MobileNavTreeProps> = ({
                 </Badge>
               </Space>
             ),
-            children:
-              boardBranches.length === 0 ? (
-                <Text type="secondary">No branches on this board</Text>
-              ) : (
-                <Collapse
-                  defaultActiveKey={[]}
-                  destroyOnHidden
-                  ghost
-                  expandIcon={({ isActive }) => <DownOutlined rotate={isActive ? 180 : 0} />}
-                  items={boardBranches.map((branch) => {
-                    const branchSessions = sortedSessionsByBranch.get(branch.branch_id) || [];
+            children: (
+              <BoardPanel
+                client={client}
+                boardId={board.board_id}
+                canUseMemberWorkspaceServices={canUseMemberWorkspaceServices}
+              >
+                {boardBranches.length === 0 ? (
+                  <Text type="secondary">No branches on this board</Text>
+                ) : (
+                  <Collapse
+                    defaultActiveKey={[]}
+                    destroyOnHidden
+                    ghost
+                    expandIcon={({ isActive }) => <DownOutlined rotate={isActive ? 180 : 0} />}
+                    items={boardBranches.map((branch) => {
+                      const branchSessions = sortedSessionsByBranch.get(branch.branch_id) || [];
 
-                    return {
-                      key: branch.branch_id,
-                      label: (
-                        <div
-                          style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 2,
-                            padding: '2px 0',
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span>🌳</span>
-                            <Text strong>{branch.name}</Text>
-                          </div>
-                          <Text type="secondary" style={{ fontSize: 12, paddingLeft: 28 }}>
-                            {branchSessions.length} sessions
-                          </Text>
-                        </div>
-                      ),
-                      children:
-                        branchSessions.length === 0 ? (
-                          <Text
-                            type="secondary"
-                            style={{ padding: '8px 0 8px 28px', display: 'block' }}
+                      return {
+                        key: branch.branch_id,
+                        label: (
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 2,
+                              padding: '2px 0',
+                            }}
                           >
-                            No sessions yet
-                          </Text>
-                        ) : (
-                          <div>
-                            {branchSessions.map((session) => (
-                              <Button
-                                type="text"
-                                block
-                                key={session.session_id}
-                                onClick={() => handleSessionClick(session.session_id)}
-                                style={{
-                                  height: 'auto',
-                                  textAlign: 'left',
-                                  padding: '6px 8px 6px 28px',
-                                  borderRadius: 4,
-                                }}
-                                onMouseEnter={(e) => {
-                                  (e.currentTarget as HTMLElement).style.background =
-                                    token.colorFillTertiary;
-                                }}
-                                onMouseLeave={(e) => {
-                                  (e.currentTarget as HTMLElement).style.background = 'transparent';
-                                }}
-                              >
-                                <div
-                                  style={{
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: 2,
-                                    width: '100%',
-                                  }}
-                                >
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <span>{getSessionStatusIcon(session)}</span>
-                                    <Text>{getSessionTitle(session)}</Text>
-                                  </div>
-                                  <Text type="secondary" style={{ fontSize: 11, paddingLeft: 28 }}>
-                                    {session.agentic_tool}
-                                    {session.model_config?.model &&
-                                      ` • ${session.model_config.model}`}
-                                  </Text>
-                                </div>
-                              </Button>
-                            ))}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span>🌳</span>
+                              <Text strong>{branch.name}</Text>
+                            </div>
+                            <Text type="secondary" style={{ fontSize: 12, paddingLeft: 28 }}>
+                              {branchSessions.length} sessions
+                            </Text>
                           </div>
                         ),
-                    };
-                  })}
-                />
-              ),
+                        children:
+                          branchSessions.length === 0 ? (
+                            <Text
+                              type="secondary"
+                              style={{ padding: '8px 0 8px 28px', display: 'block' }}
+                            >
+                              No sessions yet
+                            </Text>
+                          ) : (
+                            <div>
+                              {branchSessions.map((session) => (
+                                <Button
+                                  type="text"
+                                  block
+                                  key={session.session_id}
+                                  onClick={() => handleSessionClick(session.session_id)}
+                                  style={{
+                                    height: 'auto',
+                                    textAlign: 'left',
+                                    padding: '6px 8px 6px 28px',
+                                    borderRadius: 4,
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    (e.currentTarget as HTMLElement).style.background =
+                                      token.colorFillTertiary;
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    (e.currentTarget as HTMLElement).style.background =
+                                      'transparent';
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      display: 'flex',
+                                      flexDirection: 'column',
+                                      gap: 2,
+                                      width: '100%',
+                                    }}
+                                  >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                      <span>{getSessionStatusIcon(session)}</span>
+                                      <Text>{getSessionTitle(session)}</Text>
+                                    </div>
+                                    <Text
+                                      type="secondary"
+                                      style={{ fontSize: 11, paddingLeft: 28 }}
+                                    >
+                                      {session.agentic_tool}
+                                      {session.model_config?.model &&
+                                        ` • ${session.model_config.model}`}
+                                    </Text>
+                                  </div>
+                                </Button>
+                              ))}
+                            </div>
+                          ),
+                      };
+                    })}
+                  />
+                )}
+              </BoardPanel>
+            ),
           };
         })}
       />
