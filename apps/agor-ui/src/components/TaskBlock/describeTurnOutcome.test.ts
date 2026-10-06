@@ -122,8 +122,52 @@ describe('describeTurnOutcome v3', () => {
       action: 'resume',
     };
     expect(describe3({ sdk_failure: sdkFailure() }, { restarted: true })).toEqual(restart);
-    expect(describe3({ status: TaskStatus.STOPPED }, { restarted: true })).toEqual(restart);
+    expect(describe3(cause('heartbeat_lost'), { restarted: true })).toEqual(restart);
+    expect(
+      describe3({ error_message: 'socket has been disconnected' }, { restarted: true })
+    ).toEqual(restart);
     expect(describe3({ error_message: DAEMON_RESTART_RELEASED_MESSAGE })).toEqual(restart);
+  });
+
+  // Startup attaches the notice to the latest turn of every orphaned session, even one that had already ended.
+  it('4. a restart notice never hides the cause of a turn that ended for another reason', () => {
+    const restarted = { restarted: true };
+    expect(
+      describe3(
+        {
+          status: TaskStatus.TIMED_OUT,
+          error_message: permissionTimeoutMessage(600_000),
+        },
+        restarted
+      )
+    ).toEqual({
+      cause: 'approval_timeout',
+      type: 'warning',
+      message: 'The agent stopped waiting for approval.',
+      detailsLead: 'Approval requests expire after 10 minutes.',
+      action: 'resume',
+    });
+    expect(describe3({ status: TaskStatus.STOPPED, ...cause('user_stop') }, restarted)).toEqual({
+      cause: 'stopped',
+      type: 'neutral',
+      message: `The agent was stopped. ${EDITS_KEPT}`,
+    });
+    expect(describe3({ status: TaskStatus.STOPPED }, restarted)?.cause).toBe('stopped');
+    expect(describe3(cause('authorization_revoked'), restarted)?.cause).toBe('access_changed');
+    expect(
+      describe3({ error_message: missingScopedCredentialMessage('codex') }, restarted)?.cause
+    ).toBe('not_connected');
+    expect(describe3(cause('sdk_health_failure'), restarted)?.cause).toBe('stalled');
+    expect(
+      describe3({ ...cause('startup_timeout'), executor_connected_at: undefined }, restarted)?.cause
+    ).toBe('never_started');
+    expect(describe3({ error_message: ENOENT_SYSTEM_PROMPT }, restarted)?.cause).toBe('unknown');
+    expect(
+      describe3(
+        { status: TaskStatus.STOPPING, sdk_failure: sdkFailure({ termination: 'unverified' }) },
+        restarted
+      )?.cause
+    ).toBe('stop_unconfirmed');
   });
 
   it('4b. an unconfirmed restart warns that files may still change, with no action', () => {

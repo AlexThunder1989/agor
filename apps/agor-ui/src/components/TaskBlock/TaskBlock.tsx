@@ -797,10 +797,7 @@ export const TaskBlock = React.memo<TaskBlockProps>(
           (message) =>
             (!Array.isArray(message.content) || message.content.length > 0) &&
             !isOutcomeEcho(message, task.error_message) &&
-            !(
-              (outcomeCause === 'restart' || outcomeCause === 'restart_unconfirmed') &&
-              isRestartNotice(message)
-            ) &&
+            !(outcomeCause && isRestartNotice(message)) &&
             !(outcomeCause === 'usage_limit' && isRejectedRateLimit(message))
         )
       );

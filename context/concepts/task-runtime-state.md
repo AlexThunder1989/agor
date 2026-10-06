@@ -349,7 +349,10 @@ fields first (`sdk_failure.termination`, `termination_request.cause` and its
 recorded requester, `executor_connected_at`, the turn's restart notice,
 message `error_kind`, `rate_limit` blocks), then from the failure texts shared
 in `@agor/core/types` (`turn-failure-messages.ts`); its Details disclosure
-shows the raw `error_message` and the stored `sdk_failure.reason` code. The
+shows the raw `error_message` and the stored `sdk_failure.reason` code. A
+restart notice names the restart only on a failed turn that lost its connection
+(or carries the restart-release text): startup attaches the notice to the latest
+turn of every orphaned session, including one that had already timed out. The
 banner names a stall only when the termination cause is `sdk_health_failure`,
 because the watchdog observes by default. Resume / Try again appear only on the latest
 FAILED or TIMED_OUT turn whose termination is neither `requested` nor

@@ -49,7 +49,7 @@ export interface TurnOutcomeContext {
   missingCredential?: boolean;
   /** This turn was rejected by a provider usage limit; `resetsAt` is unix seconds. */
   rateLimit?: { resetsAt?: number };
-  /** Agor attached a restart notice to this turn. */
+  /** Agor attached a restart notice to this turn; it can also land on a turn that ended earlier. */
   restarted?: boolean;
   /** Who asked for the stop, when a person in the UI did. */
   stoppedBy?: 'you' | { name: string };
@@ -118,7 +118,15 @@ export function describeTurnOutcome(
   if (!outcomeStatuses.includes(status) && !error) return null;
   const reason = failure?.reason;
   const cause = request?.cause;
-  const wasRestart = restarted || error === DAEMON_RESTART_RELEASED_MESSAGE;
+  const exited = reason === 'heartbeat_lost' || cause === 'heartbeat_lost';
+  const lostConnection = exited || LOST_CONNECTION.has(error) || isConnectionLossMessage(error);
+  // A restart notice explains only a run that died with the connection; any other cause stands.
+  const wasRestart =
+    error === DAEMON_RESTART_RELEASED_MESSAGE ||
+    (restarted &&
+      status === TaskStatus.FAILED &&
+      (!cause || cause === 'heartbeat_lost') &&
+      lostConnection);
 
   if (failure?.termination === 'unverified') {
     return wasRestart
@@ -198,7 +206,6 @@ export function describeTurnOutcome(
     reason === 'startup_timeout' ||
     cause === 'startup_timeout' ||
     error === CODEX_LIFECYCLE_MESSAGES.stream_start_failed;
-  const exited = reason === 'heartbeat_lost' || cause === 'heartbeat_lost';
   const neverConnected =
     !task.executor_connected_at &&
     !sawTools &&
@@ -212,7 +219,7 @@ export function describeTurnOutcome(
       action: 'retry',
     };
   }
-  if (exited || LOST_CONNECTION.has(error) || isConnectionLossMessage(error)) {
+  if (lostConnection) {
     return {
       cause: 'lost_connection',
       type: 'error',

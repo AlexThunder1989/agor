@@ -793,6 +793,33 @@ it('shows one restart surface: the banner replaces the restart notice and its Re
   expect(screen.getAllByRole('button', { name: /Resume/ })).toHaveLength(1);
 });
 
+it('keeps the real cause when a restart notice lands on a turn that had already ended', () => {
+  render(
+    view({
+      task: { ...task, status: TaskStatus.TIMED_OUT },
+      taskMessages: [
+        ...messages,
+        {
+          ...message(
+            2,
+            MessageRole.SYSTEM,
+            'The Agor daemon was restarted while this session was running.'
+          ),
+          type: 'daemon_restart',
+        },
+      ],
+      taskMessagesLoaded: true,
+      isLatestTask: true,
+      canStartTurn: true,
+      sessionId: task.session_id,
+      client: {} as NonNullable<React.ComponentProps<typeof TaskBlock>['client']>,
+    })
+  );
+  expect(outcome()).toHaveTextContent('The agent stopped waiting for approval.');
+  expect(screen.queryByText(/daemon was restarted/)).toBeNull();
+  expect(screen.getAllByRole('button', { name: /Resume/ })).toHaveLength(1);
+});
+
 it('lets the usage-limit banner own the reset time on a finished run', () => {
   const resetsAt = Math.floor(Date.now() / 1000) + 3600;
   render(
