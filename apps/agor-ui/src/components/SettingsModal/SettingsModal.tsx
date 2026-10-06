@@ -360,7 +360,6 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
           <BoardsTable
             client={client}
             boardById={boardById}
-            sessionsByBranch={sessionsByBranch}
             branchById={branchById}
             currentUser={currentUser}
             onCreate={onCreateBoard}
