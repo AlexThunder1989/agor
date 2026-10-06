@@ -6,7 +6,7 @@ import type {
   Repo,
   SpawnConfig,
 } from '@agor-live/client';
-import { getTeammateConfig, isTeammate } from '@agor-live/client';
+import { getTeammateConfig, hasMinimumRole, isTeammate, ROLES } from '@agor-live/client';
 import { LeftOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons';
 import {
   Alert,
@@ -24,6 +24,7 @@ import {
 } from 'antd';
 import type React from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { useBoardPartition } from '../../hooks/useBoardPartition';
 import { useCanManageBoard } from '../../hooks/useCanManageBoard';
 import { useAgorStore } from '../../store/agorStore';
 import {
@@ -273,6 +274,20 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
     }
   };
 
+  // A primary teammate on another board: its sessions come with that board's
+  // partition, loaded in the background (the shown board stays displayed).
+  const teammateBoardId = primaryTeammateBranch?.board_id;
+  const { boardReady: teammateBoardReady } = useBoardPartition(
+    client,
+    teammateBoardId !== board?.board_id ? teammateBoardId : null,
+    {
+      canUseMemberWorkspaceServices: hasMinimumRole(
+        currentUserId ? userById.get(currentUserId)?.role : undefined,
+        ROLES.MEMBER
+      ),
+      background: true,
+    }
+  );
   const teammateSessions = useMemo(
     () =>
       primaryTeammateBranch ? sessionsByBranch.get(primaryTeammateBranch.branch_id) || [] : [],
@@ -292,7 +307,7 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
 
   const teammateContent = (() => {
     // No board (or one that doesn't exist): nothing is loading.
-    if (board && !boardReady) return boardLoadingSkeleton;
+    if (board && !(boardReady && teammateBoardReady)) return boardLoadingSkeleton;
 
     if (primaryTeammateBranch && primaryTeammateRepo) {
       const teammateConfig = getTeammateConfig(primaryTeammateBranch);
