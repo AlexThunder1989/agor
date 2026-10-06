@@ -764,13 +764,6 @@ export const TaskBlock = React.memo<TaskBlockProps>(
       );
     }, [taskMessages, streamingForTask, streamingMessages]);
 
-    // Group messages into blocks, then reconcile against the previous render:
-    // a streaming chunk rebuilds `messages` (new array identity) every frame,
-    // but only the streamed message's block actually changed. Reusing the
-    // previous block objects — and crucially their `messages` arrays, which
-    // are minted fresh by groupMessagesIntoBlocks — keeps the props of the
-    // memoized AgentChain/CompactionBlock children reference-stable, so the
-    // untouched (often large) tool-chain subtrees bail out of re-rendering.
     const hasTools = messagesHaveTools(messages);
     const agentName = agentic_tool
       ? (AGENTIC_TOOL_DISPLAY_NAMES as Record<string, string>)[agentic_tool]
@@ -788,11 +781,19 @@ export const TaskBlock = React.memo<TaskBlockProps>(
       restarted: messages.some(isRestartNotice),
       stoppedBy: stopRequester(task, currentUserId, userById),
     });
-    // The outcome banner is the one surface for these; drop their transcript duplicates.
     const outcomeCause = outcome?.cause;
+
+    // Group messages into blocks, then reconcile against the previous render:
+    // a streaming chunk rebuilds `messages` (new array identity) every frame,
+    // but only the streamed message's block actually changed. Reusing the
+    // previous block objects — and crucially their `messages` arrays, which
+    // are minted fresh by groupMessagesIntoBlocks — keeps the props of the
+    // memoized AgentChain/CompactionBlock children reference-stable, so the
+    // untouched (often large) tool-chain subtrees bail out of re-rendering.
     const prevBlocksRef = useRef<Block[]>([]);
     const blocks = useMemo(() => {
       const next = groupMessagesIntoBlocks(
+        // The outcome banner is the one surface for echoes, restart notices and the usage limit.
         messages.filter(
           (message) =>
             (!Array.isArray(message.content) || message.content.length > 0) &&
