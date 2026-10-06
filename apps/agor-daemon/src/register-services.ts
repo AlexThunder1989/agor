@@ -76,6 +76,7 @@ import {
 } from '@agor/core/db';
 import type { Application } from '@agor/core/feathers';
 import { BadRequest, Conflict, Forbidden, NotAuthenticated } from '@agor/core/feathers';
+import { branchCountsQueryValidator, typedValidateQuery } from '@agor/core/lib/feathers-validation';
 import {
   hasTemplateMarker,
   isMCPServerUsableBy,
@@ -604,7 +605,8 @@ export async function registerServices(ctx: RegisterServicesContext): Promise<Re
   // independent of it.
   app.service('branch-counts').hooks({
     before: {
-      all: [ctx.requireAuth],
+      // No filter is modelled: one sent (`board_id`) is rejected, not ignored.
+      all: [typedValidateQuery(branchCountsQueryValidator), ctx.requireAuth],
       find: [scopeFindToAccessibleBranchesSql({ allowSuperadmin })],
     },
   });

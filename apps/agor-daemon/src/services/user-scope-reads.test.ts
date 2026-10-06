@@ -14,6 +14,7 @@ import {
 } from '@agor/core/db';
 import { type Application, feathers } from '@agor/core/feathers';
 import {
+  branchCountsQueryValidator,
   branchQueryValidator,
   sessionQueryValidator,
   typedValidateQuery,
@@ -57,7 +58,12 @@ function buildApp(db: Database) {
       find: [scopeFindToAccessibleBranchesSql()],
     },
   });
-  app.service('branch-counts').hooks({ before: { find: [scopeFindToAccessibleBranchesSql()] } });
+  app.service('branch-counts').hooks({
+    before: {
+      all: [typedValidateQuery(branchCountsQueryValidator)],
+      find: [scopeFindToAccessibleBranchesSql()],
+    },
+  });
   return app;
 }
 
@@ -157,6 +163,19 @@ describe('user-scope reads through transport hooks', () => {
       branch_count: number;
     }>;
     expect(counts).toEqual([{ board_id: fixture.boardIds[0], branch_count: 2 }]);
+    // A filter the counts don't model is rejected, never ignored.
+    await expect(
+      app.service('branch-counts').find(asViewer({ board_id: fixture.boardIds[0] }) as never)
+    ).rejects.toThrow(/validation failed/);
+    // So are session and branch filters the services don't model.
+    for (const [service, query] of [
+      ['sessions', { $or: [{ created_by: fixture.owner }] }],
+      ['branches', { $or: [{ board_id: fixture.boardIds[0] }] }],
+    ] as const) {
+      await expect(app.service(service).find(asViewer(query) as never)).rejects.toThrow(
+        /validation failed/
+      );
+    }
   });
 
   dbTest('serve session_id $in on the SQL path and cap id lists', async ({ db }) => {

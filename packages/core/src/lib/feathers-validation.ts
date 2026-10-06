@@ -31,9 +31,10 @@ export const queryValidator = new Ajv({
 });
 
 /**
- * Message queries reject unknown fields instead of silently removing them.
- * Silently turning a misspelled filter into a broad transcript query is both
- * surprising and potentially expensive.
+ * Message, task, session and branch queries reject unknown fields instead of
+ * silently removing them. Silently turning a misspelled or unsupported filter
+ * (`$or`, an unknown column) into a broad inventory query is both surprising
+ * and potentially expensive.
  */
 export const strictQueryValidator = new Ajv({
   coerceTypes: true,
@@ -169,9 +170,7 @@ export const sessionQuerySchema = createQuerySchema(
     created_at: Type.Optional(CommonSchemas.timestamp),
     updated_at: Type.Optional(CommonSchemas.timestamp),
     // Marks a `remove` as the delete half of a "switch tool" swap so the
-    // service can refuse it if a task landed on the session mid-swap. Declared
-    // here so the query validator (`removeAdditional: 'all'`) doesn't strip it
-    // before the service's guard sees it.
+    // service can refuse it if a task landed on the session mid-swap.
     _swapReplace: Type.Optional(CommonSchemas.boolean),
   })
 );
@@ -357,8 +356,14 @@ export const branchQuerySchema = createQuerySchema(
     archived: Type.Optional(CommonSchemas.boolean),
     created_at: Type.Optional(CommonSchemas.timestamp),
     updated_at: Type.Optional(CommonSchemas.timestamp),
+    // `remove` only: permanent deletion always removes owned files; the
+    // service rejects `false` (`BranchesService.remove`).
+    deleteFromFilesystem: Type.Optional(CommonSchemas.boolean),
   })
 );
+
+/** `branch-counts` takes no query: every count is of the caller's visible boards. */
+export const branchCountsQuerySchema = Type.Object({}, { additionalProperties: false });
 
 /**
  * Board query schema
@@ -542,10 +547,14 @@ export const mcpCatalogQuerySchema = Type.Object({}, { additionalProperties: fal
 /**
  * Create validators for each schema
  */
-export const sessionQueryValidator = getValidator(sessionQuerySchema, queryValidator);
+export const sessionQueryValidator = getValidator(sessionQuerySchema, strictQueryValidator);
 export const taskQueryValidator = getValidator(taskQuerySchema, strictQueryValidator);
 export const messageQueryValidator = getValidator(messageQuerySchema, strictQueryValidator);
-export const branchQueryValidator = getValidator(branchQuerySchema, queryValidator);
+export const branchQueryValidator = getValidator(branchQuerySchema, strictQueryValidator);
+export const branchCountsQueryValidator = getValidator(
+  branchCountsQuerySchema,
+  strictQueryValidator
+);
 export const boardQueryValidator = getValidator(boardQuerySchema, queryValidator);
 export const userQueryValidator = getValidator(userQuerySchema, queryValidator);
 export const boardObjectQueryValidator = getValidator(boardObjectQuerySchema, queryValidator);
