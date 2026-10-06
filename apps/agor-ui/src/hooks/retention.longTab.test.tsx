@@ -20,7 +20,6 @@ import { holdRows, pinRows } from '../store/retention';
 import { USER_SCOPE_KEYS } from '../store/scopeMerge';
 import { sessionMcpCreated } from '../store/sessionMcpActions';
 import { fillOnDemand } from '../store/userScope';
-import { setGlobalHydrationForTests } from './useAgorData';
 import { useBoardPartition } from './useBoardPartition';
 import { useEnsureSessions } from './useEnsureRows';
 import { usePinnedOpenRows } from './usePinnedRows';
@@ -117,7 +116,6 @@ function useShell(client: AgorClient, board: string | null, session: string | nu
 }
 
 beforeEach(() => {
-  setGlobalHydrationForTests(false);
   discardRealtimeNow();
   setRealtimeAuthorityScope(AUTHORITY);
   const store = agorStore.getState();
@@ -131,7 +129,6 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
-  setGlobalHydrationForTests(true);
   setRealtimeAuthorityScope(null);
   agorStore.getState().reset();
   resetHydrationRevisions();
@@ -213,7 +210,6 @@ it('opening and closing 20 boards and 50 sessions keeps the store on a plateau',
       mine.length -
       RETAINED_BACKGROUND_PARTITIONS
   );
-  expect(state.globallyHydrated.size).toBe(0);
   unmount();
 });
 

@@ -7,7 +7,6 @@ import { agorStore } from '../store/agorStore';
 import { discardRealtimeNow, setRealtimeAuthorityScope } from '../store/realtimeBatch';
 import { pinnedMembers } from '../store/rowPins';
 import { MAX_REFERENCE_READ_ATTEMPTS } from '../store/userScope';
-import { setGlobalHydrationForTests } from './useAgorData';
 import { useEnsureBranches } from './useEnsureRows';
 
 const AUTHORITY = 'me:member:1';
@@ -168,24 +167,19 @@ describe('useEnsureBranches retention', () => {
   });
 
   it('a reply that lands after the view unmounted fills nothing', async () => {
-    setGlobalHydrationForTests(false);
-    try {
-      const { client, find } = makeClient([]);
-      let answer: (rows: Branch[]) => void = () => {};
-      find.mockImplementationOnce(
-        () =>
-          new Promise<Branch[]>((resolve) => {
-            answer = resolve;
-          })
-      );
-      const { unmount } = renderHook(() => useEnsureBranches(client, ['b-late']));
-      await waitFor(() => expect(find).toHaveBeenCalledTimes(1));
-      unmount();
-      await act(async () => answer([branch('b-late')]));
-      expect(agorStore.getState().branchById.has('b-late')).toBe(false);
-      expect(pinnedMembers.branches?.has('b-late')).toBe(false);
-    } finally {
-      setGlobalHydrationForTests(true);
-    }
+    const { client, find } = makeClient([]);
+    let answer: (rows: Branch[]) => void = () => {};
+    find.mockImplementationOnce(
+      () =>
+        new Promise<Branch[]>((resolve) => {
+          answer = resolve;
+        })
+    );
+    const { unmount } = renderHook(() => useEnsureBranches(client, ['b-late']));
+    await waitFor(() => expect(find).toHaveBeenCalledTimes(1));
+    unmount();
+    await act(async () => answer([branch('b-late')]));
+    expect(agorStore.getState().branchById.has('b-late')).toBe(false);
+    expect(pinnedMembers.branches?.has('b-late')).toBe(false);
   });
 });

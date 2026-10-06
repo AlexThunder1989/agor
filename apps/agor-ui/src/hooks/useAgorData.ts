@@ -52,18 +52,11 @@ import {
 import {
   buildById,
   buildSessionMaps,
-  type DataMaps,
   keepLiveWrites,
   type PartitionCollection,
 } from '../store/agorMaps';
 import * as realtime from '../store/agorRealtimeActions';
-import {
-  agorStore,
-  type LoadMetaUpdate,
-  shallow,
-  useStoreWithEqualityFn,
-  withGloballyHydrated,
-} from '../store/agorStore';
+import { agorStore, shallow, useStoreWithEqualityFn } from '../store/agorStore';
 import {
   claimBoardPartition,
   claimDisplayedBoardForResync,
@@ -99,9 +92,7 @@ import {
   boardPartitionScope,
   boardScopeKey,
   type Coverage,
-  globalHydrationEnabled,
   replaceScope,
-  setGlobalHydrationEnabled,
   withoutBoardPartitions,
 } from '../store/scopeMerge';
 import { resetSessionMcpLinks } from '../store/sessionMcpLinks';
@@ -150,43 +141,12 @@ const INITIAL_LOAD_ITEMS = [
 
 export type InitialLoadItemKey = (typeof INITIAL_LOAD_ITEMS)[number]['key'];
 
-// First-paint bound for the global (non-board-scoped) sessions slice. Covers
-// Home's "My Sessions" + "Team activity" feeds (both show only recent items)
-// and seeds enough of `sessionById` to resolve `/s/<id>` deep links. The FULL
-// session set is background-hydrated a beat later (see `fetchData`), so
-// genealogy / GlobalSearch / per-board counts converge without blocking the
-// gate. Sessions are the unbounded-with-activity collection, so this is the
-// single most important cap for first-paint latency on a busy workspace.
-//
 // Every session list read that feeds the store is `lean: true`: rows omit the
 // bulky single-session `custom_context` keys (LEAN_SESSION_LIST_OMITTED_CONTEXT_KEYS)
 // and carry the `read_shape` marker, so `sessionById` holds summaries and must
 // never be the source for those keys (see `DataMaps.sessionById`). The open
 // session reads them from its full `sessions.get` (the reactive session /
 // settings modal / zone trigger).
-const RECENT_SESSIONS_LIMIT = 50;
-
-// Longest the global snapshots wait for the user scope (U1 and its follow-up
-// id reads) before starting anyway; see `hydrateGlobalSets`' start below.
-const GLOBAL_SETS_SCOPE_HOLD_MS = 10_000;
-
-/**
- * A quiet global snapshot makes every board complete for its collection (the
- * Steps 1–2 shortcut, `globalSetsMembers`); it is marked in the update that
- * applies the snapshot.
- */
-const markGlobalSet =
-  (collection: 'sessions' | 'branches'): LoadMetaUpdate =>
-  (_maps, state) => ({
-    globallyHydrated: withGloballyHydrated(state.globallyHydrated, [collection]),
-  });
-
-// Global session and branch hydration (Steps 1–2): the background full sets
-// after first paint, and a reconnect resync's full reads. Off, a reconnect
-// resyncs through the scope replaces alone — the user scope and the
-// displayed board — which is the path 3.3 keeps. Test-only switch until 3.3
-// deletes the global loops.
-export const setGlobalHydrationForTests = setGlobalHydrationEnabled;
 
 // Items the Home first paint gates on. Board objects and cards are only needed
 // to paint a canvas, so Home does not read them at all; a board loads its own
@@ -251,8 +211,8 @@ function parseEntityPath(pathname: string): ParsedEntityPath {
 // `parseEntityPath` never matches them. Each still displays a single board at
 // first paint, so match them here: a cold deep-link then resolves its board
 // scope and triggers the targeted full-board `get`. Without this the load
-// falls back to a GLOBAL first paint and `board.objects` stays undefined until
-// the background boards hydration lands.
+// paints with no board scope and `board.objects` stays undefined until the
+// board's partition loads.
 const MOBILE_PATH_RE = /\/m\/(board|session|comments)\/([^/]+)/;
 
 // Resolve the board the app will ACTUALLY display on first paint from the
@@ -594,10 +554,6 @@ export function useAgorData(
       // The scope and the partition record carry this same lifetime, never
       // whatever authority is current when they run (a remount can swap it).
       const loadLifetime = captureLoadLifetime(fetchAuthorityScope) as LoadLifetime;
-      // A reconnect resync reads the global session and branch sets, or
-      // (global hydration off) only the scopes it replaces.
-      const globalResync = silent && globalHydrationEnabled();
-      const scopedResync = silent && !globalHydrationEnabled();
       const authorityIsCurrent = () =>
         isLoadLifetimeCurrent(loadLifetime, authorityScopeKeyRef.current);
       const runAuthorityHydration = (
@@ -736,68 +692,38 @@ export function useAgorData(
 
         // ── Essential gated fetches — LIGHT batch ───────────────────────
         // Tiny global collections (boards / users / repos / card-types stay
-        // global — bounded and small) plus a BOUNDED recent slice of sessions.
+        // global — bounded and small) plus a BOUNDED page of my sessions.
         // Awaited first so we can resolve the first-paint board scope BEFORE the
-        // board-scoped heavy batch. Sessions and branches are the two that scale
-        // (sessions unbounded with activity; hundreds of branches on a real
-        // workspace), so they are NOT fetched in full here: sessions are capped
-        // at recent-N, branches are deferred to the board-scoped heavy batch, and
-        // BOTH full sets are background-hydrated after the gate opens.
+        // board-scoped heavy batch. Sessions and branches are never read in
+        // full: the displayed board's load with it, and the user scope reads
+        // the rest of mine after paint (`userScope`).
         debugTimer?.startFetchPhase();
         // Set when the gated page of MY sessions returned fewer rows than its
         // limit, i.e. it already holds every active session I created.
         let gatedMineComplete = false;
-        // The global recent slice: the reconnect resync's full set and the
-        // standalone default.
-        const recentSessions = () =>
-          client
-            .service('sessions')
-            .find({
-              query: {
-                archived: false,
-                lean: true,
-                $limit: RECENT_SESSIONS_LIMIT,
-                $count: false,
-                $sort: { updated_at: -1 },
-              },
-            })
-            .then((result) => (Array.isArray(result) ? result : result.data) as Session[]);
         const [sessionsList, boardsList, cardTypesList, reposList, usersList] = await Promise.all([
           track(
             'sessions',
-            silent
-              ? globalResync
-                ? // Reconnect resyncs must fully repopulate every board, so they stay
-                  // GLOBAL/full (mirrors the heavy + hydration paths below).
-                  client.service('sessions').findAll({
-                    query: {
-                      archived: false,
-                      lean: true,
-                      $limit: PAGINATION.DEFAULT_LIMIT,
-                      $sort: { updated_at: -1 },
-                    },
+            !silent && authenticatedUserId
+              ? // My newest sessions (user scope, design r3 §3.1), served from
+                // SQL by `created_by`: correct however busy the rest of the
+                // workspace is. One page via find() (findAll would walk every
+                // page). The rest of mine load right after paint (`userScope`).
+                client
+                  .service('sessions')
+                  .find({ query: mySessionsQuery(authenticatedUserId, MY_SESSIONS_GATED_LIMIT) })
+                  .then((result) => {
+                    const rows = (Array.isArray(result) ? result : result.data) as Session[];
+                    gatedMineComplete = rows.length < MY_SESSIONS_GATED_LIMIT;
+                    return rows;
                   })
-                : // A scoped resync: the user scope's U1 and the displayed board read them.
-                  Promise.resolve([] as Session[])
-              : authenticatedUserId
-                ? // My newest sessions (user scope, design r3 §3.1), served from
-                  // SQL by `created_by`: correct however busy the rest of the
-                  // workspace is. One page via find() (findAll would walk every
-                  // page). The rest of mine load right after paint (`userScope`).
-                  client
-                    .service('sessions')
-                    .find({ query: mySessionsQuery(authenticatedUserId, MY_SESSIONS_GATED_LIMIT) })
-                    .then((result) => {
-                      const rows = (Array.isArray(result) ? result : result.data) as Session[];
-                      gatedMineComplete = rows.length < MY_SESSIONS_GATED_LIMIT;
-                      return rows;
-                    })
-                    .catch((err) => {
-                      // Non-fatal: U1 reads every session of mine after paint.
-                      console.warn('[useAgorData] my-sessions page failed:', err);
-                      return [] as Session[];
-                    })
-                : recentSessions()
+                  .catch((err) => {
+                    // Non-fatal: U1 reads every session of mine after paint.
+                    console.warn('[useAgorData] my-sessions page failed:', err);
+                    return [] as Session[];
+                  })
+              : // A resync: the user scope's U1 and the displayed board read them.
+                Promise.resolve([] as Session[])
           ),
           track(
             'boards',
@@ -835,15 +761,14 @@ export function useAgorData(
         const healedBranches: Branch[] = [];
 
         // Direct /s/<id>/ opens should work for archived sessions without broadening
-        // the recent-session slice. If it missed the URL target, fetch just that
+        // the gated page. If it missed the URL target, fetch just that
         // session by ID/short ID. Do not await a separate branches.get here:
         // sessions carry branch_board_id for board resolution, and the scoped
-        // branch batch / authority-fenced background hydration below loads active
-        // branches. Optional branch enrichment must not block session first paint.
-        // Older responses without branch_board_id use global background hydration.
+        // branch batch below loads active branches. Optional branch enrichment
+        // must not block session first paint.
         if (
           directSessionId &&
-          !scopedResync &&
+          !silent &&
           !hasIdMatchingPrefix(directSessionId, sessionsList, (s) => s.session_id)
         ) {
           try {
@@ -861,10 +786,9 @@ export function useAgorData(
         // The board the app will ACTUALLY display, resolved from the current URL
         // with the same slug/short-id resolvers `useUrlState` uses (NOT
         // localStorage — the displayed board can differ from the stored one, e.g.
-        // a `/b/<other>/` deep link). undefined → GLOBAL (unscoped) first paint,
-        // always correct: Home, `/a/` artifact links, or any unresolvable target.
-        // A silent reconnect resyncs sessions and branches GLOBALLY, and the
-        // displayed board's partition in place.
+        // a `/b/<other>/` deep link). undefined → no board scope, always
+        // correct: Home, `/a/` artifact links, or any unresolvable target.
+        // A silent reconnect resyncs the displayed board's partition in place.
         const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
 
         // Direct /w/<id>/ branch opens: heal that branch so the board chains
@@ -916,8 +840,8 @@ export function useAgorData(
         const interimSessionById = buildSessionMaps(sessionsList).sessionById;
 
         // A session route: start its transcript now, concurrently with the
-        // board-scoped batch, and hold the global hydration below until its
-        // first page lands so multi-megabyte snapshots don't queue ahead of it.
+        // board-scoped batch, and hold the user scope's bulk U1 read until its
+        // first page lands (below).
         const openedSessionId =
           !silent && directSessionId
             ? resolveSessionFromShortIdPure(directSessionId, interimSessionById)
@@ -974,12 +898,8 @@ export function useAgorData(
         // ── Essential gated fetches — HEAVY + board-scoped batch ────────
         // Scoped to the displayed board when resolved (board_id pushes to SQL
         // for sessions / board-objects; cards filter it server-side). On a real
-        // workspace this trims thousands of rows to one board's. A silent
-        // reconnect fetches branches GLOBAL/full to resync; sessions were
-        // already fetched full in the silent light batch above, so the extra
-        // board-session fetch is skipped there. A scoped resync reads the
-        // board's branches and sessions like first paint does. Board objects
-        // and cards stay board-scoped on a reconnect too.
+        // workspace this trims thousands of rows to one board's. A reconnect
+        // resync reads the board's rows like first paint does.
         const [
           branchesList,
           boardSessionsList,
@@ -990,24 +910,19 @@ export function useAgorData(
         ] = await Promise.all([
           track(
             'branches',
-            globalResync
+            boardScope
               ? client.service('branches').findAll({
-                  query: { archived: false, $limit: PAGINATION.DEFAULT_LIMIT },
+                  query: {
+                    archived: false,
+                    board_id: boardScope,
+                    $limit: PAGINATION.DEFAULT_LIMIT,
+                  },
                 })
-              : boardScope
-                ? client.service('branches').findAll({
-                    query: {
-                      archived: false,
-                      board_id: boardScope,
-                      $limit: PAGINATION.DEFAULT_LIMIT,
-                    },
-                  })
-                : Promise.resolve([] as Branch[])
+              : Promise.resolve([] as Branch[])
           ),
-          // Board-scoped sessions: only when a board is displayed and we didn't
-          // already fetch the full set (global resync). Merged with the recent
-          // slice below. Not tracked — not part of the loading checklist.
-          !globalResync && boardScope
+          // Board-scoped sessions: only when a board is displayed. Merged with
+          // my sessions below. Not tracked — not part of the loading checklist.
+          boardScope
             ? client.service('sessions').findAll({
                 query: {
                   archived: false,
@@ -1105,7 +1020,7 @@ export function useAgorData(
 
         // Replace the displayed board's LEAN row with its FULL record so the
         // visible canvas paints zones/text/markdown at first paint (no flash).
-        // Other boards stay lean until the boards background hydration lands.
+        // Other boards stay lean until their partition loads.
         if (displayedBoardFull) {
           boardsMap.set(displayedBoardFull.board_id, displayedBoardFull);
         } else if (boardScope && live.boardById.has(boardScope)) {
@@ -1125,9 +1040,9 @@ export function useAgorData(
         }
         keepLiveWrites(boardsMap, live.boardById, touchedSinceLoad('boards'));
 
-        // Merge the recent session slice with the board-scoped sessions (dedup by
-        // id) for first paint, then build both session lookups (incl. remote
-        // surrogates). The FULL session set is background-hydrated below.
+        // Merge my sessions with the board-scoped sessions (dedup by id) for
+        // first paint, then build both session lookups (incl. remote
+        // surrogates).
         const firstPaintSessions = new Map<string, Session>();
         for (const session of sessionsList) {
           firstPaintSessions.set(session.session_id, session);
@@ -1156,8 +1071,8 @@ export function useAgorData(
         const { sessionById: sessionsById, sessionsByBranch: sessionsByBranchId } =
           buildSessionMaps([...firstPaintSessions.values()]);
 
-        // Branch map for first paint: the board-scoped (or silent-global) set,
-        // plus any deep-link-healed branches. The FULL set is hydrated below.
+        // Branch map for first paint: the board-scoped set, plus any
+        // deep-link-healed branches.
         const branchesMap = new Map<string, Branch>();
         for (const branch of branchesList) {
           branchesMap.set(branch.branch_id, branch);
@@ -1203,16 +1118,14 @@ export function useAgorData(
         const boardStart = (boardFence ?? firstPaintFence).startRevisions;
         const touchedInLoad = (collection: PartitionCollection, id: string) =>
           touchedSince(collection, id, boardStart[collection]);
-        // The displayed board's read (every query an unbounded `findAll`; a
-        // global resync reads branches and sessions globally, so they are
-        // narrowed to the board). It reconciles the board and, when the full
-        // record arrived, settles its partition in the same update, with this
-        // membership.
+        // The displayed board's read (every query an unbounded `findAll`). It
+        // reconciles the board and, when the full record arrived, settles its
+        // partition in the same update, with this membership.
         const boardRows =
           boardScope && !reusedPartitionLoad
             ? {
                 branches: branchesList.filter((branch) => branch.board_id === boardScope),
-                sessions: (globalResync ? sessionsList : boardSessionsList).filter(
+                sessions: boardSessionsList.filter(
                   (session) => boardIdForSession(session, branchesMap) === boardScope
                 ),
                 boardObjects: canUseMemberWorkspaceServices ? (boardObjectsList ?? []) : null,
@@ -1234,10 +1147,10 @@ export function useAgorData(
           (prev) => {
             const maps = {
               ...prev,
-              // A scoped resync keeps the session and branch sets: the
-              // displayed board's replace below and the user scope's
-              // reconcile the rows they claim.
-              ...(scopedResync
+              // A resync keeps the session and branch sets: the displayed
+              // board's replace below and the user scope's reconcile the rows
+              // they claim.
+              ...(silent
                 ? {}
                 : {
                     sessionById: sessionsById,
@@ -1271,18 +1184,6 @@ export function useAgorData(
             ? (_maps, state) => ({
                 // The reset orphans partition loads in flight (`partitionEpoch`).
                 partitionEpoch: state.partitionEpoch + 1,
-                // A global resync reads the session and branch sets in full:
-                // a complete global snapshot, like the background hydrations'
-                // applies. Board objects, cards and full board records are
-                // complete only per board (its partition).
-                ...(globalResync
-                  ? {
-                      globallyHydrated: withGloballyHydrated(state.globallyHydrated, [
-                        'sessions',
-                        'branches',
-                      ]),
-                    }
-                  : {}),
               })
             : undefined
         );
@@ -1292,16 +1193,12 @@ export function useAgorData(
         // resync: an in-flight hydration whose snapshot predates the disconnect
         // would otherwise pass its quiet check and clobber this newer reconnect
         // snapshot (resurrecting data that changed while we were disconnected).
-        // The background hydrations kicked off below re-snapshot AFTER this bump,
-        // so they're unaffected.
         bumpFirstPaintMergeRevisions();
         // User scope (design r3 §3): the rest of my sessions, my branches, every
         // teammate I can view, and the branches my sessions and comment
-        // threads reference. Started BEFORE the background global hydrations
-        // so its small reads aren't queued behind multi-megabyte snapshots.
-        // On a session route only its bulk U1 read is held behind the opened
-        // transcript like the global sets below: Home and the teammate
-        // surfaces must not wait for a transcript. Starting after first paint
+        // threads reference. On a session route only its bulk U1 read is held
+        // behind the opened transcript: Home and the teammate surfaces must
+        // not wait for a transcript. Starting after first paint
         // keeps the small reads behind the transcript's stream/get/tasks reads
         // (sent with the board-scoped batch); only its messages page, which
         // needs the tasks response, can follow them. Re-run as a replace on
@@ -1343,135 +1240,6 @@ export function useAgorData(
 
         debugTimer?.endIndexing();
         debugFinishStatus = 'success';
-
-        // ── Background full hydration (skip-apply-on-race) ──────────────
-        // First paint is now open with ONLY the recent sessions + the displayed
-        // board's branches/sessions/objects/cards. Pull the FULL session and
-        // branch sets so per-board counts, the board switcher, GlobalSearch,
-        // the branch-list drawer, facepiles and session genealogy (which can
-        // span boards) see everything a beat later. Board objects, cards and
-        // full board records are never read globally: each board's load with
-        // its partition (`useBoardPartition`).
-        //
-        // Correctness: this runs WHILE the app is interactive, so a realtime
-        // create/patch/remove can land during a global fetch. `runHydration`
-        // applies the fetched snapshot WHOLESALE only when no live write to the
-        // listed collection(s) raced the fetch (revision counters unchanged) —
-        // a wholesale apply of a quiet snapshot can neither clobber a live
-        // create/patch (none happened) nor resurrect a live remove (a remove
-        // would have bumped the counter → no apply). If a write raced, the
-        // snapshot is discarded and refetched; we never overlay a racy snapshot.
-
-        const hydrateGlobalSets = () => {
-          // Sessions + branches: now ALWAYS bounded at first paint (my newest
-          // N / board-scoped), so hydrate them on every non-silent load (silent
-          // reconnect already fetched them full above). repos / users / lean
-          // boards / card-types / comments stay global at first paint, so they
-          // need no top-up.
-          //
-          // Sessions and branches hydrate on INDEPENDENT loops (separate fetches,
-          // separate revision guards, separate generation tokens). Coupling them
-          // in a single runHydration would let high-frequency session-write churn
-          // (common when agents stream) starve the branch apply indefinitely — and
-          // on Home, branches start empty and are filled ONLY by this hydration, so
-          // coupling could leave the board empty forever. On independent loops,
-          // branches apply on their own quiet window (almost immediately)
-          // regardless of session churn.
-          if (!silent && globalHydrationEnabled()) {
-            void runAuthorityHydration(
-              'sessions',
-              ['sessions'],
-              () =>
-                client.service('sessions').findAll({
-                  query: {
-                    archived: false,
-                    lean: true,
-                    $limit: PAGINATION.DEFAULT_LIMIT,
-                    $sort: { updated_at: -1 },
-                  },
-                }),
-              (allSessions) => {
-                const fromSnapshot = (prev: DataMaps): DataMaps => {
-                  // The hydration fetches active sessions only. Deep-link-healed
-                  // archived sessions (added to `sessionById` so a direct /s/<id>
-                  // archived link can open the drawer) are OUT of that query's
-                  // domain — never in branch buckets, so they don't affect board
-                  // rendering — so carry them over rather than dropping them. This
-                  // is domain-completion, NOT race reconciliation: the race
-                  // correctness comes entirely from the quiet-window guarantee.
-                  const sessions = new Map<string, Session>();
-                  for (const session of allSessions) sessions.set(session.session_id, session);
-                  for (const [id, session] of prev.sessionById) {
-                    if (session.archived && !sessions.has(id)) sessions.set(id, session);
-                  }
-                  // Reconcile against the current maps so a wholesale apply of
-                  // already-loaded sessions reuses prior refs (no board-wide
-                  // re-render). This is the hot path on a busy workspace: the
-                  // full-session hydration lands right as the user enters a board.
-                  const { sessionById, sessionsByBranch } = buildSessionMaps(
-                    [...sessions.values()],
-                    {
-                      sessionById: prev.sessionById,
-                      sessionsByBranch: prev.sessionsByBranch,
-                    }
-                  );
-                  return { ...prev, sessionById, sessionsByBranch };
-                };
-                agorStore.getState().applyMaps(fromSnapshot, undefined, markGlobalSet('sessions'));
-              }
-            );
-            void runAuthorityHydration(
-              'branches',
-              ['branches'],
-              () =>
-                client
-                  .service('branches')
-                  .findAll({ query: { archived: false, $limit: PAGINATION.DEFAULT_LIMIT } }),
-              (allBranches) => {
-                // Quiet window proven by runHydration → apply wholesale. Branches
-                // are active-only (the snapshot query is archived:false and the
-                // handlers never keep an archived branch), so a wholesale replace
-                // is complete.
-                agorStore.getState().applyMaps(
-                  (prev) => ({
-                    ...prev,
-                    branchById: buildById(allBranches, 'branch_id', prev.branchById),
-                  }),
-                  undefined,
-                  markGlobalSet('branches')
-                );
-              }
-            );
-          }
-        };
-        // On a session route, the global sets wait for the opened transcript
-        // (bounded by the prefetch timeout). A cancellation at any point of
-        // this load (unmount, authority change, logout) skips the deferred
-        // start — `authorityIsCurrent` includes the load's epoch.
-        if (openedTranscriptReady) {
-          void openedTranscriptReady.then(() => {
-            if (!authorityIsCurrent()) return;
-            hydrateGlobalSets();
-          });
-        } else if (userScopeSettled && !silent) {
-          // Elsewhere the global sets wait for the user scope — U1 and the id
-          // reads for the branches only U1 references — so Home's counts
-          // don't queue behind multi-megabyte snapshots on a slow socket.
-          // Bounded: a stalled scope read never withholds the global sets.
-          let holdTimer: ReturnType<typeof setTimeout> | undefined;
-          void Promise.race([
-            userScopeSettled.catch(() => undefined),
-            new Promise<void>((resolve) => {
-              holdTimer = setTimeout(resolve, GLOBAL_SETS_SCOPE_HOLD_MS);
-            }),
-          ]).then(() => {
-            clearTimeout(holdTimer);
-            if (!authorityIsCurrent()) return;
-            hydrateGlobalSets();
-          });
-        } else {
-          hydrateGlobalSets();
-        }
 
         // Silent refetch succeeded — clear the retry flag so future token
         // refreshes don't trigger another wasted re-fetch.
@@ -1757,9 +1525,9 @@ export function useAgorData(
     // keyed queue's tombstones keep a deferred patch from resurrecting a
     // session a synchronous `removed` just deleted (see `realtimeBatch`).
     const sessionsService = client.service('sessions');
-    // Keep the skip-apply-on-race revision bump SYNCHRONOUS — the background
-    // hydration's quiet-window guard, and the queue's own stale-drop stamp, both
-    // depend on the bump landing the instant the event does, not a frame later.
+    // Keep the revision bump SYNCHRONOUS — the loads' per-id touched fences,
+    // and the queue's own stale-drop stamp, both depend on the bump landing
+    // the instant the event does, not a frame later.
     const sessionPatchedBatched = (session: Session) => {
       if (!subscriptionIsCurrent()) return;
       bumpRevision('sessions');

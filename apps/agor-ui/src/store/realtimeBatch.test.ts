@@ -24,10 +24,12 @@ const AUTHORITY = 'user-a:member:1';
 // The keyed session-patch queue writes through the real store, so these are
 // small integration tests: seed the store, drive the queue, assert the maps.
 
+// The caller's own sessions: the user scope holds them, so realtime admits them.
 const makeSession = (overrides: Partial<Session> = {}): Session =>
   ({
     session_id: 's-1',
     branch_id: 'b-1',
+    created_by: 'user-a',
     status: 'idle',
     archived: false,
     created_at: '2026-06-24T00:00:00.000Z',
@@ -209,7 +211,11 @@ describe('realtimeBatch — keyed session-patch queue', () => {
     bumpRevision('sessions');
     enqueueSessionPatch(
       replacementAuthority,
-      makeSession({ session_id: 's-b' as Session['session_id'], status: 'completed' })
+      makeSession({
+        session_id: 's-b' as Session['session_id'],
+        created_by: 'user-b',
+        status: 'completed',
+      })
     );
     flushRealtimeNow(AUTHORITY);
 

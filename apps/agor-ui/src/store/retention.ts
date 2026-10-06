@@ -23,7 +23,6 @@ import {
   belongs,
   type Coverage,
   type CoverageCollection,
-  globalHydrationEnabled,
   isUserScopeKey,
   type LoadScope,
   replaceScope,
@@ -140,7 +139,7 @@ export function pinRows(ids: PinnedIds): () => void {
       branches: (branch) => unpinned.branches.has(branch.branch_id),
     });
     // Links of a pinned session that never loaded (`holdsSession`).
-    if (!globalHydrationEnabled()) forgetAbsentSessions(unpinned.sessions);
+    forgetAbsentSessions(unpinned.sessions);
   };
 }
 
@@ -175,12 +174,11 @@ export function holdRows(): RowHold {
  * pin, and no scope loading or loaded under the current lifetime that claims
  * them (`joinableScopes`). That is a row the write inserted, and a present
  * row it moved out of every scope (pass a moved branch's sessions too,
- * `withBranchSessions`). While the global sets exist (Steps 1–2) they hold
- * every row, so everything is admitted. Drop the MCP state of the sessions
- * it removed with `forgetAbsentSessions`.
+ * `withBranchSessions`). Drop the MCP state of the sessions it removed with
+ * `forgetAbsentSessions`.
  */
 export function admitHeld(prev: DataMaps, next: DataMaps, written: WrittenIds): DataMaps {
-  if (next === prev || globalHydrationEnabled()) return next;
+  if (next === prev) return next;
   let scopes: LoadScope[] | null = null;
   const held = (collection: CoverageCollection, id: string) => {
     if (pinnedMembers[collection]?.has(id)) return true;
@@ -224,13 +222,8 @@ export function forgetAbsentSessions(sessionIds: Iterable<string>): void {
 
 /**
  * Whether something holds session `id`, so its MCP links may enter: it is in
- * the store (admitted, `admitHeld`), or a pin holds it. While the global sets
- * exist (Steps 1–2), every session.
+ * the store (admitted, `admitHeld`), or a pin holds it.
  */
 export function holdsSession(id: string): boolean {
-  return (
-    globalHydrationEnabled() ||
-    agorStore.getState().sessionById.has(id) ||
-    !!pinnedMembers.sessions?.has(id)
-  );
+  return agorStore.getState().sessionById.has(id) || !!pinnedMembers.sessions?.has(id);
 }

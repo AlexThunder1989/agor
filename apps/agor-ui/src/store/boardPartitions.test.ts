@@ -15,7 +15,6 @@ import {
   cancelAllHydrations,
   endPartitionLoad,
   resetHydrationRevisions,
-  runHydration,
   touchedSince,
 } from './agorHydration';
 import { EMPTY_MAPS } from './agorMaps';
@@ -669,7 +668,7 @@ describe('loadBoardPartition', () => {
     expect(state.sessionById.get('s-1')?.title).toBe('fresh');
   });
 
-  it('only committed members of other current, loaded scopes (and the global sets) keep rows', () => {
+  it('only committed members of other current, loaded scopes keep rows', () => {
     const lifetime = captureLoadLifetime()!;
     const entry = (status: 'loading' | 'loaded' | 'error', id: string) => ({
       status,
@@ -688,17 +687,14 @@ describe('loadBoardPartition', () => {
       ...entry('loaded', 's-stale'),
       authorityScope: 'user-a:member:0',
     });
-    const holds = (id: string, collection: 'sessions' | 'branches' = 'sessions') =>
+    const holds = (id: string) =>
       otherCommittedMembers(agorStore.getState(), boardScopeKey(BOARD)).some((members) =>
-        members[collection]?.has(id)
+        members.sessions?.has(id)
       );
     expect(['s-1', 's-2', 's-3', 's-4', 's-mine', 's-stale'].filter((id) => holds(id))).toEqual([
       's-2',
       's-mine',
     ]);
-    agorStore.getState().markGloballyHydrated(['sessions']);
-    expect(holds('s-any')).toBe(true);
-    expect(holds('br-any', 'branches')).toBe(false);
   });
 });
 
@@ -945,22 +941,6 @@ describe('board readiness', () => {
   it('is not ready from an incomplete read', () => {
     agorStore.getState().setCoverage(boardScopeKey(BOARD), { ...boardCoverage(), complete: false });
     expect(makeBoardReadySelector(BOARD)(agorStore.getState())).toBe(false);
-  });
-
-  it('never treats a board as ready from global snapshots: only its partition', async () => {
-    // Each global apply marks its set (as `useAgorData`'s do).
-    for (const c of ['sessions', 'branches'] as const) {
-      await runHydration(
-        c,
-        [c],
-        async () => [],
-        () => agorStore.getState().markGloballyHydrated([c])
-      );
-    }
-    expect(agorStore.getState().globallyHydrated.size).toBe(2);
-    expect(makeBoardReadySelector('board-2')(agorStore.getState())).toBe(false);
-    markBoardLoaded('board-2');
-    expect(makeBoardReadySelector('board-2')(agorStore.getState())).toBe(true);
   });
 
   it('resets with the maps on an identity change', () => {

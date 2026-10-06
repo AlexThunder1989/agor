@@ -289,10 +289,9 @@ export const resetHydrationRevisions = (): void => {
   wholesaleEpoch += 1;
 };
 
-// Monotonic epoch for hydrations that are SCHEDULED but not yet started (the
-// global full-set hydration deferred behind the opened session's transcript).
-// Every cancellation path bumps it, so a deferred start that outlives its load
-// (unmount, authority change, logout) is skipped instead of starting loops.
+// Monotonic epoch of load lifetimes (`loadLifetime.ts`). Every cancellation
+// path bumps it, so work deferred past an await that outlives its load
+// (unmount, authority change, logout) is skipped instead of applying.
 let cancellationEpoch = 0;
 
 /** Current cancellation epoch; capture before deferring a hydration start. */

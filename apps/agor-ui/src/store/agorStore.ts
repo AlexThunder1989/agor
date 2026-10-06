@@ -50,31 +50,6 @@ export type ItemCounts = Partial<Record<InitialLoadItemKey, number>>;
 export type GatedHydrationFlag = 'mcpServersHydrated' | 'gatewayChannelsHydrated';
 
 /**
- * Collections loaded globally in the background (Steps 1–2; removed in 3.3).
- * Board objects, cards and full board records load per board only.
- */
-export type GloballyHydratedCollection = 'sessions' | 'branches';
-export const GLOBALLY_HYDRATED_COLLECTIONS: readonly GloballyHydratedCollection[] = [
-  'sessions',
-  'branches',
-];
-
-/** `current` with the globally hydrated ones of `collections` added; itself when nothing changes. */
-export function withGloballyHydrated(
-  current: ReadonlySet<GloballyHydratedCollection>,
-  collections: readonly string[]
-): Set<GloballyHydratedCollection> {
-  const additions = collections.filter(
-    (c): c is GloballyHydratedCollection =>
-      (GLOBALLY_HYDRATED_COLLECTIONS as readonly string[]).includes(c) &&
-      !current.has(c as GloballyHydratedCollection)
-  );
-  return additions.length === 0
-    ? (current as Set<GloballyHydratedCollection>)
-    : new Set([...current, ...additions]);
-}
-
-/**
  * User-scope state outside its coverage entries (`userScope.ts`); whether each
  * piece is loaded or capped lives in `coverage` (`USER_SCOPE_KEYS`).
  */
@@ -123,8 +98,6 @@ interface AgorMeta {
    * board, so loads dedupe per epoch and the board is requested again.
    */
   partitionEpoch: number;
-  /** Collections whose global snapshot has applied at least once. */
-  globallyHydrated: Set<GloballyHydratedCollection>;
   /**
    * Sessions whose MCP links are loaded (`sessionMcpLinks.ts`). For any other
    * session `sessionMcpServerIds` may be partial: "not loaded" is not "none".
@@ -211,8 +184,6 @@ interface AgorActions {
    * User-scope entries are kept: they belong to the identity.
    */
   resetBoardPartitions: (keep?: readonly string[]) => void;
-  /** Record that a global snapshot of these collections has applied. */
-  markGloballyHydrated: (collections: readonly string[]) => void;
   /** Record that one session's MCP links are loaded. */
   markSessionMcpLoaded: (sessionId: string) => void;
   /** Forget which sessions' MCP links are loaded and bump their epoch. */
@@ -231,13 +202,10 @@ export type AgorState = DataMaps & AgorMetaWithUserScope & AgorActions;
 
 /**
  * Load meta that describes rows the way coverage does: referenced branches
- * that are absent, the global sets that applied, the partition epoch, and the
- * sessions whose MCP links are loaded. A load publishes it with its rows.
+ * that are absent, the partition epoch, and the sessions whose MCP links are
+ * loaded. A load publishes it with its rows.
  */
-export type LoadMeta = Pick<
-  AgorState,
-  'absentBranchIds' | 'globallyHydrated' | 'partitionEpoch' | 'sessionMcpLoaded'
->;
+export type LoadMeta = Pick<AgorState, 'absentBranchIds' | 'partitionEpoch' | 'sessionMcpLoaded'>;
 /** A load-meta change published in the same store update as a maps change. */
 export type LoadMetaUpdate = (maps: DataMaps, state: AgorState) => Partial<LoadMeta>;
 
@@ -302,7 +270,6 @@ const INITIAL_META: AgorMetaWithUserScope = {
   agenticToolSettingsHydrated: false,
   coverage: new Map(),
   partitionEpoch: 0,
-  globallyHydrated: new Set(),
   sessionMcpLoaded: new Set(),
   sessionMcpEpoch: 0,
   dataAuthority: null,
@@ -319,7 +286,6 @@ export const agorStore = createStore<AgorState>()(
         ...INITIAL_META,
         coverage: new Map(),
         partitionEpoch: get().partitionEpoch + 1,
-        globallyHydrated: new Set(),
         absentBranchIds: new Set(),
         missingLinkTargets: new Set(),
         sessionMcpLoaded: new Set(),
@@ -338,7 +304,6 @@ export const agorStore = createStore<AgorState>()(
         // Coverage describes the maps being cleared, so it resets with them.
         coverage: new Map(),
         partitionEpoch: get().partitionEpoch + 1,
-        globallyHydrated: new Set(),
         sessionMcpLoaded: new Set(),
         ...INITIAL_USER_SCOPE,
         absentBranchIds: new Set(),
@@ -397,10 +362,6 @@ export const agorStore = createStore<AgorState>()(
         coverage: withoutBoardPartitions(get().coverage, keep),
         partitionEpoch: get().partitionEpoch + 1,
       });
-    },
-    markGloballyHydrated: (collections) => {
-      const globallyHydrated = withGloballyHydrated(get().globallyHydrated, collections);
-      if (globallyHydrated !== get().globallyHydrated) set({ globallyHydrated });
     },
     markSessionMcpLoaded: (sessionId) => {
       const current = get().sessionMcpLoaded;

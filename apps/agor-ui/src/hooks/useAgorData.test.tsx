@@ -38,7 +38,7 @@ import {
   selectTeammatesTruncated,
 } from '../store/userScope';
 import { markBoardLoaded } from '../test/userScopeCoverage';
-import { setGlobalHydrationForTests, useAgorData } from './useAgorData';
+import { useAgorData } from './useAgorData';
 import { useBoardPartition } from './useBoardPartition';
 
 // The opened-transcript prefetch retains a real reactive session; the mock
@@ -70,10 +70,9 @@ type Listener = (payload: unknown) => void;
 
 /**
  * `seed` is keyed by service name (e.g. `sessions`) and consulted by both
- * `findAll` and `find`. For the background-hydration tests the gated first-paint
- * fetch (`find`) and the full hydration fetch (`findAll`) need DIFFERENT data,
- * so a method-specific key (`sessions:findAll`, `sessions:find`) takes
- * precedence over the bare name when present. `name:get` seeds `get`. A seed
+ * `findAll` and `find`. When a page read (`find`) and a full read (`findAll`)
+ * need DIFFERENT data, a method-specific key (`sessions:findAll`,
+ * `sessions:find`) takes precedence over the bare name when present. `name:get` seeds `get`. A seed
  * may also be a function of the call's query (a scoped server, see `fakeServer`).
  */
 function makeMockClient(seed: Record<string, unknown[]> = {}) {
@@ -227,12 +226,6 @@ function fakeServer(seed: Record<string, unknown[]>, rows: { branches: Row[]; se
   return seed;
 }
 
-/** Run the test with global session and branch hydration off (the Step 3 path). */
-function withoutGlobalHydration() {
-  setGlobalHydrationForTests(false);
-  onTestFinished(() => setGlobalHydrationForTests(true));
-}
-
 /** Whether a branch or session read was unscoped (read the global set). */
 const globalReads = (reads: unknown[]) =>
   reads.filter((args) => {
@@ -253,8 +246,11 @@ function onBoardRoute(seed: Record<string, unknown[]>) {
   return seed;
 }
 
+// Rows live on `board-1` by default: on its route (`onBoardRoute`) its
+// partition holds them, so realtime writes to them are admitted.
 const makeBranch = (overrides: Record<string, unknown> = {}) => ({
   branch_id: 'b-1',
+  board_id: 'board-1',
   repo_id: 'r-1',
   name: 'main',
   status: 'idle',
@@ -265,6 +261,7 @@ const makeBranch = (overrides: Record<string, unknown> = {}) => ({
 const makeSession = (overrides: Record<string, unknown> = {}) => ({
   session_id: 's-1',
   branch_id: 'b-1',
+  branch_board_id: 'board-1',
   status: 'idle',
   archived: false,
   created_at: '2026-01-01T00:00:00Z',
@@ -294,11 +291,10 @@ async function waitForInitialLoad(result: { current: ReturnType<typeof useAgorDa
     expect(result.current.loading).toBe(false);
     expect(result.current.initialLoadComplete).toBe(true);
   });
-  // The first paint opens the gate, but the background hydration (sessions +
-  // branches, plus the optional mcp/gateway/artifact/oauth slices) is kicked
-  // off right after and applies a beat later — replacing those map slices
-  // WHOLESALE with the full snapshot, which changes their references even when
-  // content is identical. Flush a macrotask so it settles before tests capture
+  // The first paint opens the gate, but the background hydrations (the
+  // optional mcp/gateway/artifact/oauth slices) and the user scope are kicked
+  // off right after and apply a beat later, which changes map references even
+  // when content is identical. Flush a macrotask so it settles before tests capture
   // baseline references or emit events, otherwise reference-stability and
   // mutation assertions would race the hydration apply.
   await act(async () => {
@@ -587,7 +583,7 @@ describe('useAgorData — socket-event bailouts', () => {
 
   it('drops a duplicate `sessions.patched` (content-equal) without changing byId references', async () => {
     const session = makeSession();
-    const { client, emit } = makeMockClient({ sessions: [session] });
+    const { client, emit } = makeMockClient(onBoardRoute({ sessions: [session] }));
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
 
@@ -604,7 +600,7 @@ describe('useAgorData — socket-event bailouts', () => {
 
   it('updates byId references when a session field actually changes', async () => {
     const session = makeSession({ status: 'idle' });
-    const { client, emit } = makeMockClient({ sessions: [session] });
+    const { client, emit } = makeMockClient(onBoardRoute({ sessions: [session] }));
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
 
@@ -621,7 +617,7 @@ describe('useAgorData — socket-event bailouts', () => {
 
   it('updates branch-card session buckets when stop patches a running session idle', async () => {
     const session = makeSession({ status: 'running', ready_for_prompt: false });
-    const { client, emit } = makeMockClient({ sessions: [session] });
+    const { client, emit } = makeMockClient(onBoardRoute({ sessions: [session] }));
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
 
@@ -660,7 +656,7 @@ describe('useAgorData — socket-event bailouts', () => {
 
   it('drops a no-op `branches.patched` (idempotent content)', async () => {
     const branch = makeBranch();
-    const { client, emit } = makeMockClient({ branches: [branch] });
+    const { client, emit } = makeMockClient(onBoardRoute({ branches: [branch] }));
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
 
@@ -671,7 +667,7 @@ describe('useAgorData — socket-event bailouts', () => {
 
   it('updates branchById when a branch field flips', async () => {
     const branch = makeBranch({ name: 'main' });
-    const { client, emit } = makeMockClient({ branches: [branch] });
+    const { client, emit } = makeMockClient(onBoardRoute({ branches: [branch] }));
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
 
@@ -711,7 +707,7 @@ describe('useAgorData — socket-event bailouts', () => {
 
   it('drops a duplicate `sessions.created` for an existing id', async () => {
     const session = makeSession();
-    const { client, emit } = makeMockClient({ sessions: [session] });
+    const { client, emit } = makeMockClient(onBoardRoute({ sessions: [session] }));
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
 
@@ -727,7 +723,9 @@ describe('useAgorData — socket-event bailouts', () => {
   it('keeps unrelated byId maps reference-stable across a session patch', async () => {
     const session = makeSession({ status: 'idle' });
     const branch = makeBranch();
-    const { client, emit } = makeMockClient({ sessions: [session], branches: [branch] });
+    const { client, emit } = makeMockClient(
+      onBoardRoute({ sessions: [session], branches: [branch] })
+    );
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
 
@@ -747,7 +745,7 @@ describe('useAgorData — socket-event bailouts', () => {
 
   it('migrates a session between branches when branch_id changes', async () => {
     const session = makeSession({ session_id: 's-1', branch_id: 'b-1' });
-    const { client, emit } = makeMockClient({ sessions: [session] });
+    const { client, emit } = makeMockClient(onBoardRoute({ sessions: [session] }));
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
 
@@ -998,9 +996,11 @@ describe('useAgorData — socket-event bailouts', () => {
       branch_id: 'b-1',
       zone_id: 'zone-a',
     });
-    const { client, emit } = makeMockClient({ 'board-objects': [boardObject] });
+    const { client, emit } = makeMockClient(onBoardRoute({ 'board-objects': [boardObject] }));
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
+    // The object moves to board-2, whose loaded partition holds it there.
+    markBoardLoaded('board-2');
 
     act(() =>
       emit('board-objects', 'patched', {
@@ -1033,11 +1033,15 @@ describe('useAgorData — socket-event bailouts', () => {
       board_id: 'board-2',
       branch_id: 'b-2',
     });
-    const { client, emit } = makeMockClient({
-      'board-objects': [currentBoardObject, otherBoardObject],
-    });
+    const { client, emit } = makeMockClient(
+      onBoardRoute({
+        'board-objects': [currentBoardObject, otherBoardObject],
+      })
+    );
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
+    // board-2's loaded partition holds its object.
+    markBoardLoaded('board-2');
 
     const beforeCurrentBoardBucket = agorStore.getState().boardObjectsByBoardId.get('board-1');
 
@@ -1058,329 +1062,171 @@ describe('useAgorData — socket-event bailouts', () => {
 });
 
 /**
- * Background hydration uses a "skip-apply-on-race" rule (see `runHydration` /
- * `liveRevisionsRef` in useAgorData.ts): the full-set snapshot is applied
- * WHOLESALE only when no live write to the target collection raced the fetch.
- * If one did, the snapshot is discarded and refetched — never overlaid — and a
- * persistent race triggers repeated discard+refetch with capped exponential
- * backoff until a quiet window allows a wholesale apply: the apply is deferred,
- * never permanently skipped. These tests pin that contract (apply-on-quiet,
- * retry-until-quiet, no-resurrect, and per-collection independence) using
- * `onFetch` to land a live write mid-fetch.
- *
- * jsdom's pathname is `/`, so no board scope resolves: only the sessions+branches
- * (and the always-on mcp/gateway/artifact/oauth) hydrations run, while the gated
- * sessions fetch uses `find` and branches resolve to `[]` — so `sessions.findAll`
- * / `branches.findAll` are hit ONLY by the hydration, making call counts exact.
+ * Background hydration uses a "skip-apply-on-race" rule (see `runHydration`):
+ * a full-set snapshot is applied WHOLESALE only when no live write to the
+ * target collection raced the fetch. If one did, the snapshot is discarded and
+ * refetched — never overlaid — and a persistent race triggers repeated
+ * discard+refetch with capped exponential backoff until a quiet window allows
+ * a wholesale apply: the apply is deferred, never permanently skipped. These
+ * tests pin that contract on gateway channels (a collection that still
+ * hydrates in full), using `onFetch` to land a live write mid-fetch.
  */
 describe('useAgorData — skip-apply-on-race hydration', () => {
-  it('applies the full snapshot wholesale when no live write races (apply-on-quiet)', async () => {
-    const s1 = makeSession({ session_id: 's-1', branch_id: 'b-1' });
-    const s2 = makeSession({ session_id: 's-2', branch_id: 'b-1' });
-    const b1 = makeBranch({ branch_id: 'b-1' });
-    const { client, fetchArguments } = makeMockClient({
-      // Gated first paint sees only the recent slice; hydration sees the full set.
-      'sessions:find': [s1],
-      'sessions:findAll': [s1, s2],
-      'branches:findAll': [b1],
-    });
-    const { result } = renderHook(() => useAgorData(client));
-    await waitForInitialLoad(result);
-    expect(fetchArguments('sessions', 'find')).toContainEqual({
-      query: {
-        archived: false,
-        lean: true,
-        $limit: 50,
-        $count: false,
-        $sort: { updated_at: -1 },
-      },
-    });
-    for (const args of fetchArguments('sessions', 'findAll')) {
-      expect((args as { query: Record<string, unknown> }).query.$count).toBeUndefined();
-      // Store-feeding session lists never carry the bulky single-session context.
-      expect((args as { query: Record<string, unknown> }).query.lean).toBe(true);
-    }
-
-    expect(agorStore.getState().sessionById.has('s-1')).toBe(true);
-    // s-2 was absent from first paint and only arrives via the hydration.
-    expect(agorStore.getState().sessionById.has('s-2')).toBe(true);
-    expect(agorStore.getState().branchById.has('b-1')).toBe(true);
-    expect(
-      agorStore
-        .getState()
-        .sessionsByBranch.get('b-1')
-        ?.map((s) => s.session_id)
-        .sort()
-    ).toEqual(['s-1', 's-2']);
+  const channel = (id: string, overrides: Record<string, unknown> = {}) => ({
+    id,
+    name: id,
+    ...overrides,
   });
+  const has = (id: string) => agorStore.getState().gatewayChannelById.has(id);
 
   it('discards a racy snapshot, refetches, and applies the fresh one without clobbering the live write', async () => {
-    const s1 = makeSession({ session_id: 's-1', branch_id: 'b-1' });
-    const s2 = makeSession({ session_id: 's-2', branch_id: 'b-1' });
-    const s3 = makeSession({ session_id: 's-3', branch_id: 'b-1' });
+    const [g1, g2, g3] = [channel('g-1'), channel('g-2'), channel('g-3')];
     const { client, emit, onFetch, fetchCount } = makeMockClient({
-      'sessions:find': [s1],
       // Once the race settles, the backend's full set already includes the
-      // racing create (s-3) — models a real refetch reflecting the new row.
-      'sessions:findAll': [s1, s2, s3],
-      'branches:findAll': [],
+      // racing create (g-3) — models a real refetch reflecting the new row.
+      'gateway-channels': [g1, g2, g3],
     });
-    // A session is created mid-flight on the FIRST hydration fetch only.
-    onFetch('sessions', 'findAll', (call) => {
-      if (call === 1) emit('sessions', 'created', s3);
+    // A channel is created mid-flight on the FIRST hydration fetch only.
+    onFetch('gateway-channels', 'findAll', (call) => {
+      if (call === 1) emit('gateway-channels', 'created', g3);
     });
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
 
     // The first snapshot was discarded (it raced) and a second fetch applied.
-    expect(fetchCount('sessions', 'findAll')).toBe(2);
-    // The racing live create survived AND the hydration filled in s-2.
-    expect(agorStore.getState().sessionById.has('s-3')).toBe(true);
-    expect(agorStore.getState().sessionById.has('s-2')).toBe(true);
+    await waitFor(() => expect(has('g-2')).toBe(true));
+    expect(fetchCount('gateway-channels', 'findAll')).toBe(2);
+    expect(has('g-3')).toBe(true);
   });
 
   it('retries after races until a quiet window, then applies the fresh snapshot (never gives up)', async () => {
-    const s1 = makeSession({ session_id: 's-1', branch_id: 'b-1' });
-    const s2 = makeSession({ session_id: 's-2', branch_id: 'b-1' });
+    const g1 = channel('g-1');
     const { client, emit, onFetch, fetchCount } = makeMockClient({
-      'sessions:find': [s1],
-      'sessions:findAll': [s1, s2],
-      'branches:findAll': [],
+      'gateway-channels': [g1, channel('g-2')],
     });
     // Race the first two fetches, then go quiet — the third (immediate) retry
-    // sees a clean window and applies. The OLD code would have started skipping
-    // toward a permanent give-up; the new loop converges.
-    onFetch('sessions', 'findAll', (call) => {
-      if (call <= 2) emit('sessions', 'patched', { ...s1, status: `v${call}` });
+    // sees a clean window and applies.
+    onFetch('gateway-channels', 'findAll', (call) => {
+      if (call <= 2) emit('gateway-channels', 'patched', { ...g1, name: `v${call}` });
     });
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
 
-    await waitFor(() => expect(agorStore.getState().sessionById.has('s-2')).toBe(true), {
-      timeout: 4000,
-    });
+    await waitFor(() => expect(has('g-2')).toBe(true), { timeout: 4000 });
     // Applied on the first quiet window (3rd attempt) — not skipped forever.
-    expect(fetchCount('sessions', 'findAll')).toBe(3);
+    expect(fetchCount('gateway-channels', 'findAll')).toBe(3);
   });
 
-  it('keeps retrying past the old bounded cap without resurrecting a removed session (never skips)', async () => {
-    const s1 = makeSession({ session_id: 's-1', branch_id: 'b-1' });
-    const s2 = makeSession({ session_id: 's-2', branch_id: 'b-1' });
+  it('keeps retrying past the old bounded cap without resurrecting a removed row (never skips)', async () => {
+    const [g1, g2] = [channel('g-1'), channel('g-2')];
     const { client, emit, onFetch, fetchCount } = makeMockClient({
-      'sessions:find': [s1, s2],
-      // Stale backend snapshot ALWAYS still contains s-2: if it were ever applied
-      // it would resurrect the removed session.
-      'sessions:findAll': [s1, s2],
-      'branches:findAll': [],
+      // Stale backend snapshot ALWAYS still contains g-2: if it were ever
+      // applied it would resurrect the removed channel.
+      'gateway-channels': [g1, g2],
     });
-    onFetch('sessions', 'findAll', (call) => {
-      // Remove s-2 during the first fetch, then bump the sessions revision on
-      // every subsequent attempt so the hydration never sees a quiet window.
-      if (call === 1) emit('sessions', 'removed', s2);
-      else emit('sessions', 'patched', { ...s1, status: `v${call}` });
+    onFetch('gateway-channels', 'findAll', (call) => {
+      // Insert g-1 and g-2 live, remove g-2 during the first fetch, then bump
+      // the revision on every subsequent attempt so the hydration never sees
+      // a quiet window.
+      if (call === 1) {
+        emit('gateway-channels', 'created', g1);
+        emit('gateway-channels', 'created', g2);
+        emit('gateway-channels', 'removed', g2);
+      } else emit('gateway-channels', 'patched', { ...g1, name: `v${call}` });
     });
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
-    // The OLD code stopped after 6 fetches and skipped forever. The new loop
-    // never gives up — it keeps re-fetching past that cap (proving "retry until
-    // quiet", not "skip after N").
-    await waitFor(() => expect(fetchCount('sessions', 'findAll')).toBeGreaterThanOrEqual(7), {
-      timeout: 5000,
-    });
+    // The loop never gives up — it keeps re-fetching past the old cap of 6
+    // (proving "retry until quiet", not "skip after N").
+    await waitFor(
+      () => expect(fetchCount('gateway-channels', 'findAll')).toBeGreaterThanOrEqual(7),
+      { timeout: 5000 }
+    );
 
-    expect(agorStore.getState().sessionById.has('s-1')).toBe(true);
-    // The stale snapshot was never applied (it never went quiet), so s-2 stays
+    expect(has('g-1')).toBe(true);
+    // The stale snapshot was never applied (it never went quiet), so g-2 stays
     // removed — a racy snapshot is never force-applied.
-    expect(agorStore.getState().sessionById.has('s-2')).toBe(false);
+    expect(has('g-2')).toBe(false);
   });
 
   it('applies an unrelated collection while another keeps racing (per-collection revisions)', async () => {
-    const s1 = makeSession({ session_id: 's-1', branch_id: 'b-1' });
-    const s2 = makeSession({ session_id: 's-2', branch_id: 'b-1' });
+    const g1 = channel('g-1');
     const m1 = { mcp_server_id: 'm-1', name: 'one' };
     const m2 = { mcp_server_id: 'm-2', name: 'two' };
     const { client, emit, onFetch } = makeMockClient({
-      'sessions:find': [s1],
-      'sessions:findAll': [s1, s2],
-      'branches:findAll': [],
+      'gateway-channels': [g1, channel('g-2')],
       'mcp-servers': [m1, m2],
     });
-    // Keep the SESSIONS hydration perpetually racing (bumps only `sessions`)…
-    onFetch('sessions', 'findAll', (call) =>
-      emit('sessions', 'patched', { ...s1, status: `v${call}` })
+    // Keep the gateway-channels hydration perpetually racing…
+    onFetch('gateway-channels', 'findAll', (call) =>
+      emit('gateway-channels', 'patched', { ...g1, name: `v${call}` })
     );
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
 
-    // …the mcp-servers hydration is independent of `sessions`, so it applied.
+    // …the mcp-servers hydration is independent of it, so it applied.
     await waitFor(() => expect(agorStore.getState().mcpServerById.has('m-1')).toBe(true));
     expect(agorStore.getState().mcpServerById.has('m-2')).toBe(true);
-    // …while the still-racing sessions hydration has not applied (s-2 absent).
-    expect(agorStore.getState().sessionById.has('s-2')).toBe(false);
-  });
-
-  it('decouples per-collection hydration: session churn does not block the branch apply', async () => {
-    const s1 = makeSession({ session_id: 's-1', branch_id: 'b-1' });
-    const s2 = makeSession({ session_id: 's-2', branch_id: 'b-1' });
-    const b1 = makeBranch({ branch_id: 'b-1' });
-    const { client, emit, onFetch } = makeMockClient({
-      'sessions:find': [s1],
-      'sessions:findAll': [s1, s2],
-      // Branches are filled ONLY by hydration on Home (the first-paint heavy
-      // batch resolves to [] with no board scope), so this proves the branch
-      // apply does not wait on the sessions quiet window.
-      'branches:findAll': [b1],
-    });
-    // Sessions race forever; branches never race.
-    onFetch('sessions', 'findAll', (call) =>
-      emit('sessions', 'patched', { ...s1, status: `v${call}` })
-    );
-    const { result } = renderHook(() => useAgorData(client));
-    await waitForInitialLoad(result);
-
-    // Branches hydrated on their own quiet window despite perpetual session churn.
-    await waitFor(() => expect(agorStore.getState().branchById.has('b-1')).toBe(true));
-    // Sessions still racing → not applied (coupling would have blocked branches).
-    expect(agorStore.getState().sessionById.has('s-2')).toBe(false);
+    // …while the still-racing gateway-channels hydration has not applied.
+    expect(has('g-2')).toBe(false);
   });
 
   it('runs backoff retries with delays preceding attempts (off-by-one)', async () => {
-    const s1 = makeSession({ session_id: 's-1', branch_id: 'b-1' });
-    const s2 = makeSession({ session_id: 's-2', branch_id: 'b-1' });
+    const g1 = channel('g-1');
     const { client, emit, onFetch, fetchCount } = makeMockClient({
-      'sessions:find': [s1],
-      'sessions:findAll': [s1, s2],
-      'branches:findAll': [],
+      'gateway-channels': [g1, channel('g-2')],
     });
     // Race the first five fetches — pushing PAST the immediate-retry phase into
     // the backoff phase (attempts 5 & 6 are delayed) — then go quiet. The 6th
-    // fetch must still run (its backoff delay PRECEDES it) and apply. If the
-    // off-by-one delayed-after-the-attempt bug were present, the schedule would
-    // be wrong; here the delayed attempts run and converge.
-    onFetch('sessions', 'findAll', (call) => {
-      if (call <= 5) emit('sessions', 'patched', { ...s1, status: `v${call}` });
+    // fetch must still run (its backoff delay PRECEDES it) and apply.
+    onFetch('gateway-channels', 'findAll', (call) => {
+      if (call <= 5) emit('gateway-channels', 'patched', { ...g1, name: `v${call}` });
     });
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
 
-    await waitFor(() => expect(agorStore.getState().sessionById.has('s-2')).toBe(true), {
-      timeout: 4000,
-    });
-    expect(fetchCount('sessions', 'findAll')).toBe(6);
+    await waitFor(() => expect(has('g-2')).toBe(true), { timeout: 4000 });
+    expect(fetchCount('gateway-channels', 'findAll')).toBe(6);
   });
 });
 
 /**
- * Bulk Map replacements that are NOT a `runHydration` apply — the reconnect
- * resync's wholesale `setMaps`, and the logout reset — MUST bump the
- * per-collection revisions (and, for the reset, the hydration generations) so an
- * in-flight hydration whose snapshot predates them cannot clobber the newer
- * state or repopulate the Maps after teardown. These tests pin BLOCKING-1.
+ * The logout reset is NOT a `runHydration` apply: it MUST bump the hydration
+ * generations and revisions so an in-flight hydration whose snapshot predates
+ * it cannot repopulate the Maps after teardown.
  */
-describe('useAgorData — global sets publish with their mark', () => {
-  it('applies the global session snapshot and marks it hydrated in one update', async () => {
-    const { client } = makeMockClient({
-      'sessions:find': [],
-      'sessions:findAll': [makeSession({ session_id: 's-global' })],
-      'branches:findAll': [makeBranch({ branch_id: 'b-global' })],
-    });
-    const split: string[] = [];
-    const off = agorStore.subscribe((s) => {
-      if (s.sessionById.has('s-global') && !s.globallyHydrated.has('sessions')) split.push('s');
-      if (s.branchById.has('b-global') && !s.globallyHydrated.has('branches')) split.push('b');
-    });
-    const { result, unmount } = renderHook(() => useAgorData(client));
-    try {
-      await waitForInitialLoad(result);
-      await waitFor(() => expect(agorStore.getState().globallyHydrated.size).toBe(2));
-      expect(agorStore.getState().sessionById.has('s-global')).toBe(true);
-      expect(split).toEqual([]);
-    } finally {
-      off();
-      unmount();
-    }
-  });
-});
-
 describe('useAgorData — bulk-write revision bumps', () => {
-  it('reconnect bulk-replace bumps revisions so an in-flight hydration discards (no clobber)', async () => {
-    const s1 = makeSession({ session_id: 's-1', branch_id: 'b-1' });
-    const sNew = makeSession({ session_id: 's-new', branch_id: 'b-1' });
-    // Initial hydration sees only the stale set (no s-new); the reconnect sees
-    // the newer set after we swap the seed reference.
-    const seed: Record<string, unknown[]> = {
-      'sessions:find': [s1],
-      'sessions:findAll': [s1],
-      'branches:findAll': [],
-    };
-    const gate = deferred();
-    const { client, onFetch, fetchCount, emitIo } = makeMockClient(seed);
-    // Defer the FIRST sessions hydration fetch so it's still in-flight when the
-    // reconnect lands.
-    onFetch('sessions', 'findAll', (call) => (call === 1 ? gate.promise : undefined));
-
-    const { result } = renderHook(() => useAgorData(client));
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    await waitFor(() => expect(fetchCount('sessions', 'findAll')).toBe(1));
-
-    // Reconnect delivers the NEWER full set: swap the seed so the reconnect's
-    // findAll (call 2) returns it (call 1 already captured the stale reference).
-    seed['sessions:findAll'] = [s1, sNew];
-    seed['sessions:find'] = [s1, sNew];
-    await act(async () => {
-      emitIo('connect');
-      await new Promise<void>((r) => setTimeout(r, 0));
-    });
-    // Reconnect applied the newer snapshot and bumped revisions.
-    expect(agorStore.getState().sessionById.has('s-new')).toBe(true);
-
-    // Release the stale in-flight hydration. Its snapshot ([s-1] only) would, if
-    // applied, drop s-new — but the reconnect's revision bump fails its quiet
-    // check, so it discards and re-fetches (now also returning s-new).
-    await act(async () => {
-      gate.resolve();
-      await new Promise<void>((r) => setTimeout(r, 0));
-    });
-    await flush();
-    expect(agorStore.getState().sessionById.has('s-new')).toBe(true);
-    expect(agorStore.getState().sessionById.has('s-1')).toBe(true);
-  });
-
   it('logout reset bumps generation/revisions so an in-flight hydration cannot repopulate after logout', async () => {
-    const s1 = makeSession({ session_id: 's-1', branch_id: 'b-1' });
     const seed: Record<string, unknown[]> = {
-      'sessions:find': [s1],
-      'sessions:findAll': [s1],
-      'branches:findAll': [],
+      'gateway-channels': [{ id: 'g-1', name: 'g-1' }],
     };
     const gate = deferred();
     const { client, onFetch, fetchCount } = makeMockClient(seed);
-    onFetch('sessions', 'findAll', (call) => (call === 1 ? gate.promise : undefined));
+    onFetch('gateway-channels', 'findAll', (call) => (call === 1 ? gate.promise : undefined));
 
     const { result, rerender } = renderHook(
       ({ c }: { c: Parameters<typeof useAgorData>[0] }) => useAgorData(c),
       { initialProps: { c: client as Parameters<typeof useAgorData>[0] } }
     );
     await waitFor(() => expect(result.current.loading).toBe(false));
-    await waitFor(() => expect(fetchCount('sessions', 'findAll')).toBe(1));
+    await waitFor(() => expect(fetchCount('gateway-channels', 'findAll')).toBe(1));
 
     // Logout: client → null fires the reset (clears Maps, cancels hydrations).
     await act(async () => {
       rerender({ c: null });
       await new Promise<void>((r) => setTimeout(r, 0));
     });
-    expect(agorStore.getState().sessionById.size).toBe(0);
+    expect(agorStore.getState().gatewayChannelById.size).toBe(0);
 
-    // Release the in-flight hydration. Its snapshot ([s-1]) must NOT repopulate
-    // the cleared Maps: the reset bumped the generation (cancels the loop) and
-    // the revision (fails the quiet check).
+    // Release the in-flight hydration. Its snapshot must NOT repopulate the
+    // cleared Maps: the reset bumped the generation (cancels the loop) and the
+    // revision (fails the quiet check).
     await act(async () => {
       gate.resolve();
       await new Promise<void>((r) => setTimeout(r, 0));
     });
     await flush();
-    expect(agorStore.getState().sessionById.size).toBe(0);
-    expect(agorStore.getState().sessionById.has('s-1')).toBe(false);
+    expect(agorStore.getState().gatewayChannelById.size).toBe(0);
   });
 });
 
@@ -1527,7 +1373,6 @@ describe('useAgorData — user-scope flags', () => {
   it('reset on an identity change and recover once the silent resync re-runs the scope', async () => {
     const seed: Record<string, unknown[]> = {
       'sessions:find': [makeSession({ created_by: 'user-a' })],
-      'sessions:findAll': [makeSession({ created_by: 'user-a' })],
       'branches:findAll': [makeBranch({ created_by: 'user-a' })],
     };
     const gate = deferred();
@@ -1549,11 +1394,10 @@ describe('useAgorData — user-scope flags', () => {
     };
     await waitFor(() => expect(scopeLoaded()).toEqual([true, true, true]));
 
-    // Hold the resync's full session fetch so the reset flags can be observed first.
-    const calls = fetchCount('sessions', 'findAll');
-    onFetch('sessions', 'findAll', (call) => (call > calls ? gate.promise : undefined));
+    // Hold the resync's light batch so the reset flags can be observed first.
+    const calls = fetchCount('boards', 'findAll');
+    onFetch('boards', 'findAll', (call) => (call > calls ? gate.promise : undefined));
     seed['sessions:find'] = [makeSession({ created_by: 'user-b' })];
-    seed['sessions:findAll'] = [makeSession({ created_by: 'user-b' })];
     seed['branches:findAll'] = [makeBranch({ created_by: 'user-b' })];
     rerender({ userId: 'user-b', generation: 2 });
     await flush();
@@ -1569,10 +1413,13 @@ describe('useAgorData — user-scope flags', () => {
 });
 
 describe('session MCP links', () => {
-  it('reads no session↔MCP links globally, and realtime events still apply to any session', async () => {
-    const { client, emit, listeners, fetchCount } = makeMockClient({
-      'session-mcp-servers': [{ session_id: 's-1', mcp_server_id: 'old-server' }],
-    });
+  it('reads no session↔MCP links globally, and realtime events apply to held sessions', async () => {
+    const { client, emit, listeners, fetchCount } = makeMockClient(
+      onBoardRoute({
+        sessions: [makeSession(), makeSession({ session_id: 's-2' })],
+        'session-mcp-servers': [{ session_id: 's-1', mcp_server_id: 'old-server' }],
+      })
+    );
     const { result, unmount } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
     await flush();
@@ -1599,7 +1446,10 @@ describe('session MCP links', () => {
   });
 
   it('a reconnect resync marks every session unloaded, and a read from before it never marks one loaded', async () => {
-    const seed = { 'session-mcp-servers': [{ session_id: 's-1', mcp_server_id: 'a' }] };
+    const seed = onBoardRoute({
+      sessions: [makeSession(), makeSession({ session_id: 's-2' })],
+      'session-mcp-servers': [{ session_id: 's-1', mcp_server_id: 'a' }],
+    });
     const { client, emitIo, onFetch, fetchCount } = makeMockClient(seed);
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
@@ -1681,55 +1531,26 @@ describe('useAgorData — opened session transcript priority', () => {
     return { resolve, release };
   }
 
-  it('holds the global hydration until the opened transcript is ready', async () => {
+  it('releases the prefetch on unmount', async () => {
     const session = makeSession({ session_id: OPEN_ID });
-    const other = makeSession({ session_id: 's-global-only' });
-    const { client, fetchCount } = makeMockClient({
-      'sessions:find': [session],
-      'sessions:findAll': [session, other],
-    });
-    const prefetch = deferredPrefetch();
-
-    const { result } = renderHook(() => useAgorData(client, { directSessionId: OPEN_SHORT }));
-    await waitForInitialLoad(result);
-
-    expect(transcriptPrefetch.prefetchOpenedTranscript).toHaveBeenLastCalledWith(client, OPEN_ID);
-    expect(fetchCount('sessions', 'findAll')).toBe(0);
-    expect(fetchCount('branches', 'findAll')).toBe(0);
-    expect(fetchCount('boards', 'findAll')).toBe(1); // the gated lean list only
-    expect(agorStore.getState().sessionById.has('s-global-only')).toBe(false);
-
-    await act(async () => prefetch.resolve());
-    await waitFor(() => expect(fetchCount('sessions', 'findAll')).toBe(1));
-    expect(fetchCount('branches', 'findAll')).toBe(1);
-    expect(fetchCount('boards', 'findAll')).toBe(1); // full board records load per board only
-    await waitFor(() => expect(agorStore.getState().sessionById.has('s-global-only')).toBe(true));
-  });
-
-  it('skips the deferred hydration and releases the prefetch on unmount', async () => {
-    const session = makeSession({ session_id: OPEN_ID });
-    const { client, fetchCount } = makeMockClient({ 'sessions:find': [session] });
+    const { client } = makeMockClient({ 'sessions:get': session as never });
     const prefetch = deferredPrefetch();
 
     const { result, unmount } = renderHook(() => useAgorData(client, { directSessionId: OPEN_ID }));
     await waitForInitialLoad(result);
     unmount();
     expect(prefetch.release).toHaveBeenCalled();
-
-    await act(async () => prefetch.resolve());
-    expect(fetchCount('sessions', 'findAll')).toBe(0);
-    expect(fetchCount('branches', 'findAll')).toBe(0);
   });
 
-  it('abandons a load unmounted during the light batch (no prefetch, no maps, no hydration)', async () => {
+  it('abandons a load unmounted during the light batch (no prefetch, no maps)', async () => {
     transcriptPrefetch.prefetchOpenedTranscript.mockClear();
     const session = makeSession({ session_id: OPEN_ID });
-    const { client, fetchCount, onFetch } = makeMockClient({ 'sessions:find': [session] });
+    const { client, fetchCount, onFetch } = makeMockClient({ 'sessions:get': session as never });
     const light = deferred();
-    onFetch('sessions', 'find', () => light.promise);
+    onFetch('boards', 'findAll', () => light.promise);
 
     const { unmount } = renderHook(() => useAgorData(client, { directSessionId: OPEN_ID }));
-    await waitFor(() => expect(fetchCount('sessions', 'find')).toBe(1));
+    await waitFor(() => expect(fetchCount('boards', 'findAll')).toBe(1));
     unmount();
     await act(async () => {
       light.resolve();
@@ -1738,22 +1559,19 @@ describe('useAgorData — opened session transcript priority', () => {
     });
 
     expect(transcriptPrefetch.prefetchOpenedTranscript).not.toHaveBeenCalled();
-    expect(fetchCount('cards', 'findAll')).toBe(0); // heavy batch never started
+    expect(fetchCount('board-comments', 'findAll')).toBe(0); // heavy batch never started
     expect(agorStore.getState().sessionById.size).toBe(0);
-    expect(fetchCount('sessions', 'findAll')).toBe(0);
-    expect(fetchCount('branches', 'findAll')).toBe(0);
   });
 
   it('abandons a load unmounted during the heavy batch (prefetch released, nothing applied)', async () => {
     transcriptPrefetch.prefetchOpenedTranscript.mockClear();
     const session = makeSession({ session_id: OPEN_ID });
-    const { client, fetchCount, onFetch } = makeMockClient({ 'sessions:find': [session] });
+    const { client, fetchCount, onFetch } = makeMockClient({ 'sessions:get': session as never });
     const heavy = deferred();
     // Comments are gated on every route (Home defers cards to the background),
     // so holding them holds the heavy batch.
     onFetch('board-comments', 'findAll', () => heavy.promise);
     const release = vi.fn();
-    // `ready` settles at once, so a resumed load would start the global sets.
     transcriptPrefetch.prefetchOpenedTranscript.mockReturnValueOnce({
       ready: Promise.resolve(),
       release,
@@ -1766,27 +1584,23 @@ describe('useAgorData — opened session transcript priority', () => {
     expect(release).toHaveBeenCalled();
     await act(async () => {
       heavy.resolve();
-      // Let a resumed load pass its requestAnimationFrame yield and the
-      // deferred hydration start.
+      // Let a resumed load pass its requestAnimationFrame yield.
       await new Promise((done) => setTimeout(done, 100));
       await flush();
     });
 
     expect(transcriptPrefetch.prefetchOpenedTranscript).toHaveBeenCalledTimes(1);
     expect(agorStore.getState().sessionById.size).toBe(0);
-    expect(fetchCount('sessions', 'findAll')).toBe(0);
-    expect(fetchCount('branches', 'findAll')).toBe(0);
   });
 
-  it('does not prefetch or defer without a session route', async () => {
+  it('does not prefetch without a session route', async () => {
     transcriptPrefetch.prefetchOpenedTranscript.mockClear();
-    const { client, fetchCount } = makeMockClient({ sessions: [makeSession()] });
+    const { client } = makeMockClient({ sessions: [makeSession()] });
 
     const { result } = renderHook(() => useAgorData(client));
     await waitForInitialLoad(result);
 
     expect(transcriptPrefetch.prefetchOpenedTranscript).not.toHaveBeenCalled();
-    await waitFor(() => expect(fetchCount('sessions', 'findAll')).toBe(1));
   });
 
   it('holds only the bulk U1 read behind the opened transcript', async () => {
@@ -1823,8 +1637,8 @@ describe('useAgorData — opened session transcript priority', () => {
 
   it('starts the user scope without waiting for the opened transcript', async () => {
     const session = makeSession({ session_id: OPEN_ID, created_by: 'user-me' });
-    const { client, fetchArguments, fetchCount } = makeMockClient({ 'sessions:find': [session] });
-    const prefetch = deferredPrefetch();
+    const { client, fetchArguments } = makeMockClient({ 'sessions:find': [session] });
+    deferredPrefetch();
 
     const { result } = renderHook(() =>
       useAgorData(client, {
@@ -1837,23 +1651,18 @@ describe('useAgorData — opened session transcript priority', () => {
     );
     await waitForInitialLoad(result);
 
-    // The global snapshots wait for the transcript; my teammates (U3) do not.
+    // The transcript never becomes ready; my teammates (U3) load anyway.
     await waitFor(() =>
       expect(fetchArguments('branches', 'find')).toContainEqual({
         query: { teammate: true, archived: false, $limit: 1000 },
       })
     );
-    expect(fetchCount('sessions', 'findAll')).toBe(0);
     await waitFor(() => expect(selectTeammatesLoaded(agorStore.getState())).toBe(true));
-
-    await act(async () => prefetch.resolve());
-    await waitFor(() => expect(fetchCount('sessions', 'findAll')).toBe(1));
   });
 });
 
-describe('useAgorData — first paint holds the displayed board (global hydration off)', () => {
+describe('useAgorData — first paint holds the displayed board', () => {
   it("keeps another user's sessions created on the board before and during its read", async () => {
-    withoutGlobalHydration();
     const boardA = { board_id: 'board-A', slug: 'displayed', name: 'Displayed' };
     window.history.pushState({}, '', '/b/displayed/');
     onTestFinished(() => window.history.pushState({}, '', '/'));
@@ -1906,14 +1715,12 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
     // Annotations never resolve: Home must still open its gate.
     onFetch('board-objects', 'findAll', never);
     onFetch('cards', 'findAll', never);
-    // Hold the global sessions hydration so the first-paint state is observed.
-    onFetch('sessions', 'findAll', never);
     const { result } = renderHook(() => useAgorData(client, authority));
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
       expect(result.current.initialLoadComplete).toBe(true);
     });
-    // The gated page is MY sessions; it replaces the global recent slice.
+    // The gated page is MY sessions.
     expect(fetchArguments('sessions', 'find')[0]).toEqual({
       query: {
         created_by: 'user-me',
@@ -1946,7 +1753,6 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
     onFetch('sessions', 'find', (call) =>
       call === 1 ? Promise.reject(new Error('socket timeout')) : undefined
     );
-    onFetch('sessions', 'findAll', never);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const { result } = renderHook(() => useAgorData(client, authority));
@@ -1972,7 +1778,6 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
     });
     const comments = deferred();
     onFetch('board-comments', 'findAll', (call) => (call === 1 ? comments.promise : undefined));
-    onFetch('sessions', 'findAll', never);
     const { result } = renderHook(() => useAgorData(client, authority));
     await waitFor(() => expect(fetchArguments('board-comments', 'findAll')).toHaveLength(1));
 
@@ -2010,7 +1815,6 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
     const { client, emit, onFetch } = makeMockClient(seed);
     const comments = deferred();
     onFetch('board-comments', 'findAll', (call) => (call === 1 ? comments.promise : undefined));
-    onFetch('sessions', 'findAll', never);
     const { result } = renderHook(() => useAgorData(client, authority));
     await waitFor(() => expect(result.current.initialLoadItems.length).toBeGreaterThan(0));
     await act(async () => {
@@ -2032,104 +1836,6 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
     expect(agorStore.getState().commentById.has('c-live')).toBe(true);
   });
 
-  it('sends the id reads for branches only U1 references before the global snapshots', async () => {
-    window.history.pushState({}, '', '/');
-    // A full gated page (200 of mine) on b-1, so the scope runs U1. U1 also
-    // returns an older session on b-old: no gated row, U2 or U3 knows it.
-    const page = Array.from({ length: 200 }, (_, i) =>
-      makeSession({ session_id: `s-${i}`, created_by: 'user-me', branch_id: 'b-1' })
-    );
-    const older = makeSession({ session_id: 's-older', created_by: 'user-me', branch_id: 'b-old' });
-    const seed: Record<string, unknown[]> = { 'sessions:find': page };
-    const mock = makeMockClient(seed);
-    // Call 2 of sessions.find is U1 (call 1 is the gated page).
-    mock.onFetch('sessions', 'find', (call) => {
-      if (call === 2) seed['sessions:find'] = [...page, older];
-      return undefined;
-    });
-    const order: string[] = [];
-    const service = mock.client.service;
-    (mock.client as { service: unknown }).service = (name: string) => {
-      const svc = service(name);
-      for (const method of ['find', 'findAll'] as const) {
-        const original = svc[method];
-        svc[method] = vi.fn((args?: { query?: Record<string, unknown> }) => {
-          const ids = (args?.query?.branch_id as { $in?: string[] } | undefined)?.$in;
-          order.push(ids ? `ids:${ids.join(',')}` : `${name}:${method}`);
-          return original(args);
-        });
-      }
-      return svc;
-    };
-    const { result } = renderHook(() => useAgorData(mock.client, authority));
-    await waitForInitialLoad(result);
-    await waitFor(() => expect(order).toContain('sessions:findAll'));
-    const u1OnlyRead = order.findIndex(
-      (entry) => entry.startsWith('ids:') && entry.includes('b-old')
-    );
-    expect(u1OnlyRead).toBeGreaterThanOrEqual(0);
-    expect(u1OnlyRead).toBeLessThan(order.indexOf('sessions:findAll'));
-    expect(u1OnlyRead).toBeLessThan(order.lastIndexOf('branches:findAll'));
-    await waitFor(() => expect(selectHomeBranchesLoaded(agorStore.getState())).toBe(true));
-  });
-
-  it('sends the U1-only id reads before the global snapshots even when my branches fail', async () => {
-    window.history.pushState({}, '', '/');
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const page = Array.from({ length: 200 }, (_, i) =>
-      makeSession({ session_id: `s-${i}`, created_by: 'user-me', branch_id: 'b-1' })
-    );
-    const older = makeSession({ session_id: 's-older', created_by: 'user-me', branch_id: 'b-old' });
-    // The global session snapshot holds every session too, as the daemon's would.
-    const seed: Record<string, unknown[]> = {
-      'sessions:find': page,
-      'sessions:findAll': [...page, older],
-    };
-    const mock = makeMockClient(seed);
-    mock.onFetch('sessions', 'find', (call) => {
-      if (call === 2) seed['sessions:find'] = [...page, older];
-      return undefined;
-    });
-    // Hold the global branch snapshot so its compatibility pass can't settle
-    // b-old first; the order of the requests is what's under test.
-    let releaseGlobalBranches!: () => void;
-    const globalBranches = new Promise<void>((resolve) => {
-      releaseGlobalBranches = resolve;
-    });
-    mock.onFetch('branches', 'findAll', () => globalBranches);
-    const order: string[] = [];
-    const service = mock.client.service;
-    (mock.client as { service: unknown }).service = (name: string) => {
-      const svc = service(name);
-      for (const method of ['find', 'findAll'] as const) {
-        const original = svc[method];
-        svc[method] = vi.fn((args?: { query?: Record<string, unknown> }) => {
-          const ids = (args?.query?.branch_id as { $in?: string[] } | undefined)?.$in;
-          if (name === 'branches' && args?.query?.created_by) {
-            // U2 (my branches) fails transiently; U1 still succeeds.
-            order.push('u2');
-            return Promise.reject(new Error('socket timeout'));
-          }
-          order.push(ids ? `ids:${ids.join(',')}` : `${name}:${method}`);
-          return original(args);
-        });
-      }
-      return svc;
-    };
-    const { result } = renderHook(() => useAgorData(mock.client, authority));
-    await waitForInitialLoad(result);
-    const u1OnlyRead = () =>
-      order.findIndex((entry) => entry.startsWith('ids:') && entry.includes('b-old'));
-    await waitFor(() => {
-      expect(order).toContain('sessions:findAll');
-      expect(u1OnlyRead()).toBeGreaterThanOrEqual(0);
-    });
-    releaseGlobalBranches();
-    expect(order).toContain('u2');
-    expect(u1OnlyRead()).toBeLessThan(order.indexOf('sessions:findAll'));
-    expect(u1OnlyRead()).toBeLessThan(order.indexOf('branches:findAll'));
-  });
-
   it("never applies a load that outlived its mount into the next user's store", async () => {
     window.history.pushState({}, '', '/');
     const seed: Record<string, unknown[]> = {
@@ -2139,7 +1845,6 @@ describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
     const aliceRead = deferred();
     // Hold Alice's gated my-sessions page (call 1); Bob's (call 2) answers at once.
     onFetch('sessions', 'find', (call) => (call === 1 ? aliceRead.promise : undefined));
-    onFetch('sessions', 'findAll', never);
     const alice = renderHook(() =>
       useAgorData(client, { ...authority, authenticatedUserId: 'user-alice' })
     );
@@ -2262,13 +1967,12 @@ describe('useAgorData — reconnect reconciles the displayed partition', () => {
     expect(state.boardById.get('board-A')?.objects).toBeDefined();
     // The displayed board is complete again; every other board is unloaded.
     expect(selectBoardPartition(state, 'board-A')?.status).toBe('loaded');
-    // It commits what the resync read for the board, branches read globally included.
+    // It commits what the resync read for the board.
     const members = selectBoardPartition(state, 'board-A')?.members;
     expect([...(members?.cards ?? [])]).toEqual(['k-1']);
     expect([...(members?.boardObjects ?? [])].sort()).toEqual(['bo-1', 'bo-arch', 'bo-card']);
     expect([...(members?.branches ?? [])]).toEqual(['b-1']);
     expect(state.coverage.has(boardScopeKey('board-B'))).toBe(false);
-    expect([...state.globallyHydrated].sort()).toEqual(['branches', 'sessions']);
     // Annotations were read for the displayed board only.
     const resyncReads = [
       fetchArguments('board-objects', 'findAll').at(-1),
@@ -2339,11 +2043,11 @@ describe('useAgorData — reconnect reconciles the displayed partition', () => {
     const before = {
       objects: fetchCount('board-objects', 'findAll'),
       cards: fetchCount('cards', 'findAll'),
-      sessions: fetchCount('sessions', 'findAll'),
+      boards: fetchCount('boards', 'findAll'),
     };
 
     act(() => emitIo('connect'));
-    await waitFor(() => expect(fetchCount('sessions', 'findAll')).toBeGreaterThan(before.sessions));
+    await waitFor(() => expect(fetchCount('boards', 'findAll')).toBeGreaterThan(before.boards));
     await flush();
     expect(fetchCount('board-objects', 'findAll')).toBe(before.objects);
     expect(fetchCount('cards', 'findAll')).toBe(before.cards);
@@ -2616,7 +2320,7 @@ describe('branch creation on an already-open board', () => {
     ['ready', 'branch', 'placement'],
     ['ready', 'placement', 'branch'],
   ])('keeps one placed, ready card for %s -> %s -> %s', async (...order) => {
-    const { client, emit, fetchCount } = makeMockClient();
+    const { client, emit, fetchCount } = makeMockClient(onBoardRoute({}));
     const { result, unmount } = renderHook(() => useAgorData(client));
     try {
       await waitForInitialLoad(result);
@@ -2653,7 +2357,7 @@ describe('branch creation on an already-open board', () => {
   });
 });
 
-describe('useAgorData — scoped reconnect (global hydration off)', () => {
+describe('useAgorData — scoped reconnect', () => {
   const boardA = { board_id: 'board-A', slug: 'displayed', name: 'Displayed' };
   const authenticated = {
     authenticatedUserId: 'user-me',
@@ -2663,7 +2367,6 @@ describe('useAgorData — scoped reconnect (global hydration off)', () => {
   } as const;
 
   it("replaces the displayed board's branches and sessions and my sessions, reading no global set", async () => {
-    withoutGlobalHydration();
     window.history.pushState({}, '', '/b/displayed/');
     onTestFinished(() => window.history.pushState({}, '', '/'));
     const server = {
@@ -2797,7 +2500,6 @@ describe('useAgorData — scoped reconnect (global hydration off)', () => {
 
   for (const [name, resync] of Object.entries(resyncs)) {
     it(`after a ${name}, every user scope and the displayed board reconcile without global reads`, async () => {
-      withoutGlobalHydration();
       const { server, disconnect } = workspace();
       const { emitIo, rerender, fetchArguments } = await connectedWorkspace(server);
       const has = (map: 'sessionById' | 'branchById', id: string) =>
@@ -2848,7 +2550,6 @@ describe('useAgorData — scoped reconnect (global hydration off)', () => {
       expect(selectMySessionsLoaded(state)).toBe(true);
       expect(selectTeammatesLoaded(state)).toBe(true);
       expect(selectHomeBranchesLoaded(state)).toBe(true);
-      expect(state.globallyHydrated.size).toBe(0);
       for (const reads of [
         fetchArguments('sessions', 'findAll'),
         fetchArguments('sessions', 'find'),
@@ -2861,7 +2562,6 @@ describe('useAgorData — scoped reconnect (global hydration off)', () => {
   }
 
   it('a capped teammate read removes nothing on reconnect', async () => {
-    withoutGlobalHydration();
     const { server, disconnect } = workspace();
     const { emitIo, seed } = await connectedWorkspace(server);
     // The teammate read now reports more teammates than it returned.
@@ -2886,7 +2586,6 @@ describe('useAgorData — scoped reconnect (global hydration off)', () => {
   });
 
   it("a board opened earlier doesn't keep another user's rows deleted while disconnected", async () => {
-    withoutGlobalHydration();
     const { server } = workspace();
     const other = (id: string) =>
       makeBranch({ branch_id: id, board_id: 'board-B', created_by: 'user-other' });
@@ -2925,7 +2624,6 @@ describe('useAgorData — scoped reconnect (global hydration off)', () => {
   });
 
   it('a scope of the earlier lifetime holds its rows until the resync settles, then releases them', async () => {
-    withoutGlobalHydration();
     const { server } = workspace();
     const { rerender, seed } = await connectedWorkspace(server);
     const has = (id: string) => agorStore.getState().branchById.has(id);
@@ -2950,7 +2648,6 @@ describe('useAgorData — scoped reconnect (global hydration off)', () => {
   });
 
   it('a piece a plain reconnect fails to replace is retired once the resync settles', async () => {
-    withoutGlobalHydration();
     const { server } = workspace();
     const { emitIo, seed } = await connectedWorkspace(server);
     const has = (id: string) => agorStore.getState().branchById.has(id);
@@ -2974,7 +2671,6 @@ describe('useAgorData — scoped reconnect (global hydration off)', () => {
   });
 
   it("a reconnect evicts the unloaded boards' rows that no scope holds", async () => {
-    withoutGlobalHydration();
     const { server } = workspace();
     const { emitIo } = await connectedWorkspace(server);
     // Another loaded board with someone else's rows, and my board C.

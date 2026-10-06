@@ -1,6 +1,6 @@
 /**
  * User scope: everything Home and the teammates surfaces read, loaded in full
- * for the caller (design r3 §3), independent of the global hydration.
+ * for the caller (design r3 §3).
  *
  * - Gated (in `useAgorData`'s first paint): my newest `MY_SESSIONS_GATED_LIMIT`
  *   sessions. Fewer rows than the limit already means "all of mine".
@@ -73,9 +73,7 @@ import {
   BOARD_SCOPE_PREFIX,
   boardPartitionScope,
   type Coverage,
-  type CoverageMembers,
   type CoverageUpdate,
-  globalSetsMembers,
   type LoadScope,
   type MemberLookup,
   replaceScope,
@@ -89,7 +87,7 @@ import {
 } from './scopeMerge';
 import { sessionListQuery } from './sessionListQuery';
 
-/** Gated first-paint page of my sessions (replaces the global recent slice). */
+/** Gated first-paint page of my sessions. */
 export const MY_SESSIONS_GATED_LIMIT = 200;
 /** Cap of the single all-my-sessions read (U1). */
 export const MY_SESSIONS_FULL_LIMIT = PAGINATION.MAX_LIMIT;
@@ -115,10 +113,6 @@ export function mySessionsQuery(userId: string, limit: number) {
     $count: false,
   });
 }
-
-/** Whether the global session and branch snapshots have applied (Steps 1–2 only). */
-const globalSetsComplete = (s: AgorState) =>
-  s.globallyHydrated.has('sessions') && s.globallyHydrated.has('branches');
 
 const loadedPiece = (s: Pick<AgorState, 'coverage'>, key: UserScopeKey) =>
   s.coverage.get(key)?.status === 'loaded';
@@ -198,8 +192,7 @@ export function referenceMembers(
 /**
  * The memberships a replace of `exceptKey` must respect: every other scope
  * loaded under the current lifetime (a row that belongs to one of them is
- * never removed), the pinned rows (`rowPins.ts`), and the global sets while
- * they exist. Loading, failed and stale scopes (another authority or
+ * never removed) and the pinned rows (`rowPins.ts`). Loading, failed and stale scopes (another authority or
  * lifetime) hold nothing, unless `stale` (an eviction, which only frees
  * memory, keeps what a scope from an earlier lifetime still describes until
  * its next commit). Overlapping scopes are normal: my session on a loaded
@@ -220,7 +213,7 @@ export function otherCommittedMembers(
       members.push(entry.members);
     }
   }
-  members.push(globalSetsMembers(state.globallyHydrated), pinnedMembers);
+  members.push(pinnedMembers);
   return members;
 }
 
@@ -282,11 +275,6 @@ interface ScopeRun {
   referencesKnown: boolean;
   /** A reconnect run: every read reconciles its scope instead of filling it. */
   replace: boolean;
-  /**
-   * A scope read failed: the global snapshots (Steps 1–2) may complete the
-   * flags it left unset (`applyGlobalCompatibility`).
-   */
-  compat: boolean;
   referenceTimer: ReturnType<typeof setTimeout> | null;
   retryTimers: Set<ReturnType<typeof setTimeout>>;
   /** Resolved once no id read is queued or in flight (or the run stops). */
@@ -426,12 +414,6 @@ export async function fillOnDemand(
   });
 }
 
-/** `key`'s entry if `run` itself committed it (not an earlier run of the same lifetime). */
-function pieceInRun(run: ScopeRun, key: UserScopeKey): ScopeCoverage | undefined {
-  const entry = agorStore.getState().coverage.get(key);
-  return entry?.generation === run.generation ? entry : undefined;
-}
-
 /** A piece's coverage entry under `run`'s lifetime and generation. */
 function pieceEntry(
   run: ScopeRun,
@@ -457,9 +439,6 @@ function commitPiece(
 function settleReferencePiece(run: ScopeRun): void {
   commitPiece(run, USER_SCOPE_KEYS.references, { status: 'loaded' });
 }
-
-/** A piece the global sets complete (`applyGlobalCompatibility`) holds no rows of its own. */
-const NO_MEMBERS: CoverageMembers = {};
 
 /** Ids of my active sessions in the store. */
 function mySessionIds(s: AgorState, userId: string): Set<string> {
@@ -514,37 +493,8 @@ function missingReferences(s: AgorState, run: ScopeRun): string[] {
   return missing;
 }
 
-/**
- * Compatibility path while global hydration exists (Steps 1–2; removed with
- * the global loops in 3.3). Once the global session and branch snapshots have
- * applied, the store holds every active session and branch the caller can
- * see, so they complete any flag a failed scope left unset, and a
- * referenced branch that is still missing is absent.
- */
-function applyGlobalCompatibility(run: ScopeRun): void {
-  if (!isCurrent(run) || !run.compat) return;
-  const state = agorStore.getState();
-  if (!globalSetsComplete(state)) return;
-  const unresolved = [...referencedBranchIds(state, run.userId)].filter(
-    (id) => !state.branchById.has(id) && !run.pending.has(id)
-  );
-  updateAbsent(run, unresolved);
-  for (const id of unresolved) run.failed.delete(id);
-  // The global sets hold these rows (`globalSetsMembers`), so a piece the
-  // compatibility path completes commits no members of its own.
-  if (!selectMySessionsLoaded(state)) {
-    commitPiece(run, USER_SCOPE_KEYS.sessions, { status: 'loaded', members: NO_MEMBERS });
-  }
-  commitPiece(run, USER_SCOPE_KEYS.teammates, {
-    status: 'loaded',
-    members: pieceInRun(run, USER_SCOPE_KEYS.teammates)?.members ?? NO_MEMBERS,
-  });
-  if (run.pending.size === 0) settleReferencePiece(run);
-}
-
 /** The referenced-branch piece is loaded once every reference is known and none is unresolved. */
 function settleHomeBranches(run: ScopeRun): void {
-  applyGlobalCompatibility(run);
   if (!isCurrent(run) || !run.referencesKnown) return;
   if (run.pending.size > 0 || run.failed.size > 0) return;
   if (missingReferences(agorStore.getState(), run).length > 0) return;
@@ -651,7 +601,6 @@ function scheduleRetry(run: ScopeRun, ids: string[]): void {
       run.pending.delete(id);
       run.failed.add(id);
     }
-    run.compat = true;
     return;
   }
   const timer = setTimeout(() => {
@@ -689,8 +638,7 @@ function subscribeToReferences(run: ScopeRun): void {
     if (
       state.sessionById === prev.sessionById &&
       state.commentById === prev.commentById &&
-      state.branchById === prev.branchById &&
-      state.globallyHydrated === prev.globallyHydrated
+      state.branchById === prev.branchById
     ) {
       return;
     }
@@ -760,7 +708,6 @@ export async function startUserScope(
     inflight: 0,
     referencesKnown: false,
     replace: options.replace ?? false,
-    compat: false,
     referenceTimer: null,
     retryTimers: new Set(),
     drainWaiters: [],
@@ -790,8 +737,8 @@ export async function startUserScope(
   // reconnect or role change can make a branch visible): revalidate them.
   queueBranches(run, store().absentBranchIds);
   // Early pass: resolve what the gated page already references now — full
-  // page or not — so these small reads go out before U1 and the global
-  // snapshots instead of queuing behind them on a slow socket.
+  // page or not — so these small reads go out before U1 instead of queuing
+  // behind it on a slow socket.
   checkReferences(run);
 
   // Small reads first (U2, U3), then the bulk U1: on a slow socket the
@@ -843,7 +790,7 @@ export async function startUserScope(
         () => isCurrent(run),
         async () => {
           // Await only a real barrier: even `await undefined` would send U1 a
-          // microtask late, behind the global snapshots started right after.
+          // microtask late.
           if (options.deferBulkRead) {
             await options.deferBulkRead;
             if (!isCurrent(run)) return {};
@@ -871,12 +818,6 @@ export async function startUserScope(
   for (const result of settled) {
     if (result.status === 'rejected') console.warn('[userScope] read failed:', result.reason);
   }
-  if (settled.some((result) => result.status === 'rejected' || !result.value)) {
-    // A flag this run could not set may still be completed by the global
-    // snapshots (Steps 1–2).
-    run.compat = true;
-    applyGlobalCompatibility(run);
-  }
   // Every reference is known once all of my sessions and my branches are in;
   // teammates (U3) only shrink the id list, so they needn't succeed.
   const ok = (index: number) => settled[index].status === 'fulfilled' && settled[index].value;
@@ -893,9 +834,8 @@ export async function startUserScope(
   }
   // Immediate catch-up scan (not debounced), even when U1 or U2 failed: the
   // references a read that did land added are queued now. Resolve only once
-  // those follow-up id reads settle, so a caller holding the global snapshots
-  // for the scope doesn't release them before the U1-only references are on
-  // the wire. Completeness (the referenced-branch piece) still needs referencesKnown.
+  // those follow-up id reads settle. Completeness (the referenced-branch
+  // piece) still needs referencesKnown.
   checkReferences(run);
   await idReadsDrained(run);
 }

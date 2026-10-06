@@ -1,6 +1,5 @@
 import type { BoardEntityObject, Branch, CardWithType, Session } from '@agor-live/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { setGlobalHydrationForTests } from '../hooks/useAgorData';
 import {
   beginPartitionLoad,
   endPartitionLoad,
@@ -88,7 +87,6 @@ describe('pins', () => {
     });
   });
   afterEach(() => {
-    setGlobalHydrationForTests(true);
     setRealtimeAuthorityScope(null);
     discardRealtimeNow();
     agorStore.getState().reset();
@@ -184,7 +182,6 @@ describe('pins', () => {
   });
 
   it('a row realtime inserts on a loaded board joins it; one nothing holds never enters', () => {
-    setGlobalHydrationForTests(false);
     seedBoard('b2', { branches: [branch('br-2', 'b2')], sessions: [] });
     sessionCreated(session('s-live', 'br-2', 'b2'));
     sessionCreated(session('s-elsewhere', 'br-9', 'b9'));
@@ -253,10 +250,8 @@ describe('realtime admission (global hydration off)', () => {
     resetHydrationRevisions();
     discardRealtimeNow();
     setRealtimeAuthorityScope(AUTHORITY);
-    setGlobalHydrationForTests(false);
   });
   afterEach(() => {
-    setGlobalHydrationForTests(true);
     setRealtimeAuthorityScope(null);
     discardRealtimeNow();
     agorStore.getState().reset();

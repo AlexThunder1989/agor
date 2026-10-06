@@ -17,6 +17,10 @@ describe('useSessionMcpServerIds', () => {
     agorStore.getState().reset();
     resetHydrationRevisions();
     setRealtimeAuthorityScope('user-a:member:1');
+    // The displayed session is one the store holds: only those take links.
+    agorStore
+      .getState()
+      .setMap('sessionById', new Map([['s-1', { session_id: 's-1', archived: false } as never]]));
   });
   afterEach(() => setRealtimeAuthorityScope(null));
 

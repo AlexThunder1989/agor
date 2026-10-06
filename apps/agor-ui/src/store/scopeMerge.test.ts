@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { type DataMaps, EMPTY_MAPS } from './agorMaps';
 import {
   boardPartitionScope,
-  globalSetsMembers,
   replaceScope,
   scopeMembers,
   USER_SCOPE_KEYS,
@@ -333,15 +332,6 @@ describe('replaceScope with overlapping scopes', () => {
     expect([...(members.sessions as Set<string>)]).toEqual(['s-live']);
     expect(members.branches?.has('br-gone')).toBe(false);
     expect(members.boardObjects).toBeUndefined();
-  });
-
-  it('the global sets (Steps 1–2) keep every session and branch once hydrated', () => {
-    const prev = storeWith({ branches: [branch('br-1')], sessions: [session('s-1', 'br-1')] });
-    const global = globalSetsMembers(new Set(['sessions', 'branches']));
-    expect(replaceScope(prev, scopeA, { sessions: [], branches: [] }, never, [global])).toBe(prev);
-    // Annotations have no global claim.
-    const withCard = storeWith({ cards: [card('k-1')] });
-    expect(replaceScope(withCard, scopeA, { cards: [] }, never, [global]).cardById.size).toBe(0);
   });
 
   it('overwrites a stale session row another scope also holds without removing it', () => {

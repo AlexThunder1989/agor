@@ -39,8 +39,9 @@ import {
   stopUserScope,
 } from './userScope';
 
-const AUTHORITY = 'me:member:1';
 const ME = 'user-me';
+// The caller's identity is the authority's first segment: realtime admits my rows.
+const AUTHORITY = `${ME}:member:1`;
 /** The current load lifetime (what `useAgorData` passes for its load). */
 const lifetime = () => {
   const current = captureLoadLifetime();
@@ -506,7 +507,7 @@ describe('user scope', () => {
     expect(agorStore.getState().absentBranchIds.size).toBe(0);
   });
 
-  it('leaves flags unset when my sessions cannot be read and no global snapshot applied', async () => {
+  it('leaves my-sessions and Home-branch flags unset when my sessions cannot be read', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { client } = makeClient({
       mine: () => Promise.reject(new Error('socket timeout')),

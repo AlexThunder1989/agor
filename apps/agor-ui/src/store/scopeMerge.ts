@@ -3,9 +3,9 @@
  * snapshot (design r3 §3.8, §4.5).
  *
  * A scope is a set of rows one load is authoritative for: one board's
- * partition, a piece of the caller's user scope, and (Steps 1–2 only) the
- * global session and branch sets. Both reducers are fenced per id: a row that
- * a live event wrote since the load began keeps its live value, or its absence.
+ * partition or a piece of the caller's user scope. Both reducers are fenced
+ * per id: a row that a live event wrote since the load began keeps its live
+ * value, or its absence.
  *
  * - `applyEntityFill` (`agorMaps.ts`) inserts absent rows and never
  *   overwrites a present one (I2). It cannot remove anything, so it is not
@@ -97,7 +97,7 @@ export type CoverageCollection = keyof LoadScope['claims'];
 
 /** Row ids per collection that belong to a loaded scope. */
 export type CoverageMembers = Readonly<Partial<Record<CoverageCollection, ReadonlySet<string>>>>;
-/** What a replace asks of another scope's members: only `has` (the global sets hold every id). */
+/** What a replace asks of another scope's members: only `has`. */
 export type MemberLookup = Readonly<
   Partial<Record<CoverageCollection, Pick<ReadonlySet<string>, 'has'>>>
 >;
@@ -330,30 +330,6 @@ export function liveMembership(
     next.set(key, { ...entry, members });
   }
   return next ?? coverage;
-}
-
-const EVERY_ID: Pick<ReadonlySet<string>, 'has'> = { has: () => true };
-
-// Steps 1–2: whether the global session and branch loops run. Test-only
-// switch (`setGlobalHydrationForTests`) until 3.3 deletes them.
-let globalHydration = true;
-export const globalHydrationEnabled = () => globalHydration;
-export function setGlobalHydrationEnabled(enabled: boolean): void {
-  globalHydration = enabled;
-}
-
-/**
- * Steps 1–2 only: once a global session or branch snapshot has applied, the
- * global set holds every row of that collection, so no partition replace
- * removes one; the global resync reconciles them. Removed with global
- * hydration in 3.3. Annotations have no global claim: a card or board object
- * belongs to exactly one board, so its board's partition is authoritative.
- */
-export function globalSetsMembers(globallyHydrated: ReadonlySet<string>): MemberLookup {
-  return {
-    ...(globallyHydrated.has('sessions') ? { sessions: EVERY_ID } : {}),
-    ...(globallyHydrated.has('branches') ? { branches: EVERY_ID } : {}),
-  };
 }
 
 /**

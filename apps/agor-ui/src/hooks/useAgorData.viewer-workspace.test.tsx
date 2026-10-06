@@ -403,9 +403,11 @@ describe('workspace authority generation ordering', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     await waitFor(() => expect(seam.serviceListenerCount('sessions', 'patched')).toBe(1));
 
+    // Each patch is its author's own session, so only the authority fence keeps it out.
     const fromA = {
       session_id: 'session-from-a',
       branch_id: 'branch-a',
+      created_by: 'user-a',
       status: 'running',
       archived: false,
       created_at: '2026-08-20T00:00:00.000Z',
@@ -414,24 +416,25 @@ describe('workspace authority generation ordering', () => {
 
     // B's essential silent resync fails. The identity layout reset must remain
     // empty even when A's old passive cleanup runs after that reset.
-    const beforeFailedResync = seam.findAllCallCount('sessions');
-    seam.setServiceFailure('sessions', true);
+    const beforeFailedResync = seam.findAllCallCount('boards');
+    seam.setServiceFailure('boards', true);
     rerender({ userId: 'user-b', role: 'member', ready: true, generation: 2 });
     await waitFor(() =>
-      expect(seam.findAllCallCount('sessions')).toBeGreaterThan(beforeFailedResync)
+      expect(seam.findAllCallCount('boards')).toBeGreaterThan(beforeFailedResync)
     );
     expect(agorStore.getState().sessionById.has('session-from-a')).toBe(false);
     expect(agorStore.getState().sessionsByBranch.has('branch-a')).toBe(false);
 
     // Let B re-establish a healthy generation, then queue one of B's patches
     // and disconnect before the frame flushes. Reconnect must not replay it.
-    seam.setServiceFailure('sessions', false);
+    seam.setServiceFailure('boards', false);
     rerender({ userId: 'user-b', role: 'member', ready: true, generation: 3 });
     await waitFor(() => expect(seam.serviceListenerCount('sessions', 'patched')).toBe(1));
     const beforeDisconnect = {
       ...fromA,
       session_id: 'session-before-disconnect',
       branch_id: 'branch-b',
+      created_by: 'user-b',
     } as Session;
     act(() => seam.emitService('sessions', 'patched', beforeDisconnect));
     rerender({ userId: 'user-b', role: 'member', ready: false, generation: 3 });
@@ -447,6 +450,7 @@ describe('workspace authority generation ordering', () => {
       ...fromA,
       session_id: 'session-before-demotion',
       branch_id: 'branch-b',
+      created_by: 'user-b',
     } as Session;
     act(() => seam.emitService('sessions', 'patched', beforeDemotion));
     rerender({ userId: 'user-b', role: 'viewer', ready: true, generation: 4 });

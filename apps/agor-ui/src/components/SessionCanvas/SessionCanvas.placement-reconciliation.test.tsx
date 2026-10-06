@@ -16,6 +16,8 @@ import { ConnectionProvider } from '../../contexts/ConnectionContext';
 import { EMPTY_MAPS } from '../../store/agorMaps';
 import { boardObjectPatched, sessionPatched } from '../../store/agorRealtimeActions';
 import { agorStore } from '../../store/agorStore';
+import { captureLoadLifetime } from '../../store/loadLifetime';
+import { setRealtimeAuthorityScope } from '../../store/realtimeBatch';
 import { boardScopeKey } from '../../store/scopeMerge';
 import { boardCoverage } from '../../test/userScopeCoverage';
 import { ZoneNode } from './canvas/BoardObjectNodes';
@@ -204,9 +206,15 @@ const connected = {
   currentSha: null,
 };
 
+/**
+ * The fixture board's partition, loaded under the current lifetime: it holds
+ * the board's rows, so realtime writes to them are admitted.
+ */
+const loadedPartition = () => boardCoverage('loaded', captureLoadLifetime() ?? undefined);
+
 /** A (re)load of the fixture board's partition: a new partition lifetime. */
 function markFixtureLoaded() {
-  agorStore.getState().setCoverage(boardScopeKey(BOARD_ID), boardCoverage());
+  agorStore.getState().setCoverage(boardScopeKey(BOARD_ID), loadedPartition());
 }
 
 function currentNode(id: string): FlowNode {
@@ -218,6 +226,7 @@ function currentNode(id: string): FlowNode {
 describe('SessionCanvas authoritative zone placement reconciliation', () => {
   beforeEach(() => {
     flowProps = null;
+    setRealtimeAuthorityScope(`${adminUser.user_id}:admin:1`);
     agorStore.setState({
       ...EMPTY_MAPS,
       repoById: new Map([[repo.repo_id, repo]]),
@@ -226,7 +235,7 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
       userById: new Map([[adminUser.user_id, adminUser]]),
       boardObjectsByBoardId: new Map([[BOARD_ID, [implementingPlacement, reviewingCardPlacement]]]),
       // Structural edits need the board's partition loaded (see `boardReady`).
-      coverage: new Map([[boardScopeKey(BOARD_ID), boardCoverage()]]),
+      coverage: new Map([[boardScopeKey(BOARD_ID), loadedPartition()]]),
     });
   });
 
@@ -1047,6 +1056,7 @@ describe('SessionCanvas authoritative zone placement reconciliation', () => {
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
+    setRealtimeAuthorityScope(null);
   });
 
   it('persists a second drag after the first pending PATCH is acknowledged', async () => {

@@ -1,6 +1,5 @@
 import type { AgorClient, Session } from '@agor-live/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { setGlobalHydrationForTests } from '../hooks/useAgorData';
 import { updateSessionMcpServers } from '../utils/sessionMcpServers';
 import { cancelAllHydrations, resetHydrationRevisions } from './agorHydration';
 import {
@@ -59,6 +58,16 @@ function makeClient() {
 
 const never = () => false;
 
+/** Seed `s-1` in the store: only a session something holds takes links. */
+function holdSession() {
+  agorStore
+    .getState()
+    .setMap(
+      'sessionById',
+      new Map([['s-1', { session_id: 's-1', branch_id: 'b-1', archived: false } as never]])
+    );
+}
+
 describe('mergeSessionMcpSnapshot', () => {
   it('takes untouched links from the snapshot and keeps other sessions', () => {
     const prev = new Map([
@@ -107,6 +116,7 @@ describe('loadSessionMcpServerIds', () => {
     agorStore.getState().reset();
     resetHydrationRevisions();
     setRealtimeAuthorityScope(AUTHORITY);
+    holdSession();
   });
   afterEach(() => {
     setRealtimeAuthorityScope(null);
@@ -199,6 +209,7 @@ describe('updateSessionMcpServers before the links load', () => {
     agorStore.getState().reset();
     resetHydrationRevisions();
     setRealtimeAuthorityScope(AUTHORITY);
+    holdSession();
   });
   afterEach(() => {
     setRealtimeAuthorityScope(null);
@@ -235,6 +246,7 @@ describe('session MCP links of deleted sessions', () => {
     agorStore.getState().reset();
     resetHydrationRevisions();
     setRealtimeAuthorityScope(AUTHORITY);
+    holdSession();
   });
   afterEach(() => {
     setRealtimeAuthorityScope(null);
@@ -278,15 +290,13 @@ describe('session MCP links of deleted sessions', () => {
   });
 });
 
-describe('links of sessions nothing holds (global hydration off)', () => {
+describe('links of sessions nothing holds', () => {
   beforeEach(() => {
     agorStore.getState().reset();
     resetHydrationRevisions();
     setRealtimeAuthorityScope(AUTHORITY);
-    setGlobalHydrationForTests(false);
   });
   afterEach(() => {
-    setGlobalHydrationForTests(true);
     setRealtimeAuthorityScope(null);
     agorStore.getState().reset();
   });

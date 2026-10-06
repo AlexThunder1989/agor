@@ -602,11 +602,10 @@ export function keepLiveWrites<T>(
  *   absent from `branchById` is skipped: that branch was archived or deleted
  *   while the load was in flight.
  * - An archived session (only a deep link reads one) is held in `sessionById`
- *   for display only, outside every branch bucket; the global session
- *   hydration carries such rows over.
+ *   for display only, outside every branch bucket.
  *
  * Returns `prev` unchanged when nothing was filled. Never bumps revisions, so a
- * fill cannot make a concurrent global hydration discard its snapshot.
+ * fill cannot make a concurrent hydration discard its snapshot.
  */
 export function applyEntityFill(
   prev: DataMaps,
