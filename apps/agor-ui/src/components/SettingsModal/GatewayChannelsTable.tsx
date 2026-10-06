@@ -105,6 +105,7 @@ import { useThemedMessage } from '@/utils/message';
 import { sanitizeSecretValue } from '@/utils/sanitizeSecret';
 import { filterBySettingsSearch } from '@/utils/settingsSearch';
 import { ACCESS_TOKEN_KEY } from '@/utils/tokenRefresh';
+import { useEnsureBranches } from '../../hooks/useEnsureRows';
 import { buildModelConfigFromFormValues, getFormValuesFromConfig } from '../AgenticToolConfigForm';
 import {
   AgenticToolConfigurationPicker,
@@ -125,7 +126,7 @@ import { UserSelect } from './UserSelect';
 interface GatewayChannelsTableProps {
   client: AgorClient | null;
   gatewayChannelById: Map<string, GatewayChannel>;
-  /** The store's branches; only matches a search against a channel's target name. */
+  /** The store's branches (targets ensured by id); only match a search against a target name. */
   branchById: Map<string, Branch>;
   userById: Map<string, User>;
   mcpServerById: Map<string, MCPServer>;
@@ -4553,6 +4554,11 @@ export const GatewayChannelsTable: React.FC<GatewayChannelsTableProps> = ({
     },
   ];
 
+  // The store holds only the loaded scopes' branches: read the channels' targets.
+  useEnsureBranches(
+    client,
+    Array.from(gatewayChannelById.values(), (channel) => channel.target_branch_id)
+  );
   const channels = useMemo(() => {
     const sorted = mapToSortedArray(
       gatewayChannelById,
