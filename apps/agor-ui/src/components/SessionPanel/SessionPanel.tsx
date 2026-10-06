@@ -65,6 +65,7 @@ import {
   selectUserAuthenticatedMcpServerIds,
   selectUserById,
 } from '../../store/selectors';
+import { isConnectionLossError, withConnectionErrorDetail } from '../../utils/connectionErrors';
 import { getContextWindowGradient } from '../../utils/contextWindow';
 import { MOBILE_TOUCH_TARGET } from '../../utils/deviceDetection';
 import { mcpServerNeedsAuth } from '../../utils/mcpAuth';
@@ -94,6 +95,7 @@ import {
   isBlockingComposerAttachment,
 } from './composerAttachments';
 import { appendComposerText } from './composerText';
+import { PROMPT_NOT_SENT_MESSAGE } from './promptReconciliation';
 import type { SessionAttachmentItem } from './SessionAttachmentsDropdown';
 import { SessionAttachmentsDropdown } from './SessionAttachmentsDropdown';
 import { SessionAttachmentTray } from './SessionAttachmentTray';
@@ -1113,7 +1115,13 @@ const SessionPanel: React.FC<SessionPanelProps> = ({
     } catch (error) {
       if (composerSessionIdentityRef.current !== sendStartComposerIdentity) return;
       console.error('Composer send failed — keeping prompt and files in composer:', error);
-      showError(error instanceof Error ? error.message : 'Failed to send prompt');
+      showError(
+        isConnectionLossError(error)
+          ? withConnectionErrorDetail(PROMPT_NOT_SENT_MESSAGE, error)
+          : error instanceof Error
+            ? error.message
+            : 'Failed to send prompt'
+      );
     } finally {
       if (composerSendInFlightRef.current === sendStartComposerIdentity) {
         composerSendInFlightRef.current = null;
