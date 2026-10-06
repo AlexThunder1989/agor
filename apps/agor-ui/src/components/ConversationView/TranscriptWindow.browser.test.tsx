@@ -110,6 +110,7 @@ function transport(persisted: number) {
   const session = () => ({
     session_id: SESSION_ID,
     tasks: Array.from({ length: turns }, (_, n) => taskId(n)),
+    tasks_complete: true,
   });
   const sessions = Object.assign(events(), { get: async () => session() });
   const services: Record<string, unknown> = {
