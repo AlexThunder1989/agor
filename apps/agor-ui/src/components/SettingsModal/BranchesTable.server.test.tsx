@@ -8,7 +8,9 @@ import { EventEmitter } from 'node:events';
 import type { AgorClient, Branch, Repo } from '@agor-live/client';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { agorStore } from '@/store/agorStore';
+import { setRealtimeAuthorityScope } from '@/store/realtimeBatch';
 import { BranchesTable } from './BranchesTable';
 
 const repo = { repo_id: 'repo-1', name: 'repo-1', slug: 'org/repo-1' } as unknown as Repo;
@@ -53,6 +55,12 @@ function makeClient(total = 25) {
   const emit = (event: string, payload: unknown) => act(() => void branches.emit(event, payload));
   return { client, branchesFind, sessionsFind, emit };
 }
+
+beforeEach(() => setRealtimeAuthorityScope('me:member:1'));
+afterEach(() => {
+  setRealtimeAuthorityScope(null);
+  agorStore.getState().reset();
+});
 
 function renderTable(client: AgorClient) {
   render(

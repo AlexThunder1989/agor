@@ -1,16 +1,23 @@
 import type { AgorClient, Branch } from '@agor-live/client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { rowsOf } from '@/store/userScope';
+import { useServerRead } from '../../hooks/useServerRead';
 
 type Listener = (row: Branch) => void;
+type Page = { rows: Branch[]; total: number };
+
+const NO_PAGE: Page = { rows: [], total: 0 };
 
 /**
  * One page of `branches.find(query)`, newest first, and the server's total,
  * for a settings table that pages on the daemon rather than over the store
  * (which holds only the loaded scopes). The rows are local display state:
- * they never enter the store and join no scope. A patch to a row on the page
- * replaces it in place; a create, a removal, or a patch that flips `archived`
- * reads the page again. `query: null` reads nothing.
+ * they never enter the store and join no scope. Read through `useServerRead`:
+ * a patch to a row on the page replaces it in place (and survives a re-read
+ * in flight); an event that can change the page's membership or total — a
+ * create, a removal, an archive flip, a patch to an off-page row under a
+ * filter, any patch while searching — reads the page again, debounced.
+ * `query: null` reads nothing.
  */
 export function useBranchPage(
   client: AgorClient | null,
@@ -18,73 +25,53 @@ export function useBranchPage(
   page: number,
   pageSize: number
 ): { rows: Branch[]; total: number; loading: boolean; refresh: () => void } {
-  const [result, setResult] = useState<{ rows: Branch[]; total: number }>({ rows: [], total: 0 });
-  const [loading, setLoading] = useState(false);
-  const [revision, setRevision] = useState(0);
-  const refresh = useCallback(() => setRevision((r) => r + 1), []);
-  const rowsRef = useRef(result.rows);
-  rowsRef.current = result.rows;
-  // A stable dependency for an inline query object.
+  // A stable key for an inline query object.
   const queryKey = query ? JSON.stringify(query) : null;
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: revision is a re-read trigger
-  useEffect(() => {
-    if (!client || !queryKey) return;
-    let cancelled = false;
-    setLoading(true);
-    client
-      .service('branches')
-      .find({
+  const rowsRef = useRef<Branch[]>([]);
+  const { data, loading, refresh } = useServerRead<Page>(
+    client,
+    queryKey && `${queryKey}|${page}|${pageSize}`,
+    async (client) => {
+      const found = await client.service('branches').find({
         query: {
-          ...JSON.parse(queryKey),
+          ...JSON.parse(queryKey as string),
           $limit: pageSize,
           $skip: (page - 1) * pageSize,
           $sort: { created_at: -1 },
         },
-      })
-      .then((found) => {
-        if (cancelled) return;
-        const rows = rowsOf<Branch>(found);
-        setResult({ rows, total: Array.isArray(found) ? rows.length : found.total });
-      })
-      .catch((err) => {
-        if (!cancelled) console.warn('[settings] branch page read failed:', err);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [client, queryKey, page, pageSize, revision]);
-
-  useEffect(() => {
-    if (!client) return;
-    const service = client.service('branches');
-    const onPage = (branch: Branch) =>
-      rowsRef.current.find((row) => row.branch_id === branch.branch_id);
-    const patched: Listener = (branch) => {
-      const row = onPage(branch);
-      if (!row) return;
-      if (row.archived !== branch.archived) return refresh();
-      setResult((prev) => ({
-        ...prev,
-        rows: prev.rows.map((r) => (r.branch_id === branch.branch_id ? branch : r)),
-      }));
-    };
-    const removed: Listener = (branch) => {
-      if (onPage(branch)) refresh();
-    };
-    service.on('created', refresh);
-    service.on('patched', patched);
-    service.on('removed', removed);
-    return () => {
-      service.off('created', refresh);
-      service.off('patched', patched);
-      service.off('removed', removed);
-    };
-  }, [client, refresh]);
-
+      const rows = rowsOf<Branch>(found);
+      return { rows, total: Array.isArray(found) ? rows.length : found.total };
+    },
+    {
+      keepPrevious: true,
+      subscribe: (client, { invalidate, patch }) => {
+        const service = client.service('branches');
+        const searching = query?.search !== undefined;
+        // Under a filter, an off-page patch may be an archive flip or a match.
+        const filtered = searching || query?.archived !== undefined;
+        const patched: Listener = (branch) => {
+          const row = rowsRef.current.find((r) => r.branch_id === branch.branch_id);
+          if (row ? searching || row.archived !== branch.archived : filtered) invalidate();
+          if (!row) return;
+          patch((prev) => ({
+            ...prev,
+            rows: prev.rows.map((r) => (r.branch_id === branch.branch_id ? branch : r)),
+          }));
+        };
+        service.on('created', invalidate);
+        service.on('patched', patched);
+        service.on('removed', invalidate);
+        return () => {
+          service.off('created', invalidate);
+          service.off('patched', patched);
+          service.off('removed', invalidate);
+        };
+      },
+    }
+  );
+  const result = data ?? NO_PAGE;
+  rowsRef.current = result.rows;
   return { ...result, loading, refresh };
 }
 
