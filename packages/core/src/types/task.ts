@@ -130,7 +130,7 @@ export interface TerminationCoordinationClaim {
 }
 
 /** How a termination request reached Agor; absent on requests recorded before this existed. */
-export type TerminationRequestVia = 'ui' | 'mcp' | 'agor';
+export type TerminationRequestVia = 'ui' | 'api' | 'mcp' | 'agor';
 
 export interface TerminationRequest {
   cause: TerminationCause;

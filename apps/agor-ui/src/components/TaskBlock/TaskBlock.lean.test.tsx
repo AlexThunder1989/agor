@@ -768,6 +768,12 @@ it('keeps a load pin taken before the previous commit’s passive effect runs', 
 it.each([
   ['the viewer', 'viewer', 'ui', 'You stopped the agent. Any edits are kept.'],
   ['a teammate', 'teammate', 'ui', 'Ada stopped the agent. Any edits are kept.'],
+  [
+    'a teammate over the CLI or API',
+    'teammate',
+    'api',
+    'Ada stopped the agent. Any edits are kept.',
+  ],
   ['an agent over MCP', 'viewer', 'mcp', 'The agent was stopped. Any edits are kept.'],
   ['Agor', undefined, 'agor', 'The agent was stopped. Any edits are kept.'],
 ] as const)('names %s as the one who stopped the agent', (_, requester, via, copy) => {

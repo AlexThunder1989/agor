@@ -52,11 +52,12 @@ export async function markStoppedSessionPromptableNoDrain(
   );
 }
 
-/** The authenticated caller; MCP calls come from an agent acting for that user. */
+/** The authenticated caller; MCP calls come from an agent acting for that user, REST from the CLI or API. */
 export function stopRequester(params: Params): TerminationInput['requestedBy'] {
   const userId = (params as { user?: { user_id?: string } }).user?.user_id;
   if (!userId) return { requested_via: 'agor' };
-  return { requested_by_user_id: userId, requested_via: params.provider === 'mcp' ? 'mcp' : 'ui' };
+  const via = params.provider === 'mcp' ? 'mcp' : params.provider === 'socketio' ? 'ui' : 'api';
+  return { requested_by_user_id: userId, requested_via: via };
 }
 
 /**

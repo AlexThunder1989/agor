@@ -292,8 +292,9 @@ still running after 15 seconds emits one warning but is not falsely reported as
 quiescent.
 
 The termination request also records who asked when the winning cause carries
-it: `requested_by_user_id` and `requested_via` (`ui`, `mcp` for an agent acting
-for that user, `agor` for internal stops). It is attribution only and never
+it: `requested_by_user_id` and `requested_via` (`ui` for the app's socket,
+`api` for REST callers such as the CLI, `mcp` for an agent acting for that
+user, `agor` for internal stops). It is attribution only and never
 changes containment or settlement.
 
 Verified user Stop settles as `stopped`; verified health/startup/heartbeat

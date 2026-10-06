@@ -584,10 +584,14 @@ describe('stopSessionPreserveQueue', () => {
 });
 
 describe('stopRequester', () => {
-  it('names the person for UI stops, their agent for MCP stops, and Agor otherwise', () => {
+  it('names the person for UI and API stops, their agent for MCP stops, and Agor otherwise', () => {
     expect(stopRequester({ user: { user_id: 'u1' }, provider: 'socketio' } as never)).toEqual({
       requested_by_user_id: 'u1',
       requested_via: 'ui',
+    });
+    expect(stopRequester({ user: { user_id: 'u1' }, provider: 'rest' } as never)).toEqual({
+      requested_by_user_id: 'u1',
+      requested_via: 'api',
     });
     expect(stopRequester({ user: { user_id: 'u1' }, provider: 'mcp' } as never)).toEqual({
       requested_by_user_id: 'u1',

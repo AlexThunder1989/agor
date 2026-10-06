@@ -194,14 +194,15 @@ function messagesHaveTools(messages: Message[]): boolean {
   );
 }
 
-/** Who asked for a stop, named only when a person did it from the UI. */
+/** Who asked for a stop, named only when a person did it themselves (app, CLI or API), not their agent. */
 function stopRequester(
   task: Task,
   currentUserId: string | undefined,
   userById: Map<string, User>
 ): TurnOutcomeContext['stoppedBy'] {
   const request = task.termination_request;
-  if (request?.requested_via !== 'ui' || !request.requested_by_user_id) return undefined;
+  const byPerson = request?.requested_via === 'ui' || request?.requested_via === 'api';
+  if (!byPerson || !request?.requested_by_user_id) return undefined;
   if (request.requested_by_user_id === currentUserId) return 'you';
   const name = userById.get(request.requested_by_user_id)?.name?.trim().split(/\s+/)[0];
   return name ? { name } : undefined;
