@@ -12,6 +12,7 @@ import {
   referenceRetryDelayMs,
   rowsOf,
 } from '../store/userScope';
+import { usePinnedRows } from './usePinnedRows';
 
 type EnsureKind = 'sessions' | 'branches';
 
@@ -71,7 +72,8 @@ interface EnsureState {
  * not again under this authority, a failed read retries with the user
  * scope's capped backoff up to `MAX_REFERENCE_READ_ATTEMPTS`, and an id the
  * store evicts after loading it is read again. With `debounceMs`, a burst of
- * id changes is read once it settles.
+ * id changes is read once it settles. The ids are pinned while the view is
+ * mounted (`usePinnedRows`), so no eviction takes a row it displays.
  */
 function useEnsureRows(
   kind: EnsureKind,
@@ -80,6 +82,7 @@ function useEnsureRows(
   debounceMs = 0
 ): void {
   const key = [...new Set(ids)].filter(Boolean).sort().join(',');
+  usePinnedRows({ [kind]: key ? key.split(',') : [] });
   const missing = useAgorStore(
     useCallback(
       (s: DataMaps) =>

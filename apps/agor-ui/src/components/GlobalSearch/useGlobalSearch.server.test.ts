@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetHydrationRevisions } from '../../store/agorHydration';
 import { agorStore, useAgorStore } from '../../store/agorStore';
 import { discardRealtimeNow, setRealtimeAuthorityScope } from '../../store/realtimeBatch';
+import { pinnedMembers } from '../../store/rowPins';
 import { selectBranchById, selectSessionById } from '../../store/selectors';
 import { useGlobalSearch } from './useGlobalSearch';
 
@@ -135,5 +136,18 @@ describe('parent-branch labels', () => {
     expect(branchesFind).toHaveBeenCalledWith({
       query: { branch_id: { $in: ['br-parent'] }, archived: false, $limit: 1 },
     });
+  });
+
+  it('pins its results while the search shows them; closing the search evicts them', async () => {
+    const { client } = makeClient({
+      sessions: [session('s-remote', 'Fix login', { created_by: 'user-other' })],
+      branches: [branch('br-remote', 'login-fix')],
+    });
+    const { result, unmount } = renderSearch(client, 'login');
+    await waitFor(() => expect(result.current.counts.session).toBe(1));
+    expect(pinnedMembers.sessions?.has('s-remote')).toBe(true);
+    unmount();
+    expect(agorStore.getState().sessionById.has('s-remote')).toBe(false);
+    expect(agorStore.getState().branchById.has('br-remote')).toBe(false);
   });
 });

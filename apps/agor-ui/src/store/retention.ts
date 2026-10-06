@@ -1,15 +1,19 @@
 /**
- * Retention (design r3 §4.5): a row stays while some scope holds it. Rows
- * leave at natural points only — a partition evicted from the LRU
- * (`boardPartitions.ts`), the end of a reconnect resync — never on a timer.
+ * Retention (design r3 §4.5): a row stays while some scope or pin
+ * (`rowPins.ts`) holds it. Rows leave at natural points only — a partition
+ * evicted from the LRU (`boardPartitions.ts`), a pin released, the end of a
+ * reconnect resync — never on a timer.
  *
  * An eviction is a `replaceScope` with an empty, complete snapshot over the
  * rows being released: every one of them that no remaining scope's committed
- * membership holds (`otherCommittedMembers`) leaves, in one store update with
- * the coverage it drops. Rows outside the released set are never swept.
+ * membership holds (`otherCommittedMembers`, stale lifetimes included: a
+ * disconnect or an authority change must not free rows my scopes still
+ * describe) leaves, in one store update with the coverage it drops. Rows
+ * outside the released set are never swept.
  */
 import type { DataMaps } from './agorMaps';
 import { agorStore } from './agorStore';
+import { acquirePins, type PinnedIds, releasePins } from './rowPins';
 import {
   type Coverage,
   type LoadScope,
@@ -55,7 +59,11 @@ const without = (coverage: Coverage, keys: readonly ScopeKey[]) =>
  */
 export function evictRows(claims: Claims, dropKeys: readonly ScopeKey[] = []): void {
   const state = agorStore.getState();
-  const holders = otherCommittedMembers({ ...state, coverage: without(state.coverage, dropKeys) });
+  const holders = otherCommittedMembers(
+    { ...state, coverage: without(state.coverage, dropKeys) },
+    undefined,
+    { stale: true }
+  );
   let removedSessions: string[] = [];
   state.applyMaps(
     (prev) => {
@@ -77,4 +85,23 @@ export function evictRows(claims: Claims, dropKeys: readonly ScopeKey[] = []): v
       return { sessionMcpLoaded };
     }
   );
+}
+
+/**
+ * Pin `ids` while a view displays them; returns the release function. A
+ * release evicts the rows it unpinned that no scope or other pin holds.
+ */
+export function pinRows(ids: PinnedIds): () => void {
+  const pinned = acquirePins(ids);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const unpinned = releasePins(pinned);
+    if (unpinned.sessions.size === 0 && unpinned.branches.size === 0) return;
+    evictRows({
+      sessions: (session) => unpinned.sessions.has(session.session_id),
+      branches: (branch) => unpinned.branches.has(branch.branch_id),
+    });
+  };
 }

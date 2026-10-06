@@ -293,6 +293,14 @@ derived when a replace asks. A board is ready only when its partition is loaded 
   and runs `replaceScope` with an empty snapshot over the board's rows (`store/retention.ts`): rows another scope's
   members hold stay. Evicted sessions' MCP links go with them. A reconnect evicts the boards it unloaded the same way
   once the user scope is replaced.
+- **Pins (C2).** One ref-counted pin set by id (`store/rowPins.ts`) holds the rows mounted views display: the open
+  session and its branch (`usePinnedOpenRows` in both shells), route targets, `useEnsureRows` ids (Home, genealogy,
+  event stream, settings tables, recents) and server search results. Every replace and eviction counts the pins as a
+  holder (`otherCommittedMembers`). A release evicts the rows it unpinned that nothing else holds; a view pins its new
+  ids before releasing the old ones. The open session's MCP links stay with its pin. A realtime-inserted row on a
+  loaded board joins that board's membership; no eviction sweeps rows outside the scope or pins it releases. An
+  eviction counts stale-lifetime scopes too, so a release while disconnected never frees my rows. Archived deep-link
+  rows are not evicted (`replaceScope` never removes archived sessions).
 
 ## 5. Realtime
 

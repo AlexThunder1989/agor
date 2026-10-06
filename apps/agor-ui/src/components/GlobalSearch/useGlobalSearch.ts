@@ -9,6 +9,7 @@ import {
 } from '@agor-live/client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useEnsureBranches } from '../../hooks/useEnsureRows';
+import { usePinnedRows } from '../../hooks/usePinnedRows';
 import { sessionListQuery } from '../../store/sessionListQuery';
 import { fillOnDemand, rowsOf } from '../../store/userScope';
 import {
@@ -53,18 +54,25 @@ export function useDebouncedSearchQuery(query: string) {
  * The server half of a search: read the sessions and branches matching
  * `query` from the daemon (its `search` key, under the caller's visibility)
  * and fill them into the store, so the local pass below finds rows the store
- * never loaded. Display only: the rows join no scope. Rows the query can't
- * have matched (a daemon that ignores `search`) are dropped.
+ * never loaded. Display only: the rows join no scope, and are pinned until the
+ * next query's results replace them or the search closes. Rows the query
+ * can't have matched (a daemon that ignores `search`) are dropped.
  */
 function useServerSearch(
   client: AgorClient | null | undefined,
   query: string,
   createdBy: string | undefined
 ) {
+  const [results, setResults] = useState<{ sessions: string[]; branches: string[] }>();
+  usePinnedRows(results ?? {});
   useEffect(() => {
     const search = query.trim();
     const tokens = tokenizeSearchQuery(search);
-    if (!client || search.length < MIN_QUERY_LENGTH || tokens.length === 0) return;
+    if (!client || search.length < MIN_QUERY_LENGTH || tokens.length === 0) {
+      setResults(undefined);
+      return;
+    }
+    let current = true;
     const filter = {
       search,
       archived: false,
@@ -85,7 +93,18 @@ function useServerSearch(
           matchSearchTokens(tokens, SEARCHABLE_FIELDS.branch(b))
         ),
       };
-    }).catch((err) => console.warn('[GlobalSearch] server search failed:', err));
+    })
+      .then((rows) => {
+        if (!current || !rows) return;
+        setResults({
+          sessions: (rows.sessions ?? []).map((session) => session.session_id),
+          branches: (rows.branches ?? []).map((branch) => branch.branch_id),
+        });
+      })
+      .catch((err) => console.warn('[GlobalSearch] server search failed:', err));
+    return () => {
+      current = false;
+    };
   }, [client, query, createdBy]);
 }
 

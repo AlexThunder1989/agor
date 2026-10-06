@@ -12,6 +12,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { type AppActionsContextValue, AppActionsProvider } from '../../contexts/AppActionsContext';
 import { usePermissionDecision } from '../../hooks/usePermissionDecision';
+import { usePinnedOpenRows } from '../../hooks/usePinnedRows';
 import { useSessionMcpServerIds } from '../../hooks/useSessionMcpServerIds';
 import { useAgorStore } from '../../store/agorStore';
 import { resolveSessionFromShortIdPure } from '../../utils/urlResolution';
@@ -81,6 +82,8 @@ export const SessionPage: React.FC<SessionPageProps> = ({
   const session = resolvedSessionId ? sessionById.get(resolvedSessionId) : undefined;
   const branch = session?.branch_id ? (branchById.get(session.branch_id) ?? null) : null;
   const canonicalSessionId = session?.session_id;
+  // The open session and its branch stay while shown, whatever scope evicts.
+  usePinnedOpenRows({ sessions: [canonicalSessionId] });
 
   // Loaded on first need; the footer's edit control waits for it.
   const { ids: sessionMcpServerIds } = useSessionMcpServerIds(client, canonicalSessionId);

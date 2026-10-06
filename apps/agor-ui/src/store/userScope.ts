@@ -61,6 +61,7 @@ import {
 import { applyEntityFill, type DataMaps } from './agorMaps';
 import { type AgorState, agorStore, type LoadMetaUpdate } from './agorStore';
 import { captureLoadLifetime, isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
+import { pinnedMembers } from './rowPins';
 import {
   type CoverageMembers,
   type CoverageUpdate,
@@ -205,22 +206,29 @@ export function referenceMembers(
 /**
  * The memberships a replace of `exceptKey` must respect: every other scope
  * loaded under the current lifetime (a row that belongs to one of them is
- * never removed), and the global sets while they exist. Loading, failed and
- * stale scopes (another authority or lifetime) hold nothing. Overlapping
- * scopes are normal: my session on a loaded board belongs to the user scope
- * and to that partition.
+ * never removed), the pinned rows (`rowPins.ts`), and the global sets while
+ * they exist. Loading, failed and stale scopes (another authority or
+ * lifetime) hold nothing, unless `stale` (an eviction, which only frees
+ * memory, keeps what a scope from an earlier lifetime still describes until
+ * its next commit). Overlapping scopes are normal: my session on a loaded
+ * board belongs to the user scope and to that partition.
  */
-export function otherCommittedMembers(state: AgorState, exceptKey?: string): MemberLookup[] {
+export function otherCommittedMembers(
+  state: AgorState,
+  exceptKey?: string,
+  { stale = false }: { stale?: boolean } = {}
+): MemberLookup[] {
   const members: MemberLookup[] = [];
   for (const [key, entry] of state.coverage) {
-    if (key === exceptKey || entry.status !== 'loaded' || !isLoadLifetimeCurrent(entry)) continue;
+    if (key === exceptKey || entry.status !== 'loaded') continue;
+    if (!stale && !isLoadLifetimeCurrent(entry)) continue;
     if (key === USER_SCOPE_KEYS.references && entry.userId) {
       members.push({ branches: referenceMembers(state, entry.userId) });
     } else if (entry.members) {
       members.push(entry.members);
     }
   }
-  members.push(globalSetsMembers(state.globallyHydrated));
+  members.push(globalSetsMembers(state.globallyHydrated), pinnedMembers);
   return members;
 }
 

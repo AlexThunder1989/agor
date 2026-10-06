@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cancelAllHydrations, resetHydrationRevisions } from '../store/agorHydration';
 import { agorStore } from '../store/agorStore';
 import { discardRealtimeNow, setRealtimeAuthorityScope } from '../store/realtimeBatch';
+import { pinnedMembers } from '../store/rowPins';
 import { MAX_REFERENCE_READ_ATTEMPTS } from '../store/userScope';
 import { useEnsureBranches } from './useEnsureRows';
 
@@ -136,5 +137,17 @@ describe('useEnsureBranches', () => {
     expect(
       find.mock.calls.slice(1).some(([{ query }]) => query.branch_id.$in.includes('b-1'))
     ).toBe(true);
+  });
+});
+
+describe('useEnsureBranches retention', () => {
+  it('pins the rows it reads while mounted; unmounting evicts the ones nothing holds', async () => {
+    const { client } = makeClient([branch('b-1')]);
+    const { unmount } = renderHook(() => useEnsureBranches(client, ['b-1']));
+    await waitFor(() => expect(agorStore.getState().branchById.has('b-1')).toBe(true));
+    expect(pinnedMembers.branches?.has('b-1')).toBe(true);
+    unmount();
+    expect(pinnedMembers.branches?.has('b-1')).toBe(false);
+    expect(agorStore.getState().branchById.has('b-1')).toBe(false);
   });
 });

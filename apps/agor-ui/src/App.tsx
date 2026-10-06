@@ -84,6 +84,7 @@ import {
   type OnboardingOperationOwner,
   useOnboardingLifecycle,
 } from './hooks/useOnboardingLifecycle';
+import { usePinnedOpenRows } from './hooks/usePinnedRows';
 import { useSurfaceBranding } from './hooks/useSurfaceBranding';
 import { useUnarchiveBranch } from './hooks/useUnarchiveBranch';
 import { repoPatched, sessionCreated } from './store/agorRealtimeActions';
@@ -433,6 +434,9 @@ function AppContent() {
     location.pathname.match(/^\/(?:s|m\/session)\/([^/]+)\/?$/)?.[1] ?? null;
   const directBranchIdFromPath = location.pathname.match(/^\/w\/([^/]+)\/?$/)?.[1] ?? null;
   const authenticatedUserCanListUsers = hasMinimumRole(user?.role, ROLES.MEMBER);
+  // A deep link's target (and an open session's branch) stays while routed
+  // to, whatever scope evicts; a short id is pinned once the UI resolves it.
+  usePinnedOpenRows({ sessions: [directSessionIdFromPath], branches: [directBranchIdFromPath] });
 
   // Pass the stable client lifetime, not `connected ? client : null`:
   // useAgorData owns reconnect refetches and `null` is reserved for logout /

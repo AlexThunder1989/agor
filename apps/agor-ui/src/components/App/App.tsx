@@ -40,6 +40,7 @@ import { useEventStream } from '../../hooks/useEventStream';
 import { useFaviconStatus } from '../../hooks/useFaviconStatus';
 import { useLocalStorage } from '../../hooks/useLocalStorage';
 import { usePermissionDecision } from '../../hooks/usePermissionDecision';
+import { usePinnedOpenRows } from '../../hooks/usePinnedRows';
 import { useRecentBoards } from '../../hooks/useRecentBoards';
 import { useSessionMcpServerIds } from '../../hooks/useSessionMcpServerIds';
 import { useSettingsRoute } from '../../hooks/useSettingsRoute';
@@ -462,6 +463,9 @@ export const App: React.FC<AppProps> = ({
   );
   const effectiveSelectedSessionId =
     !isRootHomePath && selectedSessionId && selectedSessionExists ? selectedSessionId : null;
+  // The open session, its branch and the URL's branch target stay while
+  // shown, whatever scope evicts (`rowPins.ts`).
+  usePinnedOpenRows({ sessions: [selectedSessionId], branches: [activeUrlTargetBranchId] });
 
   // A real selected session always wins; the pending tool-choice empty state
   // only matters when there's no real session to show yet (see
