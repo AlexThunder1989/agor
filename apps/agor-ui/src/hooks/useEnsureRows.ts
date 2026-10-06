@@ -3,6 +3,7 @@ import { PAGINATION } from '@agor-live/client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DataMaps } from '../store/agorMaps';
 import { agorStore, useAgorStore } from '../store/agorStore';
+import { captureLoadLifetime } from '../store/loadLifetime';
 import { sessionListQuery } from '../store/sessionListQuery';
 import {
   type FillRows,
@@ -52,7 +53,7 @@ const ENSURE: Record<
  * The read state of a missing id under one authority: `pending` while a read
  * (or its retry) is outstanding, `absent` once the server didn't return it
  * (or every attempt failed). A loaded id has no state, so one the store later
- * evicts is read again.
+ * evicts is read again; neither does an id whose read was cancelled.
  */
 interface EnsureState {
   authority: string;
@@ -118,8 +119,15 @@ function useEnsureRows(
       for (let i = 0; i < toRead.length; i += PAGINATION.MAX_ID_LIST) {
         const chunk = toRead.slice(i, i + PAGINATION.MAX_ID_LIST);
         fillOnDemand(() => ENSURE[kind].read(client, chunk))
-          .then(() => {
+          .then((rows) => {
             if (state.current !== run) return;
+            if (!rows) {
+              // Cancelled, not absent: release the ids and read them again
+              // under the lifetime that replaced it, if there is one.
+              for (const id of chunk) run.status.delete(id);
+              if (captureLoadLifetime()) setRetries((n) => n + 1);
+              return;
+            }
             const maps = agorStore.getState();
             for (const id of chunk) {
               run.attempts.delete(id);

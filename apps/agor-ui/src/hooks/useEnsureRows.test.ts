@@ -2,7 +2,7 @@ import type { AgorClient, Branch } from '@agor-live/client';
 import { PAGINATION } from '@agor-live/client';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetHydrationRevisions } from '../store/agorHydration';
+import { cancelAllHydrations, resetHydrationRevisions } from '../store/agorHydration';
 import { agorStore } from '../store/agorStore';
 import { discardRealtimeNow, setRealtimeAuthorityScope } from '../store/realtimeBatch';
 import { MAX_REFERENCE_READ_ATTEMPTS } from '../store/userScope';
@@ -112,5 +112,29 @@ describe('useEnsureBranches', () => {
     act(() => agorStore.setState({ branchById: new Map() }));
     await waitFor(() => expect(find).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(agorStore.getState().branchById.has('b-1')).toBe(true));
+  });
+
+  it('reads an id again when its read was cancelled, never recording it absent', async () => {
+    const { client, find } = makeClient([branch('b-1'), branch('b-2')]);
+    let resolveFirst: (rows: Branch[]) => void = () => {};
+    find.mockImplementationOnce(
+      () =>
+        new Promise<Branch[]>((resolve) => {
+          resolveFirst = resolve;
+        })
+    );
+    const { rerender } = renderHook(({ ids }) => useEnsureBranches(client, ids), {
+      initialProps: { ids: ['b-1'] },
+    });
+    await waitFor(() => expect(find).toHaveBeenCalledTimes(1));
+    // Hydration is cancelled under the same authority (a store remount).
+    act(() => cancelAllHydrations());
+    await act(async () => resolveFirst([branch('b-1')]));
+    rerender({ ids: ['b-1', 'b-2'] });
+    await waitFor(() => expect(agorStore.getState().branchById.has('b-2')).toBe(true));
+    await waitFor(() => expect(agorStore.getState().branchById.has('b-1')).toBe(true));
+    expect(
+      find.mock.calls.slice(1).some(([{ query }]) => query.branch_id.$in.includes('b-1'))
+    ).toBe(true);
   });
 });
