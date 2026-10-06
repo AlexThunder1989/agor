@@ -1,5 +1,6 @@
 import type { AgorClient, Branch, Session } from '@agor-live/client';
 import { useRef } from 'react';
+import { agorStore } from '@/store/agorStore';
 import { rowsOf } from '@/store/userScope';
 import { useServerRead } from '../../hooks/useServerRead';
 
@@ -75,10 +76,9 @@ export function useBranchPage(
   return { ...result, loading, refresh };
 }
 
-/** Session events that can change a count (an archive is a patch). */
-const SESSION_EVENTS = ['created', 'patched', 'removed'] as const;
-/** Branch events that move a branch's sessions to another board. */
-const BRANCH_MOVE_EVENTS = ['patched', 'removed'] as const;
+/** What of a session decides which count it falls in. */
+const sessionCountKey = (s: Session) =>
+  s.archived ? null : `${s.branch_id}|${s.branch_board_id ?? ''}`;
 
 const NO_COUNTS = new Map<string, number>();
 
@@ -86,9 +86,13 @@ const NO_COUNTS = new Map<string, number>();
  * Active sessions per `field` value (a branch or a board), read as count-only
  * pages (`$limit: 0`) for just the ids a table shows, since the store holds
  * only the loaded scopes' sessions. Read through `useServerRead`: counted
- * again after a session event for a shown branch (any session event for
- * boards), after a branch moves (board counts), and after a reconnect.
- * Display only; an id missing from the map has no count yet.
+ * again after an event that can change a shown count — a session create or
+ * removal, a session's archive flip or branch/board change, a branch's move
+ * between boards (board counts) — and after an authority change, but not
+ * after a value-only patch (status, title). A patch is compared with the row
+ * last seen through these events, else the store's row when subscribed; a
+ * row seen in neither counts again once. Display only; an id missing from
+ * the map has no count yet.
  */
 export function useSessionCounts(
   client: AgorClient | null,
@@ -115,17 +119,47 @@ export function useSessionCounts(
       keepPrevious: true,
       subscribe: (client, { invalidate }) => {
         const shown = new Set(idsKey.split(','));
-        const onSession = (session: Session) => {
-          if (field === 'board_id' || shown.has(session.branch_id)) invalidate();
+        // A payload without its board may be on a shown one.
+        const shows = (s: Session) =>
+          field === 'board_id'
+            ? s.branch_board_id === undefined || shown.has(s.branch_board_id ?? '')
+            : shown.has(s.branch_id);
+        // Copy-on-write maps: the rows as they were when subscribed.
+        const { sessionById, branchById } = agorStore.getState();
+        const seenSessions = new Map<string, Session>();
+        const seenBoards = new Map<string, string | undefined>();
+        const sessionAdded = (session: Session) => {
+          seenSessions.set(session.session_id, session);
+          if (shows(session)) invalidate();
+        };
+        const sessionPatched = (session: Session) => {
+          const prev = seenSessions.get(session.session_id) ?? sessionById.get(session.session_id);
+          seenSessions.set(session.session_id, session);
+          if (prev && sessionCountKey(prev) === sessionCountKey(session)) return;
+          if (!prev || shows(prev) || shows(session)) invalidate();
+        };
+        const branchPatched = (branch: Branch) => {
+          const prev = seenBoards.has(branch.branch_id)
+            ? seenBoards.get(branch.branch_id)
+            : branchById.get(branch.branch_id)?.board_id;
+          seenBoards.set(branch.branch_id, branch.board_id);
+          if (prev !== branch.board_id) invalidate();
         };
         const sessions = client.service('sessions');
         const branches = client.service('branches');
-        for (const event of SESSION_EVENTS) sessions.on(event, onSession);
-        if (field === 'board_id')
-          for (const event of BRANCH_MOVE_EVENTS) branches.on(event, invalidate);
+        sessions.on('created', sessionAdded);
+        sessions.on('patched', sessionPatched);
+        sessions.on('removed', sessionAdded);
+        if (field === 'board_id') {
+          branches.on('patched', branchPatched);
+          branches.on('removed', invalidate);
+        }
         return () => {
-          for (const event of SESSION_EVENTS) sessions.off(event, onSession);
-          for (const event of BRANCH_MOVE_EVENTS) branches.off(event, invalidate);
+          sessions.off('created', sessionAdded);
+          sessions.off('patched', sessionPatched);
+          sessions.off('removed', sessionAdded);
+          branches.off('patched', branchPatched);
+          branches.off('removed', invalidate);
         };
       },
     }

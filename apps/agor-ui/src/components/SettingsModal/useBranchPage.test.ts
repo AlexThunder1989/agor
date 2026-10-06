@@ -141,3 +141,27 @@ it('counts a board again after a branch moves, and after a reconnect', async () 
   await waitFor(() => expect(result.current.get('board-1')).toBe(6));
   expect(find).toHaveBeenCalledTimes(3);
 });
+
+it('does not count again on a value-only session or branch patch', async () => {
+  const session = { session_id: 's-1', branch_id: 'branch-1', branch_board_id: 'board-1' };
+  agorStore.setState({
+    sessionById: new Map([['s-1', { ...session, archived: false } as never]]),
+    branchById: new Map([['branch-1', branch(1, { board_id: 'board-1' } as Partial<Branch>)]]),
+  });
+  const { client, find, emitSession, emitBranch } = makeCountsClient();
+  const { result } = renderHook(() => useSessionCounts(client, 'board_id', ['board-1']));
+  await waitFor(() => expect(result.current.get('board-1')).toBe(3));
+  emitSession('patched', { ...session, archived: false, status: 'running' });
+  emitSession('patched', { ...session, archived: false, title: 'renamed' });
+  emitBranch('patched', branch(1, { name: 'renamed', board_id: 'board-1' } as Partial<Branch>));
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  expect(find).toHaveBeenCalledTimes(1);
+  // An archive flip, then a branch move, each count again.
+  emitSession('patched', { ...session, archived: true });
+  await waitFor(() => expect(find).toHaveBeenCalledTimes(2));
+  emitSession('patched', { ...session, archived: true, title: 'archived' });
+  emitBranch('patched', branch(1, { board_id: 'board-2' } as Partial<Branch>));
+  await waitFor(() => expect(find).toHaveBeenCalledTimes(3));
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  expect(find).toHaveBeenCalledTimes(3);
+});
