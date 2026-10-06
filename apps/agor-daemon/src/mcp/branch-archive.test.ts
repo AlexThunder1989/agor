@@ -1,7 +1,9 @@
 import {
+  BoardRepository,
   BranchMaintenanceRepository,
   BranchRepository,
   BranchWorkspaceOperationRepository,
+  createTenantScopedDatabaseProxy,
   generateId,
   RepoRepository,
   runWithTenantDatabaseScope,
@@ -377,6 +379,61 @@ dbTest(
       expect(JSON.parse(response.result!.content[0]!.text).branch).toMatchObject({
         archived: false,
       });
+    } finally {
+      await fixture.close();
+    }
+  }
+);
+
+dbTest(
+  'explicit-board unarchive compares the committed board, not the cached row',
+  async ({ db }) => {
+    const { branch, user } = await seedEnvironmentCommandBranch(db);
+    const branches = new BranchRepository(db);
+    const boards = new BoardRepository(db);
+    const requested = await boards.create({ name: 'Requested', created_by: user.user_id });
+    const other = await boards.create({ name: 'Other', created_by: user.user_id });
+    const archived = await branches.update(branch.branch_id, {
+      archived: true,
+      filesystem_status: 'preserved',
+      board_id: requested.board_id,
+    });
+    const fixture = await archiveMcpFixture(db);
+    try {
+      fixture.app.use(
+        'repos',
+        {
+          async get() {
+            throw new Error('unused');
+          },
+          // Joins the unarchive admission transaction, as the real admission does.
+          retryBranchProvisioning: (id: string) =>
+            new BranchRepository(createTenantScopedDatabaseProxy(db)).update(id, {
+              archived: false,
+            }),
+        },
+        { methods: ['get', 'retryBranchProvisioning'] }
+      );
+      // Placement is already present; board-object restoration is not under test.
+      Object.assign(fixture.service, {
+        boardObjectsService: { findByBranchId: async () => ({ object_id: 'existing' }) },
+      });
+      const service = fixture.app.service('branches') as unknown as typeof fixture.service;
+      const move = vi.spyOn(service, 'patch').mockResolvedValue(archived as never);
+      // The route's authorization hook cached the request-start row (on Requested);
+      // a concurrent move to Other commits before the unarchive admission lock.
+      await branches.update(branch.branch_id, { board_id: other.board_id });
+      await service.unarchive(branch.branch_id, { boardId: requested.board_id }, {
+        provider: 'rest',
+        user,
+        tenant: { tenant_id: 'default', source: 'explicit' },
+        branch: archived,
+      } as never);
+      expect(move).toHaveBeenCalledWith(
+        branch.branch_id,
+        { board_id: requested.board_id },
+        expect.anything()
+      );
     } finally {
       await fixture.close();
     }

@@ -1310,15 +1310,21 @@ describe('BranchesService.unarchive', () => {
       const requested = 'board-requested' as BoardID;
       const other = 'board-other' as BoardID;
       const base = { branch_id: branchId, name: 'Raced', archived: true };
-      vi.spyOn(service, 'get')
-        .mockResolvedValue({ ...base, board_id: moved ? other : requested } as never)
-        .mockResolvedValueOnce({ ...base, board_id: moved ? requested : other } as never);
+      // Preflight sees the request's cached row; the locked comparison reads committed state.
+      vi.spyOn(service, 'get').mockResolvedValue({
+        ...base,
+        board_id: moved ? requested : other,
+      } as never);
       const patch = vi.spyOn(service, 'patch').mockResolvedValue(base as never);
-      stubCommittedRead(service, { ...base, archived: false });
+      const committedRead = stubCommittedRead(service, {
+        ...base,
+        board_id: moved ? other : requested,
+      });
       await service.unarchive(branchId, { boardId: requested }, userParams);
       expect(patch).toHaveBeenCalledTimes(moved ? 1 : 0);
       if (moved) expect(patch).toHaveBeenCalledWith(branchId, { board_id: requested }, userParams);
       expect(reposService.retryBranchProvisioning).toHaveBeenCalledWith(branchId, userParams, true);
+      expect(committedRead).toHaveBeenCalledWith(branchId, userParams);
     }
   );
 
@@ -1421,7 +1427,11 @@ describe('BranchesService.unarchive', () => {
       x: 7,
       y: 8,
     });
-    stubCommittedRead(service, { branch_id: branchId, archived: false, board_id: newBoardId });
+    stubCommittedRead(service, {
+      branch_id: branchId,
+      archived: false,
+      board_id: newBoardId,
+    }).mockResolvedValueOnce({ branch_id: branchId, archived: true, board_id: oldBoardId });
 
     await service.unarchive(branchId, { boardId: newBoardId }, userParams);
 

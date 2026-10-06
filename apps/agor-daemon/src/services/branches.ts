@@ -2344,7 +2344,8 @@ export class BranchesService extends DrizzleService<Branch, Partial<Branch>, Bra
           // commit-deferred events and eviction; refused admission rolls it back.
           await lockTenantAuthorizationFence(db, params);
           await lockBranchReferenceMutation(db);
-          const current = await this.get(id, params);
+          // Committed placement under the locks, not the request's cached row.
+          const current = await this.readCommittedBranch(branch.branch_id, params);
           if (current.board_id !== options?.boardId) {
             await this.patch(id, { board_id: options?.boardId }, params);
           }
