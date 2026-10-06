@@ -99,16 +99,17 @@ export const liveCoverage =
       isLoadLifetimeCurrent
     );
 
-/** Whether `boardId`'s partition is loading or loaded under the current lifetime. */
-function holdsBoard(coverage: Coverage, boardId: string | null | undefined): boolean {
+/** `boardId`'s partition entry, if it is current. */
+function currentPartition(coverage: Coverage, boardId: string | null | undefined) {
   const entry = boardId ? coverage.get(boardScopeKey(boardId)) : undefined;
-  return !!entry && entry.status !== 'error' && isLoadLifetimeCurrent(entry);
+  return entry && isLoadLifetimeCurrent(entry) ? entry : undefined;
 }
 
 /**
  * A branch that moves onto a loading or loaded board from a board whose
- * partition isn't, or that the store didn't hold, arrives without the
- * sessions nothing held while it was away, and a move emits no session
+ * partition isn't loaded and complete, or that the store didn't hold, may
+ * arrive without sessions nothing held while it was away (a loading or
+ * incomplete source's read may lack them), and a move emits no session
  * events. Its board's partition stops claiming to be complete: the mounted
  * `useBoardPartition` reloads it (a complete replace), and a load in flight
  * settles incomplete (`settleBoardPartition`), so the board is read again.
@@ -116,13 +117,14 @@ function holdsBoard(coverage: Coverage, boardId: string | null | undefined): boo
 const markArrivalIncomplete =
   (from: string | null | undefined, to: string | null | undefined): CoverageUpdate =>
   (_maps, coverage) => {
-    if (!to || from === to || !holdsBoard(coverage, to) || holdsBoard(coverage, from)) {
+    const destination = currentPartition(coverage, to);
+    const source = currentPartition(coverage, from);
+    const sourceComplete = source?.status === 'loaded' && source.complete === true;
+    if (!to || from === to || !destination || destination.status === 'error' || sourceComplete) {
       return coverage;
     }
-    const key = boardScopeKey(to);
-    const entry = coverage.get(key);
-    return entry && entry.complete !== false
-      ? withCoverage(coverage, key, { ...entry, complete: false })
+    return destination.complete !== false
+      ? withCoverage(coverage, boardScopeKey(to), { ...destination, complete: false })
       : coverage;
   };
 

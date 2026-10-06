@@ -336,6 +336,25 @@ describe('loadBoardPartition', () => {
     expect(ready()).toBe(true);
   });
 
+  it.each([
+    ['loading', () => boardCoverage('loading', captureLoadLifetime()!)],
+    [
+      'loaded-but-incomplete',
+      () => ({ ...boardCoverage('loaded', captureLoadLifetime()!), complete: false }),
+    ],
+  ])('is not complete once a branch arrives from a %s board', (_label, source) => {
+    // The source's read may not hold the branch's sessions, so they can't come along.
+    markBoardLoaded(BOARD);
+    agorStore.getState().setCoverage(boardScopeKey('board-2'), source());
+    agorStore
+      .getState()
+      .setMap('branchById', (prev) =>
+        new Map(prev).set('br-moved', branch('br-moved', { board_id: 'board-2' }))
+      );
+    branchPatched(branch('br-moved'));
+    expect(ready()).toBe(false);
+  });
+
   it('offers a resync only the loads that started after its mark, in flight or loaded', async () => {
     const lifetime = captureLoadLifetime()!;
     const { client, release } = makePartitionClient({});
