@@ -50,7 +50,7 @@ function makeClient(total = 25) {
             on: (e: string, fn: (...a: unknown[]) => void) => branches.on(e, fn),
             off: (e: string, fn: (...a: unknown[]) => void) => branches.off(e, fn),
           }
-        : { find: sessionsFind },
+        : { find: sessionsFind, on: () => {}, off: () => {} },
   } as unknown as AgorClient;
   const emit = (event: string, payload: unknown) => act(() => void branches.emit(event, payload));
   return { client, branchesFind, sessionsFind, emit };

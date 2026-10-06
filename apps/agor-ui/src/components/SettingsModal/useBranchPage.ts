@@ -1,5 +1,5 @@
-import type { AgorClient, Branch } from '@agor-live/client';
-import { useEffect, useRef, useState } from 'react';
+import type { AgorClient, Branch, Session } from '@agor-live/client';
+import { useRef } from 'react';
 import { rowsOf } from '@/store/userScope';
 import { useServerRead } from '../../hooks/useServerRead';
 
@@ -75,39 +75,60 @@ export function useBranchPage(
   return { ...result, loading, refresh };
 }
 
+/** Session events that can change a count (an archive is a patch). */
+const SESSION_EVENTS = ['created', 'patched', 'removed'] as const;
+/** Branch events that move a branch's sessions to another board. */
+const BRANCH_MOVE_EVENTS = ['patched', 'removed'] as const;
+
+const NO_COUNTS = new Map<string, number>();
+
 /**
  * Active sessions per `field` value (a branch or a board), read as count-only
  * pages (`$limit: 0`) for just the ids a table shows, since the store holds
- * only the loaded scopes' sessions. Display only; an id missing from the map
- * has no count yet.
+ * only the loaded scopes' sessions. Read through `useServerRead`: counted
+ * again after a session event for a shown branch (any session event for
+ * boards), after a branch moves (board counts), and after a reconnect.
+ * Display only; an id missing from the map has no count yet.
  */
 export function useSessionCounts(
   client: AgorClient | null,
   field: 'branch_id' | 'board_id',
   ids: string[]
 ): Map<string, number> {
-  const [counts, setCounts] = useState<Map<string, number>>(() => new Map());
   const idsKey = ids.join(',');
-
-  useEffect(() => {
-    if (!client || !idsKey) return;
-    let cancelled = false;
-    for (const id of idsKey.split(',')) {
-      client
-        .service('sessions')
-        .find({ query: { [field]: id, archived: false, $limit: 0 } })
-        .then((found) => {
-          if (cancelled || Array.isArray(found)) return;
-          setCounts((prev) => new Map(prev).set(id, found.total));
+  const { data } = useServerRead(
+    client,
+    idsKey ? `${field}|${idsKey}` : null,
+    async (client) => {
+      const counts = new Map<string, number>();
+      await Promise.all(
+        idsKey.split(',').map(async (id) => {
+          const found = await client
+            .service('sessions')
+            .find({ query: { [field]: id, archived: false, $limit: 0 } });
+          if (!Array.isArray(found)) counts.set(id, found.total);
         })
-        .catch(() => {
-          // An unreadable count stays blank.
-        });
+      );
+      return counts;
+    },
+    {
+      keepPrevious: true,
+      subscribe: (client, { invalidate }) => {
+        const shown = new Set(idsKey.split(','));
+        const onSession = (session: Session) => {
+          if (field === 'board_id' || shown.has(session.branch_id)) invalidate();
+        };
+        const sessions = client.service('sessions');
+        const branches = client.service('branches');
+        for (const event of SESSION_EVENTS) sessions.on(event, onSession);
+        if (field === 'board_id')
+          for (const event of BRANCH_MOVE_EVENTS) branches.on(event, invalidate);
+        return () => {
+          for (const event of SESSION_EVENTS) sessions.off(event, onSession);
+          for (const event of BRANCH_MOVE_EVENTS) branches.off(event, invalidate);
+        };
+      },
     }
-    return () => {
-      cancelled = true;
-    };
-  }, [client, field, idsKey]);
-
-  return counts;
+  );
+  return data ?? NO_COUNTS;
 }

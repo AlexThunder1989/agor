@@ -1,14 +1,17 @@
 import type { AgorClient, Board, Branch, Repo, User } from '@agor-live/client';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agorStore } from '../../store/agorStore';
+import { setRealtimeAuthorityScope } from '../../store/realtimeBatch';
 import { userScopeCoverage } from '../../test/userScopeCoverage';
 import { TeammatesTable } from './TeammatesTable';
 
 function renderWithProviders(ui: React.ReactElement) {
   return render(<MemoryRouter>{ui}</MemoryRouter>);
 }
+
+afterEach(() => setRealtimeAuthorityScope(null));
 
 function makeRepo(overrides: Partial<Repo> = {}): Repo {
   return {
@@ -135,8 +138,11 @@ it('searches tokens across teammate, board and email-only owner using the shared
 it('waits for the user scope before saying "No teammates yet", and counts sessions on the server', async () => {
   // Step 3: the store holds only the user scope; nothing global backs this table.
   agorStore.getState().reset();
+  setRealtimeAuthorityScope('me:member:1');
   const sessionsFind = vi.fn(async () => ({ total: 4, limit: 0, skip: 0, data: [] }));
-  const client = { service: () => ({ find: sessionsFind }) } as unknown as AgorClient;
+  const client = {
+    service: () => ({ find: sessionsFind, on: () => {}, off: () => {} }),
+  } as unknown as AgorClient;
   const { rerender } = renderWithProviders(
     <TeammatesTable
       client={client}

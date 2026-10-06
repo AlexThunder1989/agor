@@ -10,7 +10,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { agorStore } from '@/store/agorStore';
 import { setRealtimeAuthorityScope } from '@/store/realtimeBatch';
-import { useBranchPage } from './useBranchPage';
+import { useBranchPage, useSessionCounts } from './useBranchPage';
 
 const branch = (n: number, overrides: Partial<Branch> = {}) =>
   ({ branch_id: `branch-${n}`, name: `feature-${n}`, archived: false, ...overrides }) as Branch;
@@ -88,4 +88,56 @@ it('patches an on-page row in place without reading again', async () => {
   expect(result.current.rows[1].name).toBe('renamed-2');
   await new Promise((resolve) => setTimeout(resolve, 600));
   expect(find).toHaveBeenCalledTimes(1);
+});
+
+function makeCountsClient() {
+  const sessions = new EventEmitter();
+  const branches = new EventEmitter();
+  let count = 3;
+  const find = vi.fn(async () => ({ total: count, data: [] }));
+  const on = (emitter: EventEmitter) => ({
+    on: (e: string, fn: (...a: unknown[]) => void) => emitter.on(e, fn),
+    off: (e: string, fn: (...a: unknown[]) => void) => emitter.off(e, fn),
+  });
+  const client = {
+    service: (name: string) =>
+      name === 'sessions' ? { find, ...on(sessions) } : { find: vi.fn(), ...on(branches) },
+  } as unknown as AgorClient;
+  const emit = (emitter: EventEmitter, event: string, payload: unknown) =>
+    act(() => void emitter.emit(event, payload));
+  return {
+    client,
+    find,
+    setCount: (n: number) => (count = n),
+    emitSession: (event: string, payload: unknown) => emit(sessions, event, payload),
+    emitBranch: (event: string, payload: unknown) => emit(branches, event, payload),
+  };
+}
+
+it('counts sessions again after a session create, archive or removal', async () => {
+  const { client, setCount, emitSession } = makeCountsClient();
+  const { result } = renderHook(() => useSessionCounts(client, 'branch_id', ['branch-1']));
+  await waitFor(() => expect(result.current.get('branch-1')).toBe(3));
+  setCount(4);
+  emitSession('created', { session_id: 's-4', branch_id: 'branch-1', archived: false });
+  await waitFor(() => expect(result.current.get('branch-1')).toBe(4));
+  setCount(3);
+  emitSession('patched', { session_id: 's-4', branch_id: 'branch-1', archived: true });
+  await waitFor(() => expect(result.current.get('branch-1')).toBe(3));
+  setCount(2);
+  emitSession('removed', { session_id: 's-3', branch_id: 'branch-1' });
+  await waitFor(() => expect(result.current.get('branch-1')).toBe(2));
+});
+
+it('counts a board again after a branch moves, and after a reconnect', async () => {
+  const { client, find, setCount, emitBranch } = makeCountsClient();
+  const { result } = renderHook(() => useSessionCounts(client, 'board_id', ['board-1']));
+  await waitFor(() => expect(result.current.get('board-1')).toBe(3));
+  setCount(5);
+  emitBranch('patched', { branch_id: 'branch-9', board_id: 'board-1' });
+  await waitFor(() => expect(result.current.get('board-1')).toBe(5));
+  setCount(6);
+  act(() => setRealtimeAuthorityScope('me:member:2'));
+  await waitFor(() => expect(result.current.get('board-1')).toBe(6));
+  expect(find).toHaveBeenCalledTimes(3);
 });
