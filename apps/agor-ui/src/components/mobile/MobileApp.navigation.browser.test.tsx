@@ -4,7 +4,7 @@ import { BrowserRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import { agorStore } from '../../store/agorStore';
-import { boardScopeKey } from '../../store/scopeMerge';
+import { boardScopeKey, type ScopeCoverage } from '../../store/scopeMerge';
 import { boardCoverage } from '../../test/userScopeCoverage';
 import { MobileApp } from './MobileApp';
 
@@ -52,13 +52,18 @@ const branches = new Map([
   ['assistant', { branch_id: 'assistant', board_id: 'a', name: 'Ada' } as Branch],
   ['other', { branch_id: 'other', board_id: 'b' } as Branch],
 ]);
+/** A loaded partition's membership: the rows its read returned. */
+const withMembers = (entry: ScopeCoverage, branchIds: string[], sessionIds: string[]) => ({
+  ...entry,
+  members: { ...entry.members, branches: new Set(branchIds), sessions: new Set(sessionIds) },
+});
 function mount(path = '/m/board/alpha') {
   agorStore.setState({
     boardById: boards,
-    // Both boards' partitions are loaded (the page waits for them).
+    // Both boards' partitions are loaded (the page waits for them), with their rows.
     coverage: new Map([
-      [boardScopeKey('a'), boardCoverage()],
-      [boardScopeKey('b'), boardCoverage()],
+      [boardScopeKey('a'), withMembers(boardCoverage(), ['assistant'], ['parent'])],
+      [boardScopeKey('b'), withMembers(boardCoverage(), ['other'], ['child'])],
     ]),
     branchById: branches,
     sessionById: new Map([
