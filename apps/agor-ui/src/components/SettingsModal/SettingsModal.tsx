@@ -265,8 +265,7 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
         counts: {
           boards: boardById.size,
           repos: repoById.size,
-          branches: branchById.size,
-          // No card count: the store holds only loaded boards' cards.
+          // No branch or card count: the store holds only the loaded scopes' rows.
           artifacts: artifactById.size,
           mcp: mcpServerById.size,
           gateway: gatewayChannelById.size,
@@ -278,7 +277,6 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
       isAdmin,
       boardById.size,
       repoById.size,
-      branchById.size,
       artifactById.size,
       mcpServerById.size,
       gatewayChannelById.size,
@@ -393,7 +391,6 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
             branchById={branchById}
             repoById={repoById}
             boardById={boardById}
-            sessionsByBranch={sessionsByBranch}
             onArchiveOrDelete={onArchiveOrDeleteBranch}
             onUnarchive={onUnarchiveBranch}
             onCreate={onCreateBranch}

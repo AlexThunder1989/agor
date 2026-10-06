@@ -35,7 +35,7 @@ interface UseGlobalSearchInput extends GlobalSearchEntityMaps {
 }
 
 // A memoized flush/timer must not share a closure context with entity maps.
-function useDebouncedSearchQuery(query: string) {
+export function useDebouncedSearchQuery(query: string) {
   const [debouncedQuery, setDebouncedQuery] = useState(query);
 
   useEffect(() => {
