@@ -353,8 +353,10 @@ shows the raw `error_message` and the stored `sdk_failure.reason` code. The
 banner names a stall only when the termination cause is `sdk_health_failure`,
 because the watchdog observes by default. Resume / Try again appear only on the latest
 FAILED or TIMED_OUT turn whose termination is neither `requested` nor
-`unverified` and that was not a user stop, and only while the session is
-promptable (`isSessionPromptable`) with an empty queue. Try again (replay the
+`unverified` and that was not a user stop, and only while a prompt would start
+right away: the session is not executing and its queue is empty
+(`canSessionStartTurn`, the composer's rule; `ready_for_prompt` is not read
+because opening the session clears it). Try again (replay the
 prompt) is offered only when the run never started; every other outcome,
 including an unconfirmed provider result, offers Resume.
 

@@ -1,4 +1,3 @@
-import { isSessionPromptable } from '@agor/core/types';
 import type { AgorClient, Branch, Session, SpawnConfig, Task } from '@agor-live/client';
 import { getTeammateConfig, isTeammate, sessionPath } from '@agor-live/client';
 import {
@@ -15,6 +14,7 @@ import { useAgorStore } from '../../store/agorStore';
 import { selectMcpServerById, selectRepoById, selectUserById } from '../../store/selectors';
 import { copyToClipboard } from '../../utils/clipboard';
 import { useThemedMessage } from '../../utils/message';
+import { canSessionStartTurn } from '../../utils/sessionTurn';
 import { BranchHeaderPill } from '../BranchHeaderPill';
 import { BranchMetadataRow } from '../BranchMetadataRow';
 import { ConversationView } from '../ConversationView';
@@ -306,7 +306,7 @@ export const SessionPanelContent = React.memo<SessionPanelContentProps>(
               branch && isTeammate(branch) ? getTeammateConfig(branch)?.emoji : undefined
             }
             onOpenAgenticToolSettings={onOpenAgenticToolSettings}
-            canStartTurn={isSessionPromptable(session) && queuedTasks.length === 0}
+            canStartTurn={canSessionStartTurn(session, queuedTasks.length)}
           />
         </SessionConversationLayout>
 
