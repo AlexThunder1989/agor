@@ -343,7 +343,7 @@ describe('describeTurnOutcome v3', () => {
     );
   });
 
-  it('10. never offers a reset time that has passed, and dates one beyond this week', () => {
+  it('10. resumes once the reset time has passed, and dates one beyond this week', () => {
     const now = new Date(2026, 9, 5, 9);
     const at = (date: Date) => Math.floor(date.getTime() / 1000);
     const limited = (resetsAt: number) =>
@@ -355,6 +355,7 @@ describe('describeTurnOutcome v3', () => {
       cause: 'usage_limit',
       type: 'warning',
       message: 'Usage limit reached.',
+      action: 'resume',
     });
     expect(limited(at(now))?.message).toBe('Usage limit reached.');
     const later = new Date(2026, 9, 20, 15);

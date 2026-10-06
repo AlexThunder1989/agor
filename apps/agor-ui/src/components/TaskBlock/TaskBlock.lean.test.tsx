@@ -851,6 +851,34 @@ it('keeps the real cause when a restart notice lands on a turn that had already 
   expect(screen.getAllByRole('button', { name: /Resume/ })).toHaveLength(1);
 });
 
+it('names the real failure when the run continued after a usage-limit wait', () => {
+  render(
+    view({
+      task: { ...task, status: TaskStatus.FAILED, error_message: ENOENT_SYSTEM_PROMPT },
+      agentic_tool: 'claude-code',
+      taskMessages: [
+        messages[0],
+        {
+          ...message(1, MessageRole.SYSTEM, [
+            {
+              type: 'rate_limit',
+              status: 'rejected',
+              rateLimitType: 'five_hour',
+              resetsAt: Math.floor(Date.now() / 1000) + 3600,
+              text: 'Rate limited (five_hour). Waiting for limit to reset...',
+            },
+          ]),
+          type: 'system',
+        },
+        message(2, MessageRole.ASSISTANT, 'Visible answer'),
+      ],
+      taskMessagesLoaded: true,
+    })
+  );
+  expect(outcome()).toHaveTextContent('The agent hit a problem.');
+  expect(screen.getByText('Rate limited (five_hour).')).toBeVisible();
+});
+
 it('lets the usage-limit banner own the reset time on a finished run', () => {
   const resetsAt = Math.floor(Date.now() / 1000) + 3600;
   render(

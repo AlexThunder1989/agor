@@ -145,14 +145,18 @@ export function isOutcomeEcho(message: Message, errorMessage?: string): boolean 
   );
 }
 
-/** The provider's structured usage-limit rejection for this turn, if any. */
-function rejectedRateLimit(messages: Message[]): { resetsAt?: number } | undefined {
-  for (const message of [...messages].reverse()) {
-    if (!Array.isArray(message.content)) continue;
-    const block = message.content.find(
+/** The provider's usage-limit rejection that ended this turn: no agent output or tool use came after it. */
+export function rejectedRateLimit(messages: Message[]): { resetsAt?: number } | undefined {
+  for (const message of [...messages].sort((a, b) => b.index - a.index)) {
+    const blocks = Array.isArray(message.content) ? message.content : [];
+    const block = blocks.find(
       (content) => content.type === 'rate_limit' && content.status === 'rejected'
     );
     if (block) return { resetsAt: typeof block.resetsAt === 'number' ? block.resetsAt : undefined };
+    const hasOutput =
+      message.role === MessageRole.ASSISTANT &&
+      (typeof message.content === 'string' ? !!message.content.trim() : blocks.length > 0);
+    if (hasOutput || messagesHaveTools([message])) return undefined;
   }
   return undefined;
 }

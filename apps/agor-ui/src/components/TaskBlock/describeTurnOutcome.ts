@@ -258,19 +258,18 @@ export function describeTurnOutcome(
   if (rateLimit) {
     const limit = agentName ? `${agentName} usage limit reached.` : 'Usage limit reached.';
     const reset = rateLimit.resetsAt ? formatReset(rateLimit.resetsAt, now) : undefined;
-    // A reset time already behind us is stale: the limit has lifted, so say only what happened.
-    return reset
-      ? {
-          cause: 'usage_limit',
-          type: 'warning',
-          message: `${limit} Try again after ${reset}.`,
-          showsResetTime: true,
-        }
-      : {
-          cause: 'usage_limit',
-          type: 'warning',
-          message: rateLimit.resetsAt ? limit : `${limit} Try again later.`,
-        };
+    if (reset) {
+      return {
+        cause: 'usage_limit',
+        type: 'warning',
+        message: `${limit} Try again after ${reset}.`,
+        showsResetTime: true,
+      };
+    }
+    // A reset time already behind us means the limit has lifted, so the run can continue.
+    return rateLimit.resetsAt
+      ? { cause: 'usage_limit', type: 'warning', message: limit, action: 'resume' }
+      : { cause: 'usage_limit', type: 'warning', message: `${limit} Try again later.` };
   }
   if (error === CODEX_LIFECYCLE_MESSAGES.turn_failed) {
     return {

@@ -17,6 +17,7 @@ import {
   type Block,
   canOfferRecoveryTurn,
   groupMessagesIntoBlocks,
+  rejectedRateLimit,
   shouldRenderLiveTaskProgress,
   TaskBlock,
 } from './TaskBlock';
@@ -261,6 +262,27 @@ describe('recovery turn eligibility', () => {
         true
       )
     ).toBe(false);
+  });
+});
+
+describe('usage-limit rejection that ended the turn', () => {
+  const row = (index: number, role: string, content: Message['content']) =>
+    ({ message_id: `m${index}`, index, role, content }) as Message;
+  const rejected = (index: number) =>
+    row(index, 'system', [{ type: 'rate_limit', status: 'rejected', resetsAt: 100 }]);
+
+  it('counts a rejection only when no agent output or tool use followed it', () => {
+    expect(rejectedRateLimit([row(0, 'user', 'Go'), rejected(1)])).toEqual({ resetsAt: 100 });
+    expect(rejectedRateLimit([rejected(1), row(2, 'system', 'Note')])).toEqual({ resetsAt: 100 });
+    expect(rejectedRateLimit([rejected(1), row(2, 'assistant', [])])).toEqual({ resetsAt: 100 });
+    expect(rejectedRateLimit([rejected(1), row(2, 'assistant', 'Continuing')])).toBeUndefined();
+    expect(
+      rejectedRateLimit([
+        rejected(1),
+        row(2, 'user', [{ type: 'tool_result', tool_use_id: 't', content: 'ok' }]),
+      ])
+    ).toBeUndefined();
+    expect(rejectedRateLimit([row(0, 'assistant', 'Hi')])).toBeUndefined();
   });
 });
 
