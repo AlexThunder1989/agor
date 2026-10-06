@@ -20,10 +20,14 @@
  * starve the way a skip-apply-on-race hydration can.
  *
  * Loads are deduplicated per (authority, board), and a load whose authority
- * changed before it resolved applies nothing.
+ * changed before it resolved applies nothing. A loaded partition marked
+ * incomplete (a branch arrived from an unloaded board) is read again through
+ * `requestBoardReload`, debounced so sustained arrivals cost a bounded number
+ * of reads.
  */
 import type { AgorClient, Board, Branch, CardWithType, Session } from '@agor-live/client';
 import { PAGINATION } from '@agor-live/client';
+import { debounceWithMaxWait } from '../hooks/useServerRead';
 import {
   beginPartitionLoad,
   endPartitionLoad,
@@ -319,6 +323,48 @@ export function retryBoardPartition(boardId: string): void {
   }
 }
 
+type LoadOptions = { canUseMemberWorkspaceServices: boolean; background?: boolean };
+
+// The pending dirty reload of each board, with the latest load arguments.
+const dirtyReloads = new Map<
+  string,
+  { request: () => void; client: AgorClient; options: LoadOptions }
+>();
+
+/**
+ * Read `boardId` again because its loaded partition is incomplete: a branch
+ * arrived from an unloaded board (`useBoardPartition`), or during the read
+ * that settled it (`loadBoardPartition`). Debounced with a bounded wait, so a
+ * burst of arrivals coalesces into one read, and fires only if the entry is
+ * still loaded, incomplete and current, and a mounted consumer uses the board.
+ */
+export function requestBoardReload(
+  client: AgorClient,
+  boardId: string,
+  options: LoadOptions
+): void {
+  const pending = dirtyReloads.get(boardId);
+  if (pending) {
+    Object.assign(pending, { client, options });
+    pending.request();
+    return;
+  }
+  const reload = {
+    client,
+    options,
+    request: debounceWithMaxWait(() => {
+      dirtyReloads.delete(boardId);
+      const entry = selectBoardPartition(agorStore.getState(), boardId);
+      const dirty =
+        entry?.status === 'loaded' && entry.complete === false && isLoadLifetimeCurrent(entry);
+      const used = [...boardUses.values()].some((use) => use.boardId === boardId);
+      if (dirty && used) void loadBoardPartition(reload.client, boardId, reload.options);
+    }).request,
+  };
+  dirtyReloads.set(boardId, reload);
+  reload.request();
+}
+
 async function fetchBoardPartition(
   client: AgorClient,
   boardId: string,
@@ -374,12 +420,15 @@ async function fetchBoardPartition(
  * wholesale replacement never applies: it records a retryable error. The
  * snapshot and the `loaded` entry publish in one store update. A displayed
  * board's load holds background ones (`background`), which send no read
- * until the foreground reads settle (`backgroundReads.ts`).
+ * until the foreground reads settle (`backgroundReads.ts`). A load that
+ * settles incomplete (a branch arrived during its read) owns the follow-up:
+ * once its in-flight entry is gone it requests the reload
+ * (`requestBoardReload`), which a deduplicated retry could not start.
  */
 export function loadBoardPartition(
   client: AgorClient,
   boardId: string,
-  options: { canUseMemberWorkspaceServices: boolean; background?: boolean }
+  options: LoadOptions
 ): Promise<void> {
   // Captured before the first await, like every load (see `loadLifetime`).
   const lifetime = captureLoadLifetime();
@@ -453,6 +502,10 @@ export function loadBoardPartition(
     // Cancelled or dropped while still loading: release the entry so the
     // board counts as unloaded and the next mount/authority loads it again.
     if (ownsLoading(boardId, generation)) setBoardPartition(boardId, null);
+    const settled = selectBoardPartition(store(), boardId);
+    if (settled?.status === 'loaded' && settled.generation === generation && !settled.complete) {
+      requestBoardReload(client, boardId, options);
+    }
     // The LRU skipped this board while it loaded: judge it now.
     evictInactivePartitions();
   });

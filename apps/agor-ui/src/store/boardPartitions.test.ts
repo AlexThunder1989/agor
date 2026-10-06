@@ -272,6 +272,21 @@ describe('loadBoardPartition', () => {
     expect(agorStore.getState().sessionById.has('s-1')).toBe(true);
   });
 
+  it('a load that settles incomplete reads the board again for a mounted consumer', async () => {
+    const unregister = registerBoardUse(BOARD);
+    const { client, release, calls } = makePartitionClient({});
+    const load = loadBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true });
+    // A branch arrives during the read: the load settles incomplete.
+    branchPatched(branch('br-late', { created_by: 'user-b' }));
+    release();
+    await load;
+    expect(ready()).toBe(false);
+    // The loader requests the follow-up itself; no retry has to race it.
+    await vi.waitFor(() => expect(calls.filter((c) => c === 'sessions')).toHaveLength(2));
+    await vi.waitFor(() => expect(ready()).toBe(true));
+    unregister();
+  });
+
   it('is not complete once a branch arrives from an unloaded board, even while loading', async () => {
     // Loaded: a branch arriving from a board that isn't loaded brings no sessions.
     markBoardLoaded(BOARD);

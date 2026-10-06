@@ -1,11 +1,13 @@
-import type { AgorClient } from '@agor-live/client';
+import type { AgorClient, Branch } from '@agor-live/client';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cancelAllHydrations, resetHydrationRevisions } from '../store/agorHydration';
+import { branchPatched } from '../store/agorRealtimeActions';
 import { agorStore } from '../store/agorStore';
 import {
   getDisplayedBoardId,
   loadBoardPartition,
+  makeBoardReadySelector,
   registerBoardUse,
   selectBoardPartition,
 } from '../store/boardPartitions';
@@ -150,5 +152,69 @@ describe('useBoardPartition', () => {
     await waitFor(() => expect(sessionReads()).toBe(2));
     await act(async () => releaseAll());
     await waitFor(() => expect(result.current.boardReady).toBe(true));
+  });
+
+  // A branch arriving from a board that isn't loaded (nothing held it).
+  const arrive = (id: string) =>
+    branchPatched({ branch_id: id, board_id: BOARD, name: id, archived: false } as Branch);
+
+  it('reads the board again when a branch arrives while its reload is in flight', async () => {
+    const { client, sessionReads, releaseAll } = makeClient();
+    const { result } = renderHook(() =>
+      useBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true })
+    );
+    await waitFor(() => expect(sessionReads()).toBe(1));
+    await act(async () => releaseAll());
+    await waitFor(() => expect(result.current.boardReady).toBe(true));
+
+    // The first arrival reloads the board; a second lands during that read.
+    act(() => arrive('br-1'));
+    await waitFor(() => expect(sessionReads()).toBe(2));
+    act(() => arrive('br-2'));
+    await act(async () => releaseAll());
+    expect(selectBoardPartition(agorStore.getState(), BOARD)).toMatchObject({
+      status: 'loaded',
+      complete: false,
+    });
+
+    // The read may predate the second arrival: the board is read once more.
+    await waitFor(() => expect(sessionReads()).toBe(3));
+    await act(async () => releaseAll());
+    await waitFor(() => expect(result.current.boardReady).toBe(true));
+  });
+
+  it('sustained arrivals end in a bounded number of reads and a ready board', async () => {
+    vi.useFakeTimers();
+    try {
+      const { client, sessionReads, releaseAll } = makeClient();
+      renderHook(() => useBoardPartition(client, BOARD, { canUseMemberWorkspaceServices: true }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+        releaseAll();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(makeBoardReadySelector(BOARD)(agorStore.getState())).toBe(true);
+      const before = sessionReads();
+
+      // A branch arrives every 50ms for 2.5s; every read answers at once.
+      for (let i = 0; i < 50; i++) {
+        await act(async () => {
+          arrive(`br-${i}`);
+          releaseAll();
+          await vi.advanceTimersByTimeAsync(50);
+          releaseAll();
+        });
+      }
+      await act(async () => {
+        for (let i = 0; i < 10; i++) {
+          releaseAll();
+          await vi.advanceTimersByTimeAsync(500);
+        }
+      });
+      expect(makeBoardReadySelector(BOARD)(agorStore.getState())).toBe(true);
+      expect(sessionReads() - before).toBeLessThanOrEqual(12);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -6,6 +6,7 @@ import {
   makeBoardPartitionSelector,
   makeBoardReadySelector,
   registerBoardUse,
+  requestBoardReload,
   retryBoardPartition,
   selectBoardPartition,
 } from '../store/boardPartitions';
@@ -55,6 +56,12 @@ export function useBoardPartition(
     // counts as unloaded (authority transitions also forget every entry).
     const current = selectBoardPartition(agorStore.getState(), boardId);
     if (current && isLoadLifetimeCurrent(current) && (status === 'loading' || status === 'error')) {
+      return;
+    }
+    // Loaded but incomplete (a branch arrived from an unloaded board): read
+    // again, coalescing a burst of arrivals.
+    if (current && isLoadLifetimeCurrent(current) && status === 'loaded') {
+      requestBoardReload(client, boardId, { canUseMemberWorkspaceServices, background });
       return;
     }
     void loadBoardPartition(client, boardId, { canUseMemberWorkspaceServices, background });
