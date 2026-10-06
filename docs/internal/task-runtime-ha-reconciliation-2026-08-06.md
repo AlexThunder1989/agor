@@ -140,7 +140,7 @@ Task settlement is authoritative and happens before Session projection.
 - Queue eligibility follows authoritative Task settlement and the resulting Session projection. Startup itself never releases or discards queued intent.
 - A verified interruption may therefore release an existing durable queue head after settlement. The interruption UI also lets the user create an explicit new Resume Task; it never revives the failed Task.
 - Verified runtime interruption UI is derived from the durable Task outcome, so it is idempotent and cannot accumulate duplicate restart messages.
-- The action is **Resume in new task**. It creates a new durable Task; it never revives the failed Task or reuses executor ownership.
+- The turn outcome banner's action is **Resume** (**Try again**, replaying the viewer's own prompt, only when the run provably never started). Either creates a new durable Task; it never revives the failed Task or reuses executor ownership.
 - Unverified containment never shows Resume and remains behind owner/admin force-fail.
 - Legacy daemon restart/crash messages and their old Resume action remain only in explicit `standalone` compatibility mode.
 
