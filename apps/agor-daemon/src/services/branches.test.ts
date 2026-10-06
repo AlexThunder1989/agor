@@ -1433,10 +1433,13 @@ describe('BranchesService.archiveOrDelete', () => {
       const { service } = createServiceHarness();
       const branchId = 'wt-archive-op' as BranchID;
       const branch = { branch_id: branchId, archived: true };
-      vi.spyOn(service, 'get').mockResolvedValue(branch as never);
+      vi.spyOn(
+        service as unknown as { getCanonicalBranch: () => Promise<unknown> },
+        'getCanonicalBranch'
+      ).mockResolvedValue(branch);
       const request = vi
         .spyOn(service as never, 'requestWorkspaceOperation')
-        .mockResolvedValue({ status: 'accepted' } as never);
+        .mockResolvedValue({ branch_id: branchId, status: 'accepted' } as never);
       const params = { user: { user_id: 'user-1' } } as never;
       markBranchArchiveDeleteAuthorized(params, branchId, 'archive');
       expect(
