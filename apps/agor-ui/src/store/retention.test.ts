@@ -1,10 +1,27 @@
-import type { Branch, Session } from '@agor-live/client';
+import type { BoardEntityObject, Branch, CardWithType, Session } from '@agor-live/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resetHydrationRevisions } from './agorHydration';
-import { sessionCreated } from './agorRealtimeActions';
+import { setGlobalHydrationForTests } from '../hooks/useAgorData';
+import {
+  beginPartitionLoad,
+  endPartitionLoad,
+  resetHydrationRevisions,
+  touchedSince,
+} from './agorHydration';
+import {
+  boardObjectCreated,
+  branchCreated,
+  cardCreated,
+  sessionCreated,
+  sessionPatched,
+} from './agorRealtimeActions';
 import { agorStore } from './agorStore';
 import { captureLoadLifetime } from './loadLifetime';
-import { discardRealtimeNow, flushRealtimeNow, setRealtimeAuthorityScope } from './realtimeBatch';
+import {
+  discardRealtimeNow,
+  enqueueSessionPatch,
+  flushRealtimeNow,
+  setRealtimeAuthorityScope,
+} from './realtimeBatch';
 import { anyOf, evictRows, pinRows } from './retention';
 import { pinnedMembers } from './rowPins';
 import {
@@ -70,6 +87,7 @@ describe('pins', () => {
     });
   });
   afterEach(() => {
+    setGlobalHydrationForTests(true);
     setRealtimeAuthorityScope(null);
     discardRealtimeNow();
     agorStore.getState().reset();
@@ -164,11 +182,12 @@ describe('pins', () => {
     expect(agorStore.getState().sessionMcpServerIds.has('s-1')).toBe(false);
   });
 
-  it('a row realtime inserts on a loaded board joins it; one outside every scope is never swept', () => {
+  it('a row realtime inserts on a loaded board joins it; one nothing holds never enters', () => {
+    setGlobalHydrationForTests(false);
     seedBoard('b2', { branches: [branch('br-2', 'b2')], sessions: [] });
     sessionCreated(session('s-live', 'br-2', 'b2'));
     sessionCreated(session('s-elsewhere', 'br-9', 'b9'));
-    flushRealtimeNow();
+    flushRealtimeNow(AUTHORITY);
     // The displayed board's membership follows realtime: evicting others keeps it.
     evictBoard('b1');
     pinRows({ sessions: ['s-other'] })();
@@ -176,7 +195,65 @@ describe('pins', () => {
     expect(agorStore.getState().coverage.get(boardScopeKey('b2'))?.members?.sessions).toContain(
       's-live'
     );
-    // A row no scope claims is not part of any eviction.
-    expect(has('sessionById', 's-elsewhere')).toBe(true);
+    expect(has('sessionById', 's-elsewhere')).toBe(false);
+  });
+});
+
+describe('realtime admission (global hydration off)', () => {
+  beforeEach(() => {
+    agorStore.getState().reset();
+    resetHydrationRevisions();
+    discardRealtimeNow();
+    setRealtimeAuthorityScope(AUTHORITY);
+    setGlobalHydrationForTests(false);
+  });
+  afterEach(() => {
+    setGlobalHydrationForTests(true);
+    setRealtimeAuthorityScope(null);
+    discardRealtimeNow();
+    agorStore.getState().reset();
+  });
+
+  const other = (row: Session) => ({ ...row, created_by: 'user-b' }) as Session;
+
+  it('on Home, 100 creates and patches on a board never loaded leave the store empty', () => {
+    // A read in flight: it must still see what realtime wrote.
+    const fence = beginPartitionLoad();
+    for (let i = 0; i < 100; i++) {
+      sessionCreated(other(session(`s-${i}`, `br-${i % 5}`, 'b9')));
+      sessionPatched(other(session(`p-${i}`, `br-${i % 5}`, 'b9')));
+      enqueueSessionPatch(AUTHORITY, other(session(`q-${i}`, `br-${i % 5}`, 'b9')));
+      branchCreated(branch(`br-${i}`, 'b9'));
+      cardCreated({ card_id: `k-${i}`, board_id: 'b9' } as CardWithType);
+      boardObjectCreated({ object_id: `o-${i}`, board_id: 'b9' } as BoardEntityObject);
+    }
+    flushRealtimeNow(AUTHORITY);
+    const state = agorStore.getState();
+    expect(state.sessionById.size).toBe(0);
+    expect(state.sessionsByBranch.size).toBe(0);
+    expect(state.branchById.size).toBe(0);
+    expect(state.cardById.size).toBe(0);
+    expect(state.boardObjectById.size).toBe(0);
+    // The fence is still recorded, so the read keeps out what it raced.
+    expect(touchedSince('sessions', 's-0', fence.startRevisions.sessions)).toBe(true);
+    expect(touchedSince('cards', 'k-0', fence.startRevisions.cards)).toBe(true);
+    endPartitionLoad();
+  });
+
+  it('admits what a loading board, my user scope or a pin will hold', () => {
+    agorStore.getState().setCoverage(boardScopeKey('b2'), {
+      status: 'loading',
+      ...captureLoadLifetime()!,
+      generation: 0,
+    });
+    sessionCreated(other(session('s-loading', 'br-2', 'b2')));
+    sessionCreated({ ...session('s-mine', 'br-9', 'b9'), created_by: 'user-a' } as Session);
+    const release = pinRows({ sessions: ['s-open'] });
+    sessionPatched(other(session('s-open', 'br-9', 'b9')));
+    expect(has('sessionById', 's-loading')).toBe(true);
+    expect(has('sessionById', 's-mine')).toBe(true);
+    expect(has('sessionById', 's-open')).toBe(true);
+    release();
+    expect(has('sessionById', 's-open')).toBe(false);
   });
 });
