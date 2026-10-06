@@ -59,9 +59,6 @@ export interface TurnOutcomeContext {
 export const EDITS_KEPT = 'Any edits are kept.';
 export const NO_FILES_CHANGED = 'No files changed.';
 
-/** `executor_connected_at` exists from this date; older runs lack it even when they ran. */
-const CONNECTED_AT_RECORDED_SINCE = Date.parse('2026-07-22T00:00:00.000Z');
-
 const LOST_CONNECTION = new Set([
   SAFE_MISSING_PROVIDER_RESULT_MESSAGE,
   CODEX_LIFECYCLE_MESSAGES.stream_interrupted,
@@ -206,11 +203,12 @@ export function describeTurnOutcome(
     reason === 'startup_timeout' ||
     cause === 'startup_timeout' ||
     error === CODEX_LIFECYCLE_MESSAGES.stream_start_failed;
+  // A missing connect time proves nothing on legacy rows: trust it only beside a field recorded with it.
   const neverConnected =
     !task.executor_connected_at &&
     !sawTools &&
     !task.recorded_tool_count &&
-    (exited || Date.parse(task.created_at) >= CONNECTED_AT_RECORDED_SINCE);
+    (exited || task.recorded_tool_count === 0);
   if (startupFailed || neverConnected) {
     return {
       cause: 'never_started',

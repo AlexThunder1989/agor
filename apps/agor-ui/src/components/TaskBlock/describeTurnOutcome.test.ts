@@ -221,7 +221,7 @@ describe('describeTurnOutcome v3', () => {
     expect(describe3({ ...cause('heartbeat_lost'), executor_connected_at: undefined })).toEqual(
       neverStarted
     );
-    // Legacy rows lack the connect time; recorded work proves it started.
+    // Recorded work proves it started even without a connect time.
     expect(
       describe3({
         ...cause('heartbeat_lost'),
@@ -231,16 +231,23 @@ describe('describeTurnOutcome v3', () => {
     ).toBe('lost_connection');
   });
 
-  it('6b. any failure that never connected or did work could not start, except before connect times existed', () => {
+  it('6b. a failure proven never to connect could not start; legacy rows prove nothing', () => {
     const launchFailure = {
       error_message: 'Database operation failed (25P01)',
       executor_connected_at: undefined,
       recorded_tool_count: 0,
     };
     expect(describe3(launchFailure)?.cause).toBe('never_started');
-    expect(describe3({ ...launchFailure, created_at: '2026-07-01T00:00:00.000Z' })?.cause).toBe(
-      'unknown'
-    );
+    // The creation date is not evidence: an install upgraded late has new rows without either field.
+    expect(
+      describe3({ ...launchFailure, recorded_tool_count: undefined, created_at: CONNECTED })
+    ).toEqual({
+      cause: 'unknown',
+      type: 'error',
+      message: `The agent hit a problem. ${EDITS_KEPT}`,
+      action: 'resume',
+    });
+    expect(describe3({ ...launchFailure, recorded_tool_count: null })?.cause).toBe('unknown');
     expect(
       describe3({ ...launchFailure, error_message: missingScopedCredentialMessage('codex') })?.cause
     ).toBe('not_connected');
