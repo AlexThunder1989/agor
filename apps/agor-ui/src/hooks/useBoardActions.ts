@@ -28,7 +28,7 @@ export function useBoardActions(client: AgorClient | null): UseBoardActionsResul
       const created = await client.service('boards').create(board);
       return created;
     } catch (error) {
-      showError(formatActionError('create the board', error));
+      showError(formatActionError('create the board', error, { idempotent: false }));
       return null;
     } finally {
       setLoading(false);
@@ -43,7 +43,7 @@ export function useBoardActions(client: AgorClient | null): UseBoardActionsResul
       const updated = await client.service('boards').patch(boardId, updates);
       return updated;
     } catch (error) {
-      showError(formatActionError('update the board', error));
+      showError(formatActionError('update the board', error, { idempotent: true }));
       return null;
     } finally {
       setLoading(false);
@@ -58,7 +58,7 @@ export function useBoardActions(client: AgorClient | null): UseBoardActionsResul
       await client.service('boards').remove(boardId);
       return true;
     } catch (error) {
-      showError(formatActionError('delete the board', error));
+      showError(formatActionError('delete the board', error, { idempotent: true }));
       return false;
     } finally {
       setLoading(false);
@@ -73,7 +73,7 @@ export function useBoardActions(client: AgorClient | null): UseBoardActionsResul
       const archived = await client.service(`boards/${boardId}/archive`).create({});
       return archived as Board;
     } catch (error) {
-      showError(formatActionError('archive the board', error));
+      showError(formatActionError('archive the board', error, { idempotent: true }));
       return null;
     } finally {
       setLoading(false);
@@ -88,7 +88,7 @@ export function useBoardActions(client: AgorClient | null): UseBoardActionsResul
       const unarchived = await client.service(`boards/${boardId}/unarchive`).create({});
       return unarchived as Board;
     } catch (error) {
-      showError(formatActionError('unarchive the board', error));
+      showError(formatActionError('unarchive the board', error, { idempotent: true }));
       return null;
     } finally {
       setLoading(false);

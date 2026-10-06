@@ -1,7 +1,7 @@
 import type { AgorClient } from '@agor-live/client';
 import { useCallback, useEffect, useRef } from 'react';
 import { isTransientConnectionError } from '../utils/authErrors';
-import { isConnectionLossError, NOT_CONNECTED_ERROR } from '../utils/connectionErrors';
+import { isInFlightConnectionLossError } from '../utils/connectionErrors';
 import { useThemedMessage } from '../utils/message';
 
 const ACKNOWLEDGEMENT_WAIT_MS = 30_000;
@@ -28,7 +28,7 @@ export function useUnarchiveBranch(client: AgorClient | null | undefined) {
 
   return useCallback(
     (branchId: string, options?: { boardId?: string }): Promise<void> => {
-      if (!client) return Promise.reject(new Error(NOT_CONNECTED_ERROR));
+      if (!client) return Promise.reject(new Error('Not connected to daemon'));
       // Even after timeout, another click must not replay an uncertain mutation.
       const existing = operations.current.get(branchId);
       if (existing) return existing.promise;
@@ -68,7 +68,7 @@ export function useUnarchiveBranch(client: AgorClient | null | undefined) {
           resolve();
         } catch (error) {
           if (disposed) return;
-          if (isTransientConnectionError(error) || isConnectionLossError(error)) {
+          if (isTransientConnectionError(error) || isInFlightConnectionLossError(error)) {
             showWarning(UNKNOWN_OUTCOME, { key, duration: 10 });
           } else {
             showError(

@@ -33,7 +33,6 @@ import {
 import { Alert, Button, Input, Modal, Spin, Tag, Tooltip, Typography, theme } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { VISUALLY_HIDDEN_STYLE } from '@/utils/accessibility';
-import { NOT_CONNECTED_RETRY_ERROR } from '@/utils/connectionErrors';
 import { sanitizeSecretValue } from '@/utils/sanitizeSecret';
 import { useAuthenticatedAuthorityScope } from '../../hooks/useAuthorityOperationGuard';
 import { useAgorStore } from '../../store/agorStore';
@@ -949,7 +948,7 @@ export function OnboardingWizard({
   const saveOnboardingProgress = useCallback(
     async (updates: Record<string, unknown>) => {
       if (!isCurrent()) return false;
-      if (!user || !client) throw new Error(NOT_CONNECTED_RETRY_ERROR);
+      if (!user || !client) throw new Error('Not connected - try again when Agor reconnects.');
       // Preferences are a whole JSON object. Fetch immediately before the patch
       // so an unrelated settings write made while the wizard was open is not
       // replaced by the user snapshot captured at mount time.
@@ -1234,7 +1233,7 @@ export function OnboardingWizard({
         setBoardError(null);
         try {
           if (!isCurrent()) return;
-          if (!client) throw new Error(NOT_CONNECTED_RETRY_ERROR);
+          if (!client) throw new Error('Not connected - try again when Agor reconnects.');
 
           const boardId = await ensureBoard();
           if (!completionAttempt.isCurrent()) return;

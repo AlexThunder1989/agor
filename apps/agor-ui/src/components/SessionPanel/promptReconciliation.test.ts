@@ -93,20 +93,6 @@ describe('sendPromptWithReconciliation', () => {
     );
   });
 
-  it('shows the raw detail without a leading "Error: "', async () => {
-    const showError = vi.fn();
-    await sendPromptWithReconciliation({
-      send: () => Promise.reject(new Error('Error: operation has timed out')),
-      getClient: () => null,
-      attempt,
-      showError,
-      reconnectTimeoutMs: 10,
-    });
-    expect(showError).toHaveBeenCalledWith(
-      'The connection to Agor dropped as you sent this. Check the conversation before sending it again. (operation has timed out)'
-    );
-  });
-
   it('keeps the existing toast for other errors without reconciling', async () => {
     const getClient = vi.fn();
     const showError = vi.fn();

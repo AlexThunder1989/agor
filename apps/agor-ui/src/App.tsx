@@ -102,11 +102,7 @@ import {
 } from './surfaces/surfaceRegistry';
 import { useWorkspaceSurfaceLifecycle } from './surfaces/useWorkspaceSurfaceLifecycle';
 import type { CreateRepoOptions } from './types';
-import {
-  formatActionError,
-  NOT_CONNECTED_ERROR,
-  NOT_CONNECTED_RETRY_ERROR,
-} from './utils/connectionErrors';
+import { formatActionError } from './utils/connectionErrors';
 import { createRepository } from './utils/createRepository';
 import {
   enrichAuthenticatedUser,
@@ -684,7 +680,7 @@ function AppContent() {
     // best-effort auth refresh, so refresh failure cannot turn success into a
     // trapped final screen.
     if (!currentUser || !isOnboardingOwnerCurrent(owner)) return;
-    if (!client) throw new Error(NOT_CONNECTED_RETRY_ERROR);
+    if (!client) throw new Error('Not connected - try again when Agor reconnects.');
     const operationUserId = owner.userId;
     const isCurrentUser = () => isAttemptCurrent() && isOnboardingOwnerCurrent(owner);
 
@@ -1119,7 +1115,7 @@ function AppContent() {
     if (outcome.status === 'cancelled') return null;
     if (outcome.status === 'create-failed') {
       if (!shouldContinue()) return null;
-      showError(formatActionError('create the session', outcome.error));
+      showError(formatActionError('create the session', outcome.error, { idempotent: false }));
       return null;
     }
 
@@ -1156,7 +1152,7 @@ function AppContent() {
       await forkSession(sessionId as SessionID, prompt);
       showSuccess('Session forked successfully!');
     } catch (err) {
-      showError(formatActionError('fork the session', err));
+      showError(formatActionError('fork the session', err, { idempotent: false }));
       throw err;
     }
   };
@@ -1167,7 +1163,7 @@ function AppContent() {
       await btwForkSession(sessionId as SessionID, prompt);
       showSuccess('Side question sent via btw fork');
     } catch (err) {
-      showError(formatActionError('start the side question', err));
+      showError(formatActionError('start the side question', err, { idempotent: false }));
       throw err;
     }
   };
@@ -1180,7 +1176,7 @@ function AppContent() {
       await spawnSession(sessionId as SessionID, spawnConfig);
       showSuccess('Subsession session spawned successfully!');
     } catch (err) {
-      showError(formatActionError('spawn the subsession', err));
+      showError(formatActionError('spawn the subsession', err, { idempotent: false }));
       throw err;
     }
   };
@@ -1494,7 +1490,7 @@ function AppContent() {
     options: BranchArchiveOrDeleteOptions
   ) => {
     if (!client) {
-      throw new Error(NOT_CONNECTED_ERROR);
+      throw new Error('Not connected to daemon');
     }
     try {
       showLoading(`${options.metadataAction === 'archive' ? 'Archiving' : 'Deleting'} branch...`, {
@@ -1515,7 +1511,8 @@ function AppContent() {
       showError(
         formatActionError(
           options.metadataAction === 'archive' ? 'archive the branch' : 'delete the branch',
-          error
+          error,
+          { idempotent: true }
         ),
         {
           key: 'archive-delete',
@@ -1537,7 +1534,7 @@ function AppContent() {
       await client.service('branches').patch(branchId, updates as Partial<Branch>);
       if (!options.silent) showSuccess('Branch updated successfully!');
     } catch (error) {
-      showError(formatActionError('update the branch', error));
+      showError(formatActionError('update the branch', error, { idempotent: true }));
     }
   };
 
@@ -1587,7 +1584,9 @@ function AppContent() {
       destroy('create-branch');
       return branch;
     } catch (error) {
-      showError(formatActionError('create the branch', error), { key: 'create-branch' });
+      showError(formatActionError('create the branch', error, { idempotent: false }), {
+        key: 'create-branch',
+      });
       return null;
     }
   };
