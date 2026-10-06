@@ -975,6 +975,11 @@ function createGitClient(
     binary: getGitBinary(),
     abort,
     config: [],
+    // simple-git 4 rejects explicitly supplied GIT_* (and editor/pager) keys
+    // unless named here. `spawnEnv` is the exact child environment built by
+    // this module, so admit precisely its keys; the unsafe flags below remain
+    // the second opt-in for any vulnerability category those keys touch.
+    allowEnvironment: Object.keys(spawnEnv),
     ...(timeoutMs === undefined ? {} : { timeout: { block: timeoutMs } }),
     unsafe: {
       // simple-git's scanner cannot distinguish Agor's fixed defensive
@@ -1897,8 +1902,7 @@ export async function createBranch(
  * Branch storage mode = 'clone' produces a working directory whose `.git/`
  * is a real directory (not a `gitdir:` pointer file), with its own
  * `.git/config`, refs, and credentials surface. Closes the cross-branch
- * leak vectors that the Layer A defenses exist to mitigate. See
- * `context/explorations/clone-redesign.md` §1.
+ * leak vectors that the Layer A defenses exist to mitigate.
  */
 export interface CreateBranchAsCloneOptions {
   /** Remote URL to clone from (https://, ssh://, git@host:path, file://, or local path). */
