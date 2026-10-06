@@ -104,6 +104,13 @@ const makeZeroCounters = (): Record<HydratedCollection, number> => ({
 // removed entity: a remove would have bumped the counter, so no apply happens.
 let liveRevisions = makeZeroCounters();
 
+// The collections `runHydration` still replaces wholesale; only they carry a
+// generation token.
+export type BackgroundHydratedCollection = Extract<
+  HydratedCollection,
+  'agenticToolSettings' | 'mcpServers' | 'gatewayChannels' | 'artifacts' | 'comments'
+>;
+
 // Per-collection hydration generation tokens. Each `runHydration` call bumps the
 // generation for the collection(s) it owns and captures it; its retry loop stops
 // (without applying a snapshot or scheduling another timer) the moment a newer
@@ -111,20 +118,13 @@ let liveRevisions = makeZeroCounters();
 // unmounts, or a logout reset fires — all of which bump these counters. This is
 // CANCELLATION, not race reconciliation: clobber-safety still comes entirely
 // from the quiet-window check against `liveRevisions`. Kept strictly monotonic.
-const hydrationGeneration = makeZeroCounters();
-
-// Per-collection high-water mark of the live-write revision that the most recent
-// wholesale hydration apply was proven quiet against. A hydration applies its
-// full-set server snapshot only when no live write raced the fetch, so the
-// applied rows reflect every write up to this revision. The frame-coalesced
-// session-patch queue reads this to DROP any queued patch whose enqueue-time
-// revision is at-or-below it: that patch's effect is already contained in the
-// fresher server snapshot, so replaying it would overwrite newer state with
-// older. Any patch enqueued AFTER a hydration snapshots its baseline bumps the
-// revision during the fetch and forces that hydration to discard — so a queued
-// patch can only ever be at-or-below (stale relative to), never ahead of, an
-// apply. Reset to zero with `liveRevisions` on (re)mount.
-let lastAppliedRevision = makeZeroCounters();
+const hydrationGeneration: Record<BackgroundHydratedCollection, number> = {
+  agenticToolSettings: 0,
+  mcpServers: 0,
+  gatewayChannels: 0,
+  artifacts: 0,
+  comments: 0,
+};
 
 // ── Per-ID touched fence (board partition loads) ──────────────────────────
 // A board partition load never discards its snapshot (that is what lets
@@ -235,37 +235,8 @@ export class WholesaleReplacementError extends Error {
   }
 }
 
-/**
- * Current live-write revision for a collection. The session-patch queue stamps
- * each enqueued entry with this (captured right after the synchronous bump) so a
- * later hydration apply can tell which queued patches it has already subsumed.
- */
+/** Current live-write revision for a collection. */
 export const getRevision = (collection: HydratedCollection): number => liveRevisions[collection];
-
-/**
- * Revision that the last quiet-window hydration apply for a collection was
- * proven against. The session-patch queue drops queued entries stamped at-or-
- * below this — their effect already lives in the fresher applied snapshot.
- */
-export const getLastAppliedRevision = (collection: HydratedCollection): number =>
-  lastAppliedRevision[collection];
-
-/**
- * Record that a wholesale hydration apply for `collections` landed against the
- * given per-collection baseline revisions (the counters snapshotted before the
- * fetch, re-proven unchanged after). Monotonic — only advances the high-water
- * mark. Called from `runHydration` at the moment it applies.
- */
-export const recordHydrationApply = (
-  collections: readonly HydratedCollection[],
-  baselineRevisions: readonly number[]
-): void => {
-  collections.forEach((c, i) => {
-    if (baselineRevisions[i] > lastAppliedRevision[c]) {
-      lastAppliedRevision[c] = baselineRevisions[i];
-    }
-  });
-};
 
 /**
  * Bump the revisions of every collection a non-runHydration wholesale merge
@@ -285,7 +256,6 @@ export const bumpFirstPaintMergeRevisions = (): void => {
  */
 export const resetHydrationRevisions = (): void => {
   liveRevisions = makeZeroCounters();
-  lastAppliedRevision = makeZeroCounters();
   touchedIds = new Map();
   wholesaleEpoch += 1;
 };
@@ -305,7 +275,7 @@ export const getHydrationCancellationEpoch = (): number => cancellationEpoch;
  */
 export const cancelAllHydrations = (): void => {
   cancellationEpoch += 1;
-  for (const c of Object.keys(hydrationGeneration) as HydratedCollection[]) {
+  for (const c of Object.keys(hydrationGeneration) as BackgroundHydratedCollection[]) {
     hydrationGeneration[c] += 1;
   }
 };
@@ -320,9 +290,9 @@ export const cancelAllHydrations = (): void => {
  */
 export const cancelAndFailAllHydrations = (): void => {
   cancellationEpoch += 1;
-  for (const c of Object.keys(hydrationGeneration) as HydratedCollection[]) {
+  for (const c of Object.keys(liveRevisions) as HydratedCollection[]) liveRevisions[c] += 1;
+  for (const c of Object.keys(hydrationGeneration) as BackgroundHydratedCollection[]) {
     hydrationGeneration[c] += 1;
-    liveRevisions[c] += 1;
   }
   wholesaleEpoch += 1;
 };
@@ -343,7 +313,7 @@ export const cancelAndFailAllHydrations = (): void => {
  */
 export async function runHydration<T>(
   label: string,
-  collections: readonly HydratedCollection[],
+  collections: readonly BackgroundHydratedCollection[],
   fetchFn: () => Promise<T>,
   apply: (result: T) => void
 ): Promise<void> {
@@ -387,10 +357,6 @@ export async function runHydration<T>(
     if (!isCurrent()) return; // superseded while fetching
     const raced = collections.some((c, i) => liveRevisions[c] !== before[i]);
     if (!raced) {
-      // The snapshot is provably quiet against `before` — record it as the
-      // high-water mark so the session-patch queue discards any queued patch it
-      // has already subsumed, THEN apply.
-      recordHydrationApply(collections, before);
       apply(result);
       return;
     }

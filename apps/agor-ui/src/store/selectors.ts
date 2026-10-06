@@ -49,7 +49,6 @@ export const selectGatewayChannelById = (s: AgorState) => s.gatewayChannelById;
 export const selectUserAuthenticatedMcpServerIds = (s: AgorState) =>
   s.userAuthenticatedMcpServerIds;
 export const selectArtifactById = (s: AgorState) => s.artifactById;
-export const selectSessionMcpServerIds = (s: AgorState) => s.sessionMcpServerIds;
 
 /**
  * Select a single board's board-object array. Curried so callers can memoize
