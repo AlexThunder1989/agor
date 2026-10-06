@@ -49,6 +49,7 @@ export {
   matchSearchTokens,
   SEARCHABLE_FIELDS,
   type SearchFieldExtractor,
+  serverSearchText,
   tokenizeSearchQuery,
   uniqueSearchTokens,
 } from '../search/index.js';

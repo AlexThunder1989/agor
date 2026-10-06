@@ -5,6 +5,7 @@ import {
   matchSearchTokens,
   SEARCHABLE_FIELDS,
   type Session,
+  serverSearchText,
   tokenizeSearchQuery,
 } from '@agor-live/client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -82,7 +83,8 @@ function useServerSearch(
     }
     const hold = holdRows();
     const filter = {
-      search,
+      // At most the daemon's term cap; every term still filters below.
+      search: serverSearchText(search),
       archived: false,
       ...(createdBy ? { created_by: createdBy } : {}),
       $sort: { updated_at: -1 },

@@ -1,4 +1,4 @@
-import type { AgorClient, Branch } from '@agor-live/client';
+import { type AgorClient, type Branch, serverSearchText } from '@agor-live/client';
 import { Select } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { rowsOf } from '@/store/userScope';
@@ -48,7 +48,7 @@ export const BranchSelect: React.FC<BranchSelectProps> = ({
       .find({
         query: {
           archived: false,
-          ...(search ? { search } : {}),
+          ...(search ? { search: serverSearchText(search) } : {}),
           $limit: OPTION_LIMIT,
           $sort: { name: 1 },
         },

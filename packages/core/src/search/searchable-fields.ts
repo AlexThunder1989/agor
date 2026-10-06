@@ -91,3 +91,12 @@ export const MAX_SEARCH_TOKENS = 8;
 export function uniqueSearchTokens(query: string): string[] {
   return [...new Set(tokenizeSearchQuery(query))];
 }
+
+/**
+ * `query` as the daemon's `search` accepts it: its first `MAX_SEARCH_TOKENS`
+ * distinct tokens. A longer query then matches its leading terms on the
+ * server; a caller that filters locally applies every term itself.
+ */
+export function serverSearchText(query: string): string {
+  return uniqueSearchTokens(query).slice(0, MAX_SEARCH_TOKENS).join(' ');
+}

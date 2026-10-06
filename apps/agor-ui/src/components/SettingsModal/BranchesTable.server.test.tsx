@@ -112,6 +112,26 @@ describe('BranchesTable — server pages with the store empty', { timeout: 10_00
     );
   });
 
+  it('sends the daemon at most its 8 distinct search terms', async () => {
+    const { client, branchesFind } = makeClient();
+    renderTable(client);
+    await screen.findByText('feature-1');
+    fireEvent.change(screen.getByPlaceholderText(/Search/), {
+      target: { value: 'alpha beta gamma delta epsilon zeta eta theta iota kappa' },
+    });
+    await waitFor(() =>
+      expect(branchesFind).toHaveBeenLastCalledWith({
+        query: {
+          archived: false,
+          search: 'alpha beta gamma delta epsilon zeta eta theta',
+          $limit: 10,
+          $skip: 0,
+          $sort: { created_at: -1 },
+        },
+      })
+    );
+  });
+
   it('applies a realtime patch to a visible row in place', async () => {
     const { client, branchesFind, emit } = makeClient();
     renderTable(client);

@@ -6,7 +6,7 @@ import type {
   Repo,
   User,
 } from '@agor-live/client';
-import { isTeammate } from '@agor-live/client';
+import { isTeammate, serverSearchText } from '@agor-live/client';
 import {
   AimOutlined,
   BranchesOutlined,
@@ -136,7 +136,7 @@ export const BranchesTable: React.FC<BranchesTableProps> = ({
       ? null
       : {
           ...(archiveFilter === 'all' ? {} : { archived: archiveFilter === 'archived' }),
-          ...(search ? { search } : {}),
+          ...(search ? { search: serverSearchText(search) } : {}),
         },
     page,
     pageSize

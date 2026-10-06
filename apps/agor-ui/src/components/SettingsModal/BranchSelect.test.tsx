@@ -42,6 +42,24 @@ describe('BranchSelect', { timeout: 10_000 }, () => {
     expect(await screen.findByTitle('matching')).toBeInTheDocument();
   });
 
+  it('sends the daemon at most its 8 distinct search terms', async () => {
+    const { client, find } = makeClient();
+    render(<BranchSelect client={client} />);
+    fireEvent.change(screen.getByRole('combobox'), {
+      target: { value: 'alpha beta gamma delta epsilon zeta eta theta iota kappa' },
+    });
+    await waitFor(() =>
+      expect(find).toHaveBeenLastCalledWith({
+        query: {
+          archived: false,
+          search: 'alpha beta gamma delta epsilon zeta eta theta',
+          $limit: 50,
+          $sort: { name: 1 },
+        },
+      })
+    );
+  });
+
   it('labels a saved value outside the page with one by-id read', async () => {
     const { client, get } = makeClient();
     const { rerender } = render(<BranchSelect client={client} value="b-9" />);

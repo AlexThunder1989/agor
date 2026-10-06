@@ -105,6 +105,26 @@ describe('useGlobalSearch server results', () => {
     expect(result.current.counts.session).toBe(1);
   });
 
+  it('sends the daemon at most its 8 distinct terms, and matches every term locally', async () => {
+    const { client, finds } = makeClient({
+      sessions: [
+        session('s-all', 'alpha beta gamma delta epsilon zeta eta theta iota kappa'),
+        session('s-eight', 'alpha beta gamma delta epsilon zeta eta theta'),
+      ],
+    });
+    const { result } = renderSearch(
+      client,
+      'alpha beta gamma delta epsilon zeta eta theta iota kappa alpha'
+    );
+    await waitFor(() => expect(result.current.counts.session).toBe(1));
+    for (const find of [finds.sessions, finds.branches]) {
+      expect(find).toHaveBeenCalledWith({
+        query: expect.objectContaining({ search: 'alpha beta gamma delta epsilon zeta eta theta' }),
+      });
+    }
+    expect(result.current.results.session[0].item.session_id).toBe('s-all');
+  });
+
   it('fills nothing a daemon that ignored the search returned', async () => {
     const { client, finds } = makeClient({ sessions: [session('s-other', 'Unrelated')] });
     renderSearch(client, 'login');
