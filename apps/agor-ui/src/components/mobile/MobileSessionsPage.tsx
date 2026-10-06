@@ -4,6 +4,8 @@ import { Empty, List, Segmented, Spin, theme } from 'antd';
 import { useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useBoardPartition } from '../../hooks/useBoardPartition';
+import { useAgorStore } from '../../store/agorStore';
+import { selectMySessionsLoaded } from '../../store/userScope';
 import { isOwnActiveSession, sortSessions } from '../../utils/sessionSearch';
 import { BranchSessionSections } from '../BranchCard';
 import { mobileScrollAreaStyle } from './constants';
@@ -70,6 +72,8 @@ export const MobileSessionsPage: React.FC<MobileSessionsPageProps> = ({
     );
     return sortSessions(own, 'recent');
   }, [sessionById, currentUser?.user_id]);
+  // An empty list means "none" only once the caller's sessions have loaded.
+  const yourSessionsLoaded = useAgorStore(selectMySessionsLoaded);
 
   const { boardReady: assistantReady } = useBoardPartition(
     client,
@@ -134,6 +138,8 @@ export const MobileSessionsPage: React.FC<MobileSessionsPageProps> = ({
               client={client}
             />
           </div>
+        ) : yourSessions.length === 0 && !yourSessionsLoaded ? (
+          <Spin style={{ display: 'block', margin: '48px auto' }} />
         ) : yourSessions.length === 0 ? (
           <div
             style={{

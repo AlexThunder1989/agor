@@ -1,5 +1,5 @@
 import type { AgorClient, Branch, Session, User } from '@agor-live/client';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetHydrationRevisions } from '../../store/agorHydration';
@@ -7,6 +7,7 @@ import { agorStore, useAgorStore } from '../../store/agorStore';
 import { getDisplayedBoardId } from '../../store/boardPartitions';
 import { discardRealtimeNow, setRealtimeAuthorityScope } from '../../store/realtimeBatch';
 import { selectSessionsByBranch } from '../../store/selectors';
+import { userScopeCoverage } from '../../test/userScopeCoverage';
 import { MobileSessionsPage } from './MobileSessionsPage';
 
 const ownSession = {
@@ -132,5 +133,32 @@ describe('MobileSessionsPage assistant scope with the store empty (Step 3)', () 
     );
     expect(await screen.findByText('Assistant task')).toBeInTheDocument();
     expect(getDisplayedBoardId()).toBeUndefined();
+  });
+});
+
+describe('MobileSessionsPage Yours empty state', () => {
+  afterEach(() => agorStore.getState().reset());
+
+  it("waits for the caller's sessions to load before claiming there are none", () => {
+    agorStore.getState().reset();
+    render(
+      <MemoryRouter initialEntries={['/m/sessions']}>
+        <MobileSessionsPage
+          sessionById={new Map()}
+          branchById={new Map()}
+          userById={new Map()}
+          sessionsByBranch={new Map()}
+          currentUser={{ user_id: 'u1' } as User}
+          client={null}
+          onForkSession={vi.fn(async () => {})}
+          onSpawnSession={vi.fn(async () => {})}
+          onCreateSessionOnBranch={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+    // An empty map is not "none" until the user scope's sessions have loaded.
+    expect(screen.queryByText(/No sessions yet/)).not.toBeInTheDocument();
+    act(() => agorStore.setState({ coverage: userScopeCoverage({ sessions: true }) }));
+    expect(screen.getByText(/No sessions yet/)).toBeInTheDocument();
   });
 });
