@@ -45,9 +45,10 @@ const HYDRATION_IMMEDIATE_RETRIES = 4;
 const HYDRATION_BACKOFF_BASE_MS = 200;
 const HYDRATION_BACKOFF_CAP_MS = 5000;
 
-// Hydrated collections that the background hydration replaces wholesale. Each
-// has its own live-write revision counter (`liveRevisions`) so a write to one
-// collection never blocks another's hydration from applying.
+// Collections with a live-write revision counter (`liveRevisions`): the ones a
+// background hydration (`runHydration`) still replaces wholesale, and the ones
+// first paint, a resync or a partition load fence per id. Each has its own
+// counter so a write to one collection never blocks another's load.
 export type HydratedCollection =
   | 'sessions'
   | 'branches'
@@ -157,8 +158,8 @@ const stampTouched = (collection: HydratedCollection, id: string): void => {
  * Bump the live-write revision for a collection. Called by every realtime entity
  * action (and the hook's deep-link heal / OAuth handlers) that mutates one of the
  * hydrated collection Maps, so an in-flight hydration discards its snapshot
- * rather than clobbering the write. Pass the written entity's id so an in-flight
- * board partition load skips that row (see `touchedSince`).
+ * rather than clobbering the write. Pass the written entity's id so a load in
+ * flight (first paint, a resync, a partition) keeps that row (see `touchedSince`).
  */
 export const bumpRevision = (collection: HydratedCollection, id?: string): void => {
   liveRevisions[collection] += 1;

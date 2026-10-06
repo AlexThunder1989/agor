@@ -18,7 +18,7 @@ Status: design, revision 3 (2026-10-01), with Kamil's decisions applied (see bel
   - The first-paint/resync wholesale apply keeps every id touched by a live event during the load; a gated page that raced my own sessions never skips U1.
   - Partition entries are owned by their load and released on cancellation; no fill-only load applies across a wholesale replacement (a retryable error instead).
   - References: subscription before the first read, early pass for every gated page, at most 3 `$in` reads in flight, a run-owned retry queue, absent marks revalidated per run.
-  - Older daemon: rejected (400) or ignored keys put the scope in a terminal degraded state (`userScopeDegraded`); until 3.3 the global snapshots complete the flags (§10.2).
+  - Older daemon: no special support since 3.3. A rejected user-scope read is an ordinary failed read, retried by the next run (§10.2).
   - Caps are visible: `mySessionsTruncated` renders "N+" and suppresses "All caught up"; the teammate read reports its real `total` and sets `teammatesTruncated`.
   - On `/s/`, only U1 waits for the opened transcript.
 - **Step 2 (2026-10-02):** implemented. Contracts that differ from §4.3–§4.5 and §6 as written:
@@ -222,8 +222,8 @@ The stack's contracts are preserved: counts wait, rows render immediately, teamm
 - **Step 3 batch C1 (implemented).** Every resync already runs the scoped replace: U1–U3 replace their pieces,
   the displayed board replaces its branches and sessions with its annotations, and then every present referenced
   branch is re-read through the `$in` queue (omitted ids leave and become absent). `otherCommittedMembers` keeps rows
-  other scopes hold; a capped read removes nothing. Global hydration is the backstop until 3.3. It can be turned off
-  in tests (`setGlobalHydrationForTests`) to prove the scoped path alone.
+  other scopes hold; a capped read removes nothing. Since 3.3 there is no global hydration behind it: the scoped
+  path alone keeps the store correct.
 
 ## 4. Board partitions (commit 1.2, adjusted)
 
@@ -546,7 +546,7 @@ There is no committed Playwright suite; only `vitest.browser.config.ts` runs in 
 | S9  | Mobile: shared Home, bell badge, nav tree lazy expansion, assistant tab.                                                                                                                                                                                                                    | sqlite           | 1.5 / 3.2         |
 | S10 | A global viewer gets Home and Marketplace without 403s and makes no board-objects requests.                                                                                                                                                                                                 | rich             | 1.4               |
 | S11 | Scale fixture (about 5k sessions, 20 boards): network, `__AGOR_INITIAL_LOAD_TIMINGS__`, heap after GC, each step.                                                                                                                                                                           | sqlite, rich     | each step         |
-| S12 | New UI against the previous daemon: degraded but no fatal error (§10.2).                                                                                                                                                                                                                    | sqlite           | 1.4 / 3.2         |
+| S12 | New UI against the previous daemon: rejected user-scope reads fail like any read; no fatal error, first paint completes (§10.2).                                                                                                                                                            | sqlite           | 1.4 / 3.2         |
 
 ### 9.6 Expected results
 
@@ -581,12 +581,10 @@ Sandbox baselines: heap 121 MB after GC (340 MB pre-GC); blocking global session
 
 - **Why it happens:** the daemon serves the UI bundle (`D/index.ts:614-641`), so a rolling HA deploy or a stale tab can pair a new UI with an old daemon.
 - **What breaks:** an old daemon rejects `created_by` with `$count:false` (400), `$in`, and the `teammate`/`created_by` branch keys, and has no `search`.
-- **Requirement:** every new read is non-fatal.
-  - The gated my-sessions read falls back to the global recent slice.
-  - An unsupported user-scope read (400, or rows that violate its filter) degrades the scope; the global snapshots then complete its flags (Steps 1–2 only). Other failures retry (references) or wait for the global snapshots too.
-  - Teammates fall back to the teammates found in loaded branches.
-  - Search falls back to local hits.
-  - None of these may fail the first-paint gate.
+- **Decision (3.3):** no special support for an old daemon. There is no degraded scope state, no filter-violation check and no fallback read.
+  - A user-scope read the daemon rejects is an ordinary failed read, retried by the next run. Nothing infers an older daemon from a 400 or from rows outside the filter.
+  - A failed gated my-sessions page never fails first paint: it contributes no rows, and U1 reads every session of mine after paint.
+  - Surfaces that need a scope piece wait for it to load (`selectMySessionsLoaded` and friends) instead of showing an empty state.
 
 ### 10.3 Rollback
 

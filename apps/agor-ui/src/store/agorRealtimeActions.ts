@@ -7,12 +7,13 @@
  * named branch lifecycle cascades). `useAgorData`'s subscribe effect wires socket
  * events straight to these.
  *
- * Background hydration: each handler bumps the matching per-collection revision
- * counter (`bumpRevision`, from `agorHydration`) so an in-flight background
- * hydration discards its snapshot rather than clobbering this live write —
- * INCLUDING the branch-eviction cascade, which mutates sessions and, for a
- * hard delete, every normalized FK-cascade/SET NULL slice, and so bumps the
- * matching revisions.
+ * Load fences: each handler bumps the matching per-collection revision and
+ * stamps the written id (`bumpRevision`, from `agorHydration`), so a load in
+ * flight — first paint, a reconnect resync, a board partition or the user
+ * scope — keeps this live write rather than replacing it with its older
+ * snapshot. That INCLUDES the branch-eviction cascade, which mutates sessions
+ * and, for a hard delete, every normalized FK-cascade/SET NULL slice, and so
+ * bumps the matching revisions.
  *
  * IMMER breadth/depth rule applied here:
  *  - HOT single-map `*:patched` writes → RAW reducer via `setMap`
@@ -171,8 +172,7 @@ function evictedWith(branchId: string, withBoardObjects: boolean): WrittenIds {
 
 // ── Sessions ────────────────────────────────────────────────────────────────
 export function sessionCreated(session: Session) {
-  // Bump the sessions revision so an in-flight sessions hydration discards its
-  // snapshot and refetches instead of clobbering this write.
+  // Bump and stamp so a load in flight keeps this write (see the header).
   bumpRevision('sessions', session.session_id);
   if (session.archived) return;
 
@@ -201,8 +201,8 @@ export function sessionCreated(session: Session) {
 
 export function sessionPatched(session: Session) {
   // Patch (incl. archive, which removes the session from the active maps) counts
-  // as a live write — bump so an in-flight sessions hydration can't clobber it or
-  // resurrect an archive with a pre-archive snapshot. One `applyMaps` commits
+  // as a live write — bump so a load in flight can't clobber it or resurrect an
+  // archive with a pre-archive snapshot. One `applyMaps` commits
   // both `sessionById` and `sessionsByBranch` in a single store notify; the
   // reducer returns `prev` untouched on a no-op patch so references stay stable.
   bumpRevision('sessions', session.session_id);
@@ -240,9 +240,9 @@ export function sessionRemoved(session: Session) {
 }
 
 // ── Boards ──────────────────────────────────────────────────────────────────
-// Boards are background-hydrated WITH their full `objects`/`custom_css` (the
-// gated list fetch is lean), so every board write bumps the `boards` revision —
-// otherwise an in-flight boards hydration whose (full) snapshot predates a zone
+// A board partition load replaces its board WITH the full `objects`/`custom_css`
+// (the gated list fetch is lean), so every board write bumps and stamps the
+// `boards` revision — otherwise a load whose (full) snapshot predates a zone
 // create/move/delete could clobber the live change with the pre-edit board.
 export function boardCreated(board: Board) {
   bumpRevision('boards', board.board_id);
