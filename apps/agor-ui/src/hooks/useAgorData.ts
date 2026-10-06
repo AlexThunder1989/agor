@@ -43,6 +43,7 @@ import {
   cancelAllHydrations,
   cancelAndFailAllHydrations,
   endPartitionLoad,
+  type PartitionLoadFence,
   resetHydrationRevisions,
   runHydration,
   touchedIdsSince,
@@ -64,6 +65,7 @@ import {
   withGloballyHydrated,
 } from '../store/agorStore';
 import {
+  claimBoardPartition,
   claimDisplayedBoardForResync,
   evictUnloadedBoards,
   getDisplayedBoardId,
@@ -629,6 +631,9 @@ export function useAgorData(
       // The generation this load settles the displayed board's partition
       // under (the claim's, when it holds one).
       const boardGeneration = resyncClaim?.generation ?? nextPartitionGeneration();
+      // The displayed board, once resolved: claimed and fenced from there.
+      let boardClaim: { boardId: string; generation: number } | null = null;
+      let boardFence: PartitionLoadFence | null = null;
 
       try {
         if (!silent) {
@@ -968,6 +973,14 @@ export function useAgorData(
             ? partitionLoadSince(boardScope, loadLifetime, partitionMark)
             : undefined;
         const readBoardAnnotations = !!boardScope && !reusedPartitionLoad;
+        // Claim the board before reading it, and fence its rows from here: a
+        // live row on it is admitted from now on (`admitHeld`) and keeps its
+        // live value, while one rejected before the claim (the board wasn't
+        // known yet) is not touched for this fence, so the snapshot restores it.
+        if (boardScope && !reusedPartitionLoad) {
+          boardClaim = claimBoardPartition(boardScope, loadLifetime);
+          boardFence = beginPartitionLoad();
+        }
 
         // ── Essential gated fetches — HEAVY + board-scoped batch ────────
         // Scoped to the displayed board when resolved (board_id pushes to SQL
@@ -1198,8 +1211,9 @@ export function useAgorData(
         // hidden while disconnected) leave unless another scope's committed
         // membership holds them. Other boards' rows are untouched (Home reads
         // none).
+        const boardStart = (boardFence ?? firstPaintFence).startRevisions;
         const touchedInLoad = (collection: PartitionCollection, id: string) =>
-          touchedSince(collection, id, firstPaintFence.startRevisions[collection]);
+          touchedSince(collection, id, boardStart[collection]);
         // The displayed board's read (every query an unbounded `findAll`; a
         // global resync reads branches and sessions globally, so they are
         // narrowed to the board). It reconciles the board and, when the full
@@ -1222,9 +1236,9 @@ export function useAgorData(
             ? settleBoardPartition(
                 boardScope,
                 loadLifetime,
-                boardGeneration,
+                boardClaim?.generation ?? boardGeneration,
                 boardRows,
-                firstPaintFence.startRevisions
+                boardStart
               )
             : undefined;
         agorStore.getState().applyMaps(
@@ -1494,7 +1508,9 @@ export function useAgorData(
         return true;
       } finally {
         endPartitionLoad();
+        if (boardFence) endPartitionLoad();
         releaseResyncClaim(resyncClaim);
+        releaseResyncClaim(boardClaim);
         if (!silent && authorityIsCurrent()) {
           agorStore.getState().setLoading(false);
           agorStore.getState().setLoadingStage('idle');

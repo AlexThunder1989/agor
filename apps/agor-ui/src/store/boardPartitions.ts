@@ -218,7 +218,21 @@ export function claimDisplayedBoardForResync(
   lifetime: LoadLifetime
 ): { boardId: string; generation: number } | null {
   const boardId = getDisplayedBoardId();
-  if (!boardId || agorStore.getState().coverage.has(boardScopeKey(boardId))) return null;
+  return boardId ? claimBoardPartition(boardId, lifetime) : null;
+}
+
+/**
+ * Mark `boardId` loading under `lifetime` while it has no entry, for a load
+ * outside `loadBoardPartition` (first paint, a resync): from then on a live
+ * row on the board is admitted (`admitHeld`), so the load's settle — fenced
+ * from the claim — keeps it. Free it with `releaseResyncClaim` if the load
+ * ends without settling.
+ */
+export function claimBoardPartition(
+  boardId: string,
+  lifetime: LoadLifetime
+): { boardId: string; generation: number } | null {
+  if (agorStore.getState().coverage.has(boardScopeKey(boardId))) return null;
   const generation = nextPartitionGeneration();
   setBoardPartition(boardId, { status: 'loading', ...lifetime, generation });
   return { boardId, generation };

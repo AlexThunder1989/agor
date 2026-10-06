@@ -1853,6 +1853,45 @@ describe('useAgorData — opened session transcript priority', () => {
   });
 });
 
+describe('useAgorData — first paint holds the displayed board (global hydration off)', () => {
+  it("keeps another user's sessions created on the board before and during its read", async () => {
+    withoutGlobalHydration();
+    const boardA = { board_id: 'board-A', slug: 'displayed', name: 'Displayed' };
+    window.history.pushState({}, '', '/b/displayed/');
+    onTestFinished(() => window.history.pushState({}, '', '/'));
+    const server = {
+      branches: [makeBranch({ branch_id: 'b-A', board_id: 'board-A', created_by: 'user-other' })],
+      sessions: [makeSession({ session_id: 's-A', branch_id: 'b-A', created_by: 'user-other' })],
+    };
+    const seed = fakeServer({ boards: [boardA], 'boards:get': boardA as never }, server);
+    const { client, emit, onFetch } = makeMockClient(seed);
+    // Created on the server and announced live: one while the light batch
+    // resolves the board, one while the board's own rows are being read.
+    const create = (id: string) => {
+      const row = makeSession({ session_id: id, branch_id: 'b-A', created_by: 'user-other' });
+      server.sessions.push(row);
+      emit('sessions', 'created', { ...row, branch_board_id: 'board-A' });
+    };
+    onFetch('boards', 'findAll', (call) => call === 1 && create('s-early'));
+    onFetch('sessions', 'findAll', (call) => call === 1 && create('s-late'));
+    const { result } = renderHook(() =>
+      useAgorData(client, {
+        authenticatedUserId: 'user-me',
+        authenticatedUserRole: 'member',
+        authGeneration: 1,
+        connectionReady: true,
+      })
+    );
+    await waitForInitialLoad(result);
+    const state = agorStore.getState();
+    expect(selectBoardPartition(state, 'board-A')?.status).toBe('loaded');
+    expect(['s-A', 's-early', 's-late'].filter((id) => !state.sessionById.has(id))).toEqual([]);
+    expect(selectBoardPartition(state, 'board-A')?.members?.sessions).toEqual(
+      new Set(['s-A', 's-early', 's-late'])
+    );
+  });
+});
+
 describe('useAgorData — user-scoped first paint (design r3 §3.1)', () => {
   const authority = {
     authenticatedUserId: 'user-me',
