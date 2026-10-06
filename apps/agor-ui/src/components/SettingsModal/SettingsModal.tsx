@@ -19,7 +19,7 @@ import { hasMinimumRole, ROLES } from '@agor-live/client';
 import { ArrowLeftOutlined, CloseOutlined, RightOutlined, UserOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { Button, Drawer, Flex, Grid, Layout, Menu, Modal, Typography, theme } from 'antd';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useAuthenticatedAuthorityScope } from '@/hooks/useAuthorityOperationGuard';
 import type { BranchStorageConfig } from '@/utils/branchStorage';
 import { mapToArray } from '@/utils/mapHelpers';
@@ -35,7 +35,6 @@ import {
   selectGatewayChannelById,
   selectMcpServerById,
   selectRepoById,
-  selectSessionsByBranch,
   selectUserById,
 } from '../../store/selectors';
 import { MOBILE_TOUCH_TARGET } from '../../utils/deviceDetection';
@@ -164,7 +163,6 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
   const boardObjectById = useAgorStore(selectBoardObjectById);
   const repoById = useAgorStore(selectRepoById);
   const branchById = useAgorStore(selectBranchById);
-  const sessionsByBranch = useAgorStore(selectSessionsByBranch);
   const userById = useAgorStore(selectUserById);
   const mcpServerById = useAgorStore(selectMcpServerById);
   const cardTypeById = useAgorStore(selectCardTypeById);
@@ -181,15 +179,30 @@ const SettingsModalContent: React.FC<SettingsModalProps> = ({
   const [branchSessions, setBranchSessions] = useState<Session[]>([]);
   const [branchModalOpen, setBranchModalOpen] = useState(false);
 
+  // The branch whose sessions a read may still deliver (a later open or a close wins).
+  const branchSessionsFor = useRef<string | null>(null);
+
   const handleBranchRowClick = (branch: Branch) => {
     // Snapshot the data when opening modal
     setSelectedBranch(branch);
     setSelectedRepo(repoById.get(branch.repo_id) || null);
-    setBranchSessions(sessionsByBranch.get(branch.branch_id) || []);
+    setBranchSessions([]);
     setBranchModalOpen(true);
+    // The store holds only the loaded scopes' sessions: read this branch's once.
+    branchSessionsFor.current = branch.branch_id;
+    client
+      ?.service('sessions')
+      .findAll({
+        query: { branch_id: branch.branch_id, archived: false, $sort: { created_at: -1 } },
+      })
+      .then((sessions) => {
+        if (branchSessionsFor.current === branch.branch_id) setBranchSessions(sessions);
+      })
+      .catch((err) => console.warn('[settings] branch sessions read failed:', err));
   };
 
   const handleBranchModalClose = () => {
+    branchSessionsFor.current = null;
     setBranchModalOpen(false);
     // Clear after modal closes
     setSelectedBranch(null);
