@@ -132,7 +132,7 @@ export function useServerRead<T>(
           return;
         }
         attempts = 0;
-        const data = patches.reduce((current, update) => update(current), reply);
+        const data = patches.reduce<T>((current, update) => update(current), reply);
         setState({ key, identity, data });
       } catch (err) {
         if (disposed) return;
