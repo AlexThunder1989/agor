@@ -20,7 +20,11 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { getRevision } from '../store/agorHydration';
 import { agorStore } from '../store/agorStore';
-import { registerBoardUse, selectBoardPartition } from '../store/boardPartitions';
+import {
+  loadBoardPartition,
+  registerBoardUse,
+  selectBoardPartition,
+} from '../store/boardPartitions';
 // Session `patched`/`updated` writes are coalesced to one flush per frame (see
 // realtimeBatch); flush synchronously in tests that assert the post-patch store.
 import { flushRealtimeNow } from '../store/realtimeBatch';
@@ -2886,6 +2890,45 @@ describe('useAgorData — scoped reconnect (global hydration off)', () => {
     // Unmarked, but the capped read can't prove it: it stays.
     expect(state.branchById.has('mate-unmarked')).toBe(true);
     expect(state.branchById.has('mate-1')).toBe(true);
+  });
+
+  it("a board opened earlier doesn't keep another user's rows deleted while disconnected", async () => {
+    withoutGlobalHydration();
+    const { server } = workspace();
+    const other = (id: string) =>
+      makeBranch({ branch_id: id, board_id: 'board-B', created_by: 'user-other' });
+    const otherSession = (id: string, branchId: string) =>
+      makeSession({ session_id: id, branch_id: branchId, created_by: 'user-other' });
+    server.branches.push(other('b-B'), other('b-B-gone') as Row);
+    server.sessions.push(otherSession('s-B', 'b-B'), otherSession('s-B-gone', 'b-B') as Row);
+    const { emitIo, client } = await connectedWorkspace(server);
+    const has = (map: 'sessionById' | 'branchById', id: string) =>
+      agorStore.getState()[map].has(id);
+    // Open board B, then go back to board A (displayed): B stays among the recent partitions.
+    const releaseB = registerBoardUse('board-B');
+    await act(() => loadBoardPartition(client, 'board-B', { canUseMemberWorkspaceServices: true }));
+    releaseB();
+    expect(selectBoardPartition(agorStore.getState(), 'board-B')?.status).toBe('loaded');
+    for (const id of ['b-B', 'b-B-gone']) expect(has('branchById', id)).toBe(true);
+    for (const id of ['s-B', 's-B-gone']) expect(has('sessionById', id)).toBe(true);
+
+    // While disconnected, another user's branch is deleted and a session revoked.
+    server.branches = server.branches.filter((row) => row.branch_id !== 'b-B-gone');
+    server.sessions = server.sessions.filter((row) => row.session_id !== 's-B-gone');
+    act(() => emitIo('connect'));
+    await waitFor(() => expect(has('branchById', 'b-B-gone')).toBe(false));
+    await flush();
+    // B is unloaded and none of its rows stay; the displayed board's do.
+    expect(agorStore.getState().coverage.has(boardScopeKey('board-B'))).toBe(false);
+    for (const id of ['s-B', 's-B-gone']) expect(has('sessionById', id)).toBe(false);
+    expect(has('branchById', 'b-B')).toBe(false);
+    expect(has('branchById', 'b-A')).toBe(true);
+    // Re-opening B reads it again, without the deleted rows.
+    await act(() => loadBoardPartition(client, 'board-B', { canUseMemberWorkspaceServices: true }));
+    expect(has('branchById', 'b-B')).toBe(true);
+    expect(has('sessionById', 's-B')).toBe(true);
+    expect(has('branchById', 'b-B-gone')).toBe(false);
+    expect(has('sessionById', 's-B-gone')).toBe(false);
   });
 
   it("a reconnect evicts the unloaded boards' rows that no scope holds", async () => {
