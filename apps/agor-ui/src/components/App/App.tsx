@@ -77,7 +77,7 @@ import {
   buildTeammateBootstrapPrompt,
   buildTeammateFirstSessionTitle,
 } from '../../utils/teammateBootstrapPrompt';
-import { createTeammateBranch } from '../../utils/teammateCreation';
+import { boardHasNoActiveBranches, createTeammateBranch } from '../../utils/teammateCreation';
 import { isTeammatesRoute } from '../../utils/uiRoutes';
 import { getUserDefaultConfigurationSource } from '../AgenticToolConfigurationPicker/useAgenticConfigurationSources';
 import { AppHeader } from '../AppHeader';
@@ -1075,9 +1075,7 @@ export const App: React.FC<AppProps> = ({
               boardId: teammateTargetBoardId,
               keepExistingPrimary: true,
               // An existing board with branches already has its own layout; skip the welcome note.
-              welcomeNote: ![...agorStore.getState().branchById.values()].some(
-                (branch) => branch.board_id === teammateTargetBoardId
-              ),
+              welcomeNote: await boardHasNoActiveBranches(client, teammateTargetBoardId),
             }
           : {}),
       },
