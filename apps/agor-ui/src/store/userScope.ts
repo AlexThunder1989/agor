@@ -59,7 +59,7 @@ import {
   wholesaleReplacedSince,
 } from './agorHydration';
 import { applyEntityFill, type DataMaps } from './agorMaps';
-import { type AgorState, agorStore } from './agorStore';
+import { type AgorState, agorStore, type LoadMetaUpdate } from './agorStore';
 import { captureLoadLifetime, isLoadLifetimeCurrent, type LoadLifetime } from './loadLifetime';
 import {
   type CoverageMembers,
@@ -277,7 +277,7 @@ export type FillRows = { branches?: Branch[]; sessions?: Session[] };
  * with the rows realtime wrote meanwhile judged by their current value
  * (`settledMembers`). With `replace`, the rows reconcile that scope
  * (`replaceScope`, complete unless the piece says the read was capped) instead
- * of filling it.
+ * of filling it. `meta` publishes load meta with the rows (absent marks).
  */
 async function fillRead(
   current: () => boolean,
@@ -292,6 +292,7 @@ async function fillRead(
       commitIf?: () => Promise<boolean>;
     };
     replace?: LoadScope;
+    meta?: (rows: FillRows) => LoadMetaUpdate;
   } = {}
 ): Promise<FillRows | null> {
   const { violatesFilter, piece, replace } = options;
@@ -341,13 +342,15 @@ async function fillRead(
               otherCommittedMembers(agorStore.getState(), replace.key)
             )
           : applyEntityFill(prev, rows, touched);
+      let meta = options.meta?.(rows);
       if (piece?.commitIf) {
         // A deferred commit publishes the rows now and the coverage once allowed.
-        agorStore.getState().applyMaps(update);
+        agorStore.getState().applyMaps(update, undefined, meta);
         if (!(await piece.commitIf()) || !current()) return null;
         update = (prev) => prev;
+        meta = undefined;
       }
-      agorStore.getState().applyMaps(update, settle);
+      agorStore.getState().applyMaps(update, settle, meta);
       return rows;
     } finally {
       endPartitionLoad();
@@ -423,16 +426,24 @@ function mySessionIds(s: AgorState, userId: string): Set<string> {
   return ids;
 }
 
+/** `absent` plus `add`, without the branches present in `branchById`; itself when unchanged. */
+function withAbsent(
+  absent: Set<string>,
+  add: readonly string[],
+  branchById: DataMaps['branchById']
+): Set<string> {
+  const next = new Set([...absent, ...add]);
+  for (const id of next) if (branchById.has(id)) next.delete(id);
+  const same = next.size === absent.size && [...next].every((id) => absent.has(id));
+  return same ? absent : next;
+}
+
 /** Add absent marks and drop the marks of branches that are present now (current run only). */
 function updateAbsent(run: ScopeRun, add: readonly string[]): void {
   if (!isCurrent(run)) return;
   const state = agorStore.getState();
-  const next = new Set([...state.absentBranchIds, ...add]);
-  for (const id of next) if (state.branchById.has(id)) next.delete(id);
-  const same =
-    next.size === state.absentBranchIds.size &&
-    [...next].every((id) => state.absentBranchIds.has(id));
-  if (!same) state.setUserScope({ absentBranchIds: next });
+  const absentBranchIds = withAbsent(state.absentBranchIds, add, state.branchById);
+  if (absentBranchIds !== state.absentBranchIds) state.setUserScope({ absentBranchIds });
 }
 
 /** Ids referenced but neither present, absent, nor pending or failed in this run. */
@@ -545,7 +556,8 @@ function idReadsDrained(run: ScopeRun): Promise<void> {
 
 /**
  * Read one chunk of branch ids and record the ones the server doesn't return —
- * and that didn't arrive meanwhile — as absent. In a replace run the chunk
+ * and that didn't arrive meanwhile — as absent, in the update that applies the
+ * chunk's rows. In a replace run the chunk
  * reconciles its ids: returned rows overwrite, omitted ones leave unless
  * another scope's committed membership holds them. A failed read is retried
  * with backoff; the ids stay pending until it settles.
@@ -572,17 +584,18 @@ async function readBranchChunk(run: ScopeRun, chunk: string[]): Promise<void> {
         violatesFilter: ({ branches }) =>
           (branches ?? []).some((branch) => !requested.has(branch.branch_id)),
         replace,
+        meta: ({ branches }) => {
+          const returned = new Set((branches ?? []).map((branch) => branch.branch_id as string));
+          const omitted = chunk.filter((id) => !returned.has(id));
+          return (maps, state) => ({
+            absentBranchIds: withAbsent(state.absentBranchIds, omitted, maps.branchById),
+          });
+        },
       }
     );
     // Recheck after the await: `fillRead` applied while current, but this
     // continuation runs later, possibly after a cancellation or a new run.
     if (!rows || !isCurrent(run)) return;
-    const returned = new Set((rows.branches ?? []).map((branch) => branch.branch_id as string));
-    const state = agorStore.getState();
-    updateAbsent(
-      run,
-      chunk.filter((id) => !returned.has(id) && !state.branchById.has(id))
-    );
     for (const id of chunk) {
       run.pending.delete(id);
       run.attempts.delete(id);

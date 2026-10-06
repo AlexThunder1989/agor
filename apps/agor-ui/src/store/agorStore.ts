@@ -31,13 +31,12 @@ import { createStore } from 'zustand/vanilla';
 import type { InitialLoadItemKey, InitialLoadingStage } from '../hooks/useAgorData';
 import { type DataMaps, EMPTY_MAPS, isSessionRowRemovedWith, MAP_KEYS, pickMaps } from './agorMaps';
 import {
-  BOARD_SCOPE_PREFIX,
-  boardScopeKey,
   type Coverage,
   type CoverageUpdate,
   type ScopeCoverage,
   type ScopeKey,
   withCoverage,
+  withoutBoardPartitions,
 } from './scopeMerge';
 
 // Immer needs this to draft Map/Set state. Called once at module load; the
@@ -59,6 +58,21 @@ export const GLOBALLY_HYDRATED_COLLECTIONS: readonly GloballyHydratedCollection[
   'sessions',
   'branches',
 ];
+
+/** `current` with the globally hydrated ones of `collections` added; itself when nothing changes. */
+export function withGloballyHydrated(
+  current: ReadonlySet<GloballyHydratedCollection>,
+  collections: readonly string[]
+): Set<GloballyHydratedCollection> {
+  const additions = collections.filter(
+    (c): c is GloballyHydratedCollection =>
+      (GLOBALLY_HYDRATED_COLLECTIONS as readonly string[]).includes(c) &&
+      !current.has(c as GloballyHydratedCollection)
+  );
+  return additions.length === 0
+    ? (current as Set<GloballyHydratedCollection>)
+    : new Set([...current, ...additions]);
+}
 
 /**
  * User-scope state outside its coverage entries (`userScope.ts`); whether each
@@ -181,9 +195,14 @@ interface AgorActions {
    * reducer's existing per-slice reference preservation carries through, and an
    * all-no-op reducer leaves the outer state object untouched. `coverage`
    * publishes the coverage change that goes with it (a load's commit, live
-   * membership) in the same update.
+   * membership) in the same update, and `meta` the load meta that describes
+   * the same rows.
    */
-  applyMaps: (updater: (prev: DataMaps) => DataMaps, coverage?: CoverageUpdate) => void;
+  applyMaps: (
+    updater: (prev: DataMaps) => DataMaps,
+    coverage?: CoverageUpdate,
+    meta?: LoadMetaUpdate
+  ) => void;
   /** Set (or clear, with `null`) one scope's coverage; a no-op when nothing changes. */
   setCoverage: (key: ScopeKey, entry: ScopeCoverage | null) => void;
   /** Merge user-scope meta; a no-op when nothing changes. */
@@ -212,6 +231,18 @@ interface AgorActions {
 }
 
 export type AgorState = DataMaps & AgorMetaWithUserScope & AgorActions;
+
+/**
+ * Load meta that describes rows the way coverage does: referenced branches
+ * that are absent, the global sets that applied, the partition epoch, and the
+ * sessions whose MCP links are loaded. A load publishes it with its rows.
+ */
+export type LoadMeta = Pick<
+  AgorState,
+  'absentBranchIds' | 'globallyHydrated' | 'partitionEpoch' | 'sessionMcpLoaded'
+>;
+/** A load-meta change published in the same store update as a maps change. */
+export type LoadMetaUpdate = (maps: DataMaps, state: AgorState) => Partial<LoadMeta>;
 
 /** Publish a cascade's coverage change in the cascade's own update. */
 function updateCoverage(
@@ -365,25 +396,14 @@ export const agorStore = createStore<AgorState>()(
       if (changed) set(partial as Partial<AgorState>);
     },
     resetBoardPartitions: (keep = []) => {
-      const kept = new Set<ScopeKey>(keep.map(boardScopeKey));
-      const next = new Map<ScopeKey, ScopeCoverage>();
-      for (const [key, entry] of get().coverage) {
-        if (!key.startsWith(BOARD_SCOPE_PREFIX) || kept.has(key)) next.set(key, entry);
-      }
       set({
-        coverage: next,
+        coverage: withoutBoardPartitions(get().coverage, keep),
         partitionEpoch: get().partitionEpoch + 1,
       });
     },
     markGloballyHydrated: (collections) => {
-      const current = get().globallyHydrated;
-      const additions = collections.filter(
-        (c): c is GloballyHydratedCollection =>
-          (GLOBALLY_HYDRATED_COLLECTIONS as readonly string[]).includes(c) &&
-          !current.has(c as GloballyHydratedCollection)
-      );
-      if (additions.length === 0) return;
-      set({ globallyHydrated: new Set([...current, ...additions]) });
+      const globallyHydrated = withGloballyHydrated(get().globallyHydrated, collections);
+      if (globallyHydrated !== get().globallyHydrated) set({ globallyHydrated });
     },
     markSessionMcpLoaded: (sessionId) => {
       const current = get().sessionMcpLoaded;
@@ -433,7 +453,7 @@ export const agorStore = createStore<AgorState>()(
       set(changed as Partial<AgorState>);
     },
 
-    applyMaps: (updater, coverage) => {
+    applyMaps: (updater, coverage, meta) => {
       const prev = pickMaps(get());
       const next = updater(prev);
       const changed: Partial<AgorState> = {};
@@ -448,6 +468,11 @@ export const agorStore = createStore<AgorState>()(
       }
       const nextCoverage = coverage?.(next, get().coverage);
       if (nextCoverage && nextCoverage !== get().coverage) changed.coverage = nextCoverage;
+      const nextMeta = meta?.(next, get()) ?? {};
+      for (const k of Object.keys(nextMeta) as (keyof LoadMeta)[]) {
+        // biome-ignore lint/suspicious/noExplicitAny: heterogeneous meta union; per-key types are sound.
+        if (!Object.is(nextMeta[k], get()[k])) changed[k] = nextMeta[k] as any;
+      }
       if (Object.keys(changed).length === 0) return;
       set(changed);
     },

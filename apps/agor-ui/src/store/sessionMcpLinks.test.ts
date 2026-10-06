@@ -119,6 +119,20 @@ describe('loadSessionMcpServerIds', () => {
     expect(agorStore.getState().sessionMcpLoaded.has('s-1')).toBe(true);
   });
 
+  it('publishes the links and their loaded mark in one update', async () => {
+    const { client, responses } = makeClient();
+    const split: string[] = [];
+    const off = agorStore.subscribe((s) => {
+      if (s.sessionMcpServerIds.has('s-1') !== s.sessionMcpLoaded.has('s-1')) split.push('s-1');
+    });
+    const load = loadSessionMcpServerIds(client, 's-1');
+    responses[0].resolve([{ session_id: 's-1', mcp_server_id: 'a' }]);
+    await load;
+    off();
+    expect(agorStore.getState().sessionMcpLoaded.has('s-1')).toBe(true);
+    expect(split).toEqual([]);
+  });
+
   it('applies realtime link events that race the read instead of the older snapshot', async () => {
     const { client, responses } = makeClient();
     const load = loadSessionMcpServerIds(client, 's-1');

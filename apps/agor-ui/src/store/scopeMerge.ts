@@ -140,6 +140,18 @@ export function withCoverage(
   return next;
 }
 
+/** `coverage` without its board partitions, but the `keep` boards'; itself when nothing changes. */
+export function withoutBoardPartitions(coverage: Coverage, keep: readonly string[] = []): Coverage {
+  const kept = new Set<ScopeKey>(keep.map(boardScopeKey));
+  let next: Map<ScopeKey, ScopeCoverage> | null = null;
+  for (const key of coverage.keys()) {
+    if (!key.startsWith(BOARD_SCOPE_PREFIX) || kept.has(key)) continue;
+    next ??= new Map(coverage);
+    next.delete(key);
+  }
+  return next ?? coverage;
+}
+
 /**
  * The ids of a read's rows that belong to its scope: branches and sessions
  * that are not archived (archived rows are never listed), and every board

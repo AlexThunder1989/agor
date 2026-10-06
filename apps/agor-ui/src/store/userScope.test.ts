@@ -1089,4 +1089,32 @@ describe('user scope — reconnect replace', () => {
     expect(requested).toEqual(expect.arrayContaining(['br-ref', 'br-gone', 'br-held']));
     expect(flags().homeBranchesLoaded).toBe(true);
   });
+
+  it('publishes a removed referenced branch and its absent mark in one update', async () => {
+    const first = makeClient({
+      mine: () => [session('s-1', 'br-gone')],
+      byIds: (ids) => ids.map((id) => branch(id)),
+    });
+    await startUserScope(first.client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: false,
+    });
+    await vi.waitFor(() => expect(flags().homeBranchesLoaded).toBe(true));
+    const split: string[] = [];
+    const off = agorStore.subscribe((s) => {
+      if (!s.branchById.has('br-gone') && !s.absentBranchIds.has('br-gone')) split.push('br-gone');
+    });
+    const resync = makeClient({ mine: () => [session('s-1', 'br-gone')], byIds: () => [] });
+    await startUserScope(resync.client, {
+      userId: ME,
+      lifetime: lifetime(),
+      gatedMineComplete: false,
+      replace: true,
+    });
+    await vi.waitFor(() => expect(has('branchById', 'br-gone')).toBe(false));
+    off();
+    expect(agorStore.getState().absentBranchIds.has('br-gone')).toBe(true);
+    expect(split).toEqual([]);
+  });
 });

@@ -51,11 +51,18 @@ import {
 import {
   buildById,
   buildSessionMaps,
+  type DataMaps,
   keepLiveWrites,
   type PartitionCollection,
 } from '../store/agorMaps';
 import * as realtime from '../store/agorRealtimeActions';
-import { agorStore, shallow, useStoreWithEqualityFn } from '../store/agorStore';
+import {
+  agorStore,
+  type LoadMetaUpdate,
+  shallow,
+  useStoreWithEqualityFn,
+  withGloballyHydrated,
+} from '../store/agorStore';
 import {
   claimDisplayedBoardForResync,
   getDisplayedBoardId,
@@ -83,7 +90,13 @@ import {
   tombstoneSession,
   untombstoneSession,
 } from '../store/realtimeBatch';
-import { boardPartitionScope, boardScopeKey, replaceScope } from '../store/scopeMerge';
+import {
+  boardPartitionScope,
+  boardScopeKey,
+  type Coverage,
+  replaceScope,
+  withoutBoardPartitions,
+} from '../store/scopeMerge';
 import { resetSessionMcpLinks } from '../store/sessionMcpLinks';
 import {
   fillOnDemand,
@@ -149,6 +162,17 @@ const RECENT_SESSIONS_LIMIT = 50;
 // Longest the global snapshots wait for the user scope (U1 and its follow-up
 // id reads) before starting anyway; see `hydrateGlobalSets`' start below.
 const GLOBAL_SETS_SCOPE_HOLD_MS = 10_000;
+
+/**
+ * A quiet global snapshot makes every board complete for its collection (the
+ * Steps 1–2 shortcut, `globalSetsMembers`); it is marked in the update that
+ * applies the snapshot.
+ */
+const markGlobalSet =
+  (collection: 'sessions' | 'branches'): LoadMetaUpdate =>
+  (_maps, state) => ({
+    globallyHydrated: withGloballyHydrated(state.globallyHydrated, [collection]),
+  });
 
 // Global session and branch hydration (Steps 1–2): the background full sets
 // after first paint, and a reconnect resync's full reads. Off, a reconnect
@@ -1152,8 +1176,11 @@ export function useAgorData(
         // deletions while disconnected, and their next partition load
         // reconciles them. The displayed board is reconciled right here.
         // Boards loaded after this resync started (a reused partition load
-        // among them) are already reconciled: they stay loaded.
-        if (silent) agorStore.getState().resetBoardPartitions(sparedBoardIds);
+        // among them) are already reconciled: they stay loaded. The reset
+        // publishes with the rows and the displayed board's settle below, so
+        // no update shows the board unloaded or its rows without coverage.
+        const resetCoverage = (coverage: Coverage) =>
+          silent ? withoutBoardPartitions(coverage, sparedBoardIds) : coverage;
         // The displayed board reconciles (`replaceScope`, fenced like
         // everything above): rows written live during this load keep their
         // live value, and rows the board no longer has (deleted, moved or
@@ -1179,6 +1206,16 @@ export function useAgorData(
                 complete: true,
               }
             : null;
+        const settleDisplayed =
+          boardScope && boardRows && displayedBoardFull && isLoadLifetimeCurrent(loadLifetime)
+            ? settleBoardPartition(
+                boardScope,
+                loadLifetime,
+                boardGeneration,
+                boardRows,
+                firstPaintFence.startRevisions
+              )
+            : undefined;
         agorStore.getState().applyMaps(
           (prev) => {
             const maps = {
@@ -1200,22 +1237,39 @@ export function useAgorData(
               userById: usersMap,
             };
             if (!boardScope || !boardRows) return maps;
+            const state = agorStore.getState();
             return replaceScope(
               maps,
               boardPartitionScope(boardScope),
               boardRows,
               touchedInLoad,
-              otherCommittedMembers({ ...agorStore.getState(), ...maps }, boardScopeKey(boardScope))
+              otherCommittedMembers(
+                { ...state, ...maps, coverage: resetCoverage(state.coverage) },
+                boardScopeKey(boardScope)
+              )
             );
           },
-          boardScope && boardRows && displayedBoardFull && isLoadLifetimeCurrent(loadLifetime)
-            ? settleBoardPartition(
-                boardScope,
-                loadLifetime,
-                boardGeneration,
-                boardRows,
-                firstPaintFence.startRevisions
-              )
+          (maps, coverage) =>
+            settleDisplayed
+              ? settleDisplayed(maps, resetCoverage(coverage))
+              : resetCoverage(coverage),
+          silent
+            ? (_maps, state) => ({
+                // The reset orphans partition loads in flight (`partitionEpoch`).
+                partitionEpoch: state.partitionEpoch + 1,
+                // A global resync reads the session and branch sets in full:
+                // a complete global snapshot, like the background hydrations'
+                // applies. Board objects, cards and full board records are
+                // complete only per board (its partition).
+                ...(globalResync
+                  ? {
+                      globallyHydrated: withGloballyHydrated(state.globallyHydrated, [
+                        'sessions',
+                        'branches',
+                      ]),
+                    }
+                  : {}),
+              })
             : undefined
         );
         // This wholesale replace is NOT a `runHydration` apply, so it must bump
@@ -1227,11 +1281,6 @@ export function useAgorData(
         // The background hydrations kicked off below re-snapshot AFTER this bump,
         // so they're unaffected.
         bumpFirstPaintMergeRevisions();
-        // A global resync reads the session and branch sets in full: a
-        // complete global snapshot, exactly like the background hydrations'
-        // applies. Board objects, cards and full board records are complete
-        // only per board (its partition).
-        if (globalResync) agorStore.getState().markGloballyHydrated(['sessions', 'branches']);
         // User scope (design r3 §3): the rest of my sessions, my branches, every
         // teammate I can view, and the branches my sessions and comment
         // threads reference. Started BEFORE the background global hydrations
@@ -1311,7 +1360,7 @@ export function useAgorData(
                   },
                 }),
               (allSessions) => {
-                agorStore.getState().applyMaps((prev) => {
+                const fromSnapshot = (prev: DataMaps): DataMaps => {
                   // The hydration fetches active sessions only. Deep-link-healed
                   // archived sessions (added to `sessionById` so a direct /s/<id>
                   // archived link can open the drawer) are OUT of that query's
@@ -1336,7 +1385,8 @@ export function useAgorData(
                     }
                   );
                   return { ...prev, sessionById, sessionsByBranch };
-                });
+                };
+                agorStore.getState().applyMaps(fromSnapshot, undefined, markGlobalSet('sessions'));
               }
             );
             void runAuthorityHydration(
@@ -1351,10 +1401,14 @@ export function useAgorData(
                 // are active-only (the snapshot query is archived:false and the
                 // handlers never keep an archived branch), so a wholesale replace
                 // is complete.
-                agorStore.getState().applyMaps((prev) => ({
-                  ...prev,
-                  branchById: buildById(allBranches, 'branch_id', prev.branchById),
-                }));
+                agorStore.getState().applyMaps(
+                  (prev) => ({
+                    ...prev,
+                    branchById: buildById(allBranches, 'branch_id', prev.branchById),
+                  }),
+                  undefined,
+                  markGlobalSet('branches')
+                );
               }
             );
           }

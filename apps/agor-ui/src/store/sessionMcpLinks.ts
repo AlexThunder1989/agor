@@ -126,24 +126,28 @@ export function loadSessionMcpServerIds(client: AgorClient, sessionId: string): 
       const snapshotIds = rows
         .filter((row) => row.session_id === sessionId)
         .map((row) => row.mcp_server_id);
-      const store = agorStore.getState();
-      store.applyMaps((prev) => {
-        const sessionMcpServerIds = mergeSessionMcpSnapshot(
-          prev.sessionMcpServerIds,
-          sessionId,
-          snapshotIds,
-          {
-            deletedMcpServerIds: agorStore.getState().deletedMcpServerIds,
-            touched: (id) => touchedSince(collection, id, start),
-          }
-        );
-        return sessionMcpServerIds === prev.sessionMcpServerIds
-          ? prev
-          : { ...prev, sessionMcpServerIds };
-      });
-      // `applyMaps` notifies synchronously; a subscriber may have ended this load.
-      if (!isCurrent()) return;
-      store.markSessionMcpLoaded(sessionId);
+      // The links and their loaded mark publish in one update.
+      agorStore.getState().applyMaps(
+        (prev) => {
+          const sessionMcpServerIds = mergeSessionMcpSnapshot(
+            prev.sessionMcpServerIds,
+            sessionId,
+            snapshotIds,
+            {
+              deletedMcpServerIds: agorStore.getState().deletedMcpServerIds,
+              touched: (id) => touchedSince(collection, id, start),
+            }
+          );
+          return sessionMcpServerIds === prev.sessionMcpServerIds
+            ? prev
+            : { ...prev, sessionMcpServerIds };
+        },
+        undefined,
+        (_maps, state) =>
+          state.sessionMcpLoaded.has(sessionId)
+            ? {}
+            : { sessionMcpLoaded: new Set(state.sessionMcpLoaded).add(sessionId) }
+      );
     } catch (err) {
       if (isCurrent()) console.warn(`[sessionMcpLinks] load failed for session ${sessionId}:`, err);
     } finally {

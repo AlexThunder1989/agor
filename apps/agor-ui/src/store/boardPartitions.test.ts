@@ -688,12 +688,13 @@ describe('board readiness', () => {
   });
 
   it('never treats a board as ready from global snapshots: only its partition', async () => {
+    // Each global apply marks its set (as `useAgorData`'s do).
     for (const c of ['sessions', 'branches'] as const) {
       await runHydration(
         c,
         [c],
         async () => [],
-        () => {}
+        () => agorStore.getState().markGloballyHydrated([c])
       );
     }
     expect(agorStore.getState().globallyHydrated.size).toBe(2);

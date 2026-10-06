@@ -19,8 +19,6 @@
  * never collide with a fresh loop's generation.
  */
 
-import { agorStore } from './agorStore';
-
 // Skip-apply-on-race background hydration retry schedule. A hydration applies
 // its full-set snapshot ONLY if no live write to the target collection(s)
 // raced the fetch (proven via the per-collection `liveRevisions` counters);
@@ -394,9 +392,6 @@ export async function runHydration<T>(
       // has already subsumed, THEN apply.
       recordHydrationApply(collections, before);
       apply(result);
-      // A quiet global snapshot makes every board complete for these
-      // collections (the Steps 1–2 readiness shortcut in `boardPartitions`).
-      agorStore.getState().markGloballyHydrated(collections);
       return;
     }
     // A live write to one of these collections raced the fetch — discard this

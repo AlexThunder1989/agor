@@ -1254,6 +1254,31 @@ describe('useAgorData — skip-apply-on-race hydration', () => {
  * in-flight hydration whose snapshot predates them cannot clobber the newer
  * state or repopulate the Maps after teardown. These tests pin BLOCKING-1.
  */
+describe('useAgorData — global sets publish with their mark', () => {
+  it('applies the global session snapshot and marks it hydrated in one update', async () => {
+    const { client } = makeMockClient({
+      'sessions:find': [],
+      'sessions:findAll': [makeSession({ session_id: 's-global' })],
+      'branches:findAll': [makeBranch({ branch_id: 'b-global' })],
+    });
+    const split: string[] = [];
+    const off = agorStore.subscribe((s) => {
+      if (s.sessionById.has('s-global') && !s.globallyHydrated.has('sessions')) split.push('s');
+      if (s.branchById.has('b-global') && !s.globallyHydrated.has('branches')) split.push('b');
+    });
+    const { result, unmount } = renderHook(() => useAgorData(client));
+    try {
+      await waitForInitialLoad(result);
+      await waitFor(() => expect(agorStore.getState().globallyHydrated.size).toBe(2));
+      expect(agorStore.getState().sessionById.has('s-global')).toBe(true);
+      expect(split).toEqual([]);
+    } finally {
+      off();
+      unmount();
+    }
+  });
+});
+
 describe('useAgorData — bulk-write revision bumps', () => {
   it('reconnect bulk-replace bumps revisions so an in-flight hydration discards (no clobber)', async () => {
     const s1 = makeSession({ session_id: 's-1', branch_id: 'b-1' });
@@ -2252,6 +2277,31 @@ describe('useAgorData — reconnect reconciles the displayed partition', () => {
       fetchArguments('cards', 'findAll').at(-1),
     ] as Array<{ query?: unknown }>;
     for (const read of resyncReads) expect(read.query).toMatchObject({ board_id: 'board-A' });
+  });
+
+  it('keeps the displayed board loaded in every update of the resync', async () => {
+    boardRoute();
+    const seed: Record<string, unknown[]> = {
+      boards: [boardA],
+      'boards:get': fullA as never,
+      cards: [card('k-1'), card('k-deleted')],
+    };
+    const { client, emitIo } = makeMockClient(seed);
+    const { result } = renderHook(() => useAgorData(client));
+    await waitForInitialLoad(result);
+    await flush();
+    expect(selectBoardPartition(agorStore.getState(), 'board-A')?.status).toBe('loaded');
+    const statuses: Array<string | undefined> = [];
+    const off = agorStore.subscribe((s) => {
+      statuses.push(selectBoardPartition(s, 'board-A')?.status);
+    });
+    seed.cards = [card('k-1')];
+    act(() => emitIo('connect'));
+    await waitFor(() => expect(agorStore.getState().cardById.has('k-deleted')).toBe(false));
+    await flush();
+    off();
+    expect(statuses.length).toBeGreaterThan(0);
+    expect(statuses.filter((status) => status !== 'loaded')).toEqual([]);
   });
 
   it('keeps rows written live while the resync was in flight', async () => {
