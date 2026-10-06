@@ -91,7 +91,7 @@ import {
   tombstoneSession,
   untombstoneSession,
 } from '../store/realtimeBatch';
-import { holdRows } from '../store/retention';
+import { holdRows, releaseStaleScopes } from '../store/retention';
 import {
   BOARD_SCOPE_PREFIX,
   boardPartitionScope,
@@ -1320,21 +1320,22 @@ export function useAgorData(
             deferBulkRead: openedTranscriptReady ?? undefined,
           });
         }
-        // Retention: the rows of the boards this resync unloaded leave unless
-        // a scope holds them — judged once the user scope is replaced under
-        // this lifetime, so my rows on those boards stay. A board displayed
-        // or loaded again meanwhile keeps its rows.
-        if (silent && unloadedBoardIds.length > 0) {
-          void (userScopeSettled ?? Promise.resolve())
-            .catch(() => undefined)
-            .then(() => {
-              if (!authorityIsCurrent()) return;
-              const displayed = getDisplayedBoardId();
-              evictUnloadedBoards(
-                unloadedBoardIds.filter((id) => id !== boardScope && id !== displayed)
-              );
-            });
-        }
+        // Retention, once the user scope is replaced under this lifetime (so
+        // my rows stay): the rows of the boards this resync unloaded leave
+        // unless a scope holds them — a board displayed or loaded again
+        // meanwhile keeps its rows — and so do the scopes of earlier
+        // lifetimes this one didn't replace (a failed read), with the rows
+        // only they held.
+        void (userScopeSettled ?? Promise.resolve())
+          .catch(() => undefined)
+          .then(() => {
+            if (!authorityIsCurrent()) return;
+            const displayed = getDisplayedBoardId();
+            evictUnloadedBoards(
+              unloadedBoardIds.filter((id) => id !== boardScope && id !== displayed)
+            );
+            releaseStaleScopes();
+          });
 
         debugTimer?.endIndexing();
         debugFinishStatus = 'success';

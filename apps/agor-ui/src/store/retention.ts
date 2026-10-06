@@ -17,6 +17,7 @@
  */
 import { applySessionPatchToMaps, type DataMaps, removeBoardObjectFromMaps } from './agorMaps';
 import { agorStore } from './agorStore';
+import { isLoadLifetimeCurrent } from './loadLifetime';
 import { acquirePins, type PinnedIds, pinnedMembers, releasePins } from './rowPins';
 import {
   belongs,
@@ -92,6 +93,39 @@ export function evictRows(claims: Claims, dropKeys: readonly ScopeKey[] = []): v
       for (const id of loaded) sessionMcpLoaded.delete(id);
       return { sessionMcpLoaded };
     }
+  );
+}
+
+/**
+ * Release every scope of an earlier lifetime, once the current lifetime's
+ * replace has settled: its entry goes, with the rows only it held. Until
+ * then (disconnected, or while the resync runs) it keeps them (`evictRows`
+ * counts stale members); a piece the new lifetime failed to read is
+ * unloaded rather than left complete over rows it no longer holds.
+ */
+export function releaseStaleScopes(): void {
+  const stale = [...agorStore.getState().coverage].filter(
+    ([, entry]) => !isLoadLifetimeCurrent(entry)
+  );
+  if (stale.length === 0) return;
+  const member =
+    (collection: CoverageCollection) =>
+    (id: string): boolean =>
+      stale.some(([, entry]) => !!entry.members?.[collection]?.has(id));
+  const has = {
+    branches: member('branches'),
+    sessions: member('sessions'),
+    boardObjects: member('boardObjects'),
+    cards: member('cards'),
+  };
+  evictRows(
+    {
+      branches: (branch) => has.branches(branch.branch_id),
+      sessions: (session) => has.sessions(session.session_id),
+      boardObjects: (boardObject) => has.boardObjects(boardObject.object_id),
+      cards: (card) => has.cards(card.card_id),
+    },
+    stale.map(([key]) => key)
   );
 }
 

@@ -28,7 +28,7 @@ import {
 // Session `patched`/`updated` writes are coalesced to one flush per frame (see
 // realtimeBatch); flush synchronously in tests that assert the post-patch store.
 import { flushRealtimeNow } from '../store/realtimeBatch';
-import { boardScopeKey } from '../store/scopeMerge';
+import { boardScopeKey, USER_SCOPE_KEYS } from '../store/scopeMerge';
 import { makeBranchesForBoardSelector } from '../store/selectors';
 import { loadSessionMcpServerIds } from '../store/sessionMcpLinks';
 import {
@@ -2929,6 +2929,31 @@ describe('useAgorData — scoped reconnect (global hydration off)', () => {
     expect(has('sessionById', 's-B')).toBe(true);
     expect(has('branchById', 'b-B-gone')).toBe(false);
     expect(has('sessionById', 's-B-gone')).toBe(false);
+  });
+
+  it('a scope of the earlier lifetime holds its rows until the resync settles, then releases them', async () => {
+    withoutGlobalHydration();
+    const { server } = workspace();
+    const { rerender, seed } = await connectedWorkspace(server);
+    const has = (id: string) => agorStore.getState().branchById.has(id);
+    // mate-1 (board D, unloaded, someone else's) is held only by the teammate read.
+    expect(has('mate-1')).toBe(true);
+    // On the resync the teammate read fails: its piece stays from the earlier lifetime.
+    const find = seed['branches:find'] as unknown as (query: Record<string, unknown>) => unknown;
+    seed['branches:find'] = ((query: Record<string, unknown>) => {
+      if (query.teammate) throw new Error('teammates unavailable');
+      return find(query);
+    }) as never;
+    // A new authority generation: a new lifetime, every scope replaced.
+    rerender({ generation: 2 });
+    await waitFor(() => expect(has('mate-1')).toBe(false));
+    await flush();
+    const state = agorStore.getState();
+    expect(state.coverage.has(USER_SCOPE_KEYS.teammates)).toBe(false);
+    expect(selectTeammatesLoaded(state)).toBe(false);
+    // The pieces the reconnect replaced keep theirs.
+    expect(has('b-mine')).toBe(true);
+    expect(state.sessionById.has('s-mine')).toBe(true);
   });
 
   it("a reconnect evicts the unloaded boards' rows that no scope holds", async () => {
