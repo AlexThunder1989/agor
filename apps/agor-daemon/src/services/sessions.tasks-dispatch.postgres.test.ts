@@ -217,6 +217,9 @@ describe.skipIf(!postgresUrl || !usesPostgresSchema)(
       expect(await complete(tenant, [])).toBe(false);
       await list([first.task_id, second.task_id, generateId()]);
       expect(await complete(tenant, [first.task_id, second.task_id])).toBe(false);
+      // NULL makes `NOT IN` unknown, so it must not hide the omitted dispatched Task.
+      await list([null as unknown as string]);
+      expect(await complete(tenant, [null as unknown as string])).toBe(false);
       await list([first.task_id]);
       expect(await complete(tenant, [first.task_id])).toBe(true);
       // Another tenant's scope cannot see the Session: nothing to report.

@@ -147,6 +147,8 @@ describe('Session.tasks is server-managed', () => {
       expect(await completeWith([a, b, b])).toBe(false); // duplicate
       expect(await completeWith([a, foreign])).toBe(false); // another Session's Task
       expect(await completeWith([a, b, foreign])).toBe(false);
+      // NULL makes `NOT IN` unknown, so it must not hide the omitted run Task b.
+      expect(await completeWith([a, null as unknown as string])).toBe(false);
 
       // A dispatch between the row read and the check extends the list: the
       // row's list is a prefix of the snapshot's, so it was complete.
