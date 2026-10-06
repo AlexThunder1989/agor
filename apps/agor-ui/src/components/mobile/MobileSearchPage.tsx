@@ -135,7 +135,7 @@ export const MobileSearchPage: React.FC<MobileSearchPageProps> = ({
           key: comment.comment_id,
           title: comment.content,
           subtitle: boardById.get(comment.board_id)?.name,
-          onClick: () => navigate(`/m/comments/${comment.board_id}`),
+          onClick: () => navigate(`/m/board/${comment.board_id}?tab=comments`),
         })),
       },
     ];

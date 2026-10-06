@@ -164,6 +164,8 @@ interface SessionCanvasProps {
   staticCursorScale?: number;
   /** Optional host-controlled height for embedded/demo canvases. Defaults to full viewport. */
   height?: React.CSSProperties['height'];
+  /** View only (mobile): pan, zoom and open items; no tools, dragging, edits or cursor broadcast. */
+  readOnly?: boolean;
 }
 
 export interface SessionCanvasRef {
@@ -464,6 +466,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
       staticCursors,
       staticCursorScale,
       height = '100vh',
+      readOnly = false,
     }: SessionCanvasProps,
     ref
   ) => {
@@ -481,12 +484,13 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
     const cardById = useAgorStore(selectCardById);
     const userById = useAgorStore(selectUserById);
     const currentUser = currentUserId ? userById.get(currentUserId) : undefined;
-    const canEditBoard = useCanManageBoard(client, board ?? undefined, currentUser);
+    const canEditBoard = useCanManageBoard(client, board ?? undefined, currentUser) && !readOnly;
     const canMutateBoard = canEditBoard && mutationGate.canMutate;
     // Board Viewers may collaborate through comments even though structural
     // canvas mutations require board.edit. The daemon applies the same global
     // member floor plus board-view authorization on comment creation.
-    const canComment = Boolean(currentUser && hasMinimumRole(currentUser.role, ROLES.MEMBER));
+    const canComment =
+      !readOnly && Boolean(currentUser && hasMinimumRole(currentUser.role, ROLES.MEMBER));
     const canMutateComments = canComment && mutationGate.canMutate;
     const boardMutationMessage = canEditBoard
       ? mutationGate.message
@@ -1292,7 +1296,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
       client,
       boardId: board?.board_id as BoardID | null,
       reactFlowInstance: reactFlowInstanceRef.current,
-      enabled: !!board && !!client && !staticCursors,
+      enabled: !!board && !!client && !staticCursors && !readOnly,
     });
 
     // Create comment nodes from spatial comments
@@ -2838,7 +2842,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
             // The connection gate is global; each node carries its narrower
             // authorization (board.edit for structure, author/admin for
             // comments). Selection/focus remain available in read-only mode.
-            nodesDraggable={mutationGate.canMutate}
+            nodesDraggable={mutationGate.canMutate && !readOnly}
             nodesConnectable={false}
             elementsSelectable={true}
             elevateNodesOnSelect={false}
@@ -2861,6 +2865,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
           >
             {!canvasBackground && <Background />}
             <Controls
+              style={readOnly ? { display: 'none' } : undefined}
               position="top-left"
               showZoom={false}
               showFitView={false}
@@ -3042,6 +3047,7 @@ const SessionCanvasInner = forwardRef<SessionCanvasRef, SessionCanvasProps>(
               pannable
               zoomable
               style={{
+                display: readOnly ? 'none' : undefined,
                 backgroundColor: token.colorBgElevated,
                 border: `1px solid ${token.colorBorder}`,
               }}

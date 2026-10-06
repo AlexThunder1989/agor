@@ -19,6 +19,12 @@
         margin: 0;
         padding: 0;
       }
+      /* iOS Safari sizes vh to the toolbar-hidden viewport, which leaves the document scrollable. */
+      @supports (height: 100dvh) {
+        #root {
+          height: 100dvh;
+        }
+      }
     </style>
   </head>
   <body>

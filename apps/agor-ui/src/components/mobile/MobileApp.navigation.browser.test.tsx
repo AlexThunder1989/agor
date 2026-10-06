@@ -1,4 +1,4 @@
-import type { Board, Branch, Session } from '@agor-live/client';
+import type { Board, Branch, Repo, Session } from '@agor-live/client';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { BrowserRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -26,7 +26,6 @@ vi.mock('../SessionPanel', () => ({
 }));
 vi.mock('../SessionSettingsModal', () => ({ SessionSettingsModal: () => null }));
 vi.mock('../HomePage', () => ({ HomePage: () => <h1>Home</h1> }));
-vi.mock('./MobileCommentsPage', () => ({ MobileCommentsPage: () => null }));
 vi.mock('./MobileSearchPage', () => ({ MobileSearchPage: () => null }));
 vi.mock('./MobileSessionsPage', () => ({ MobileSessionsPage: () => null }));
 vi.mock('./MobileMarketplacePage', () => ({ MobileMarketplacePage: () => null }));
@@ -35,6 +34,7 @@ vi.mock('../BranchModal', () => ({ BranchModal: () => null }));
 vi.mock('../SettingsModal/PrimaryTeammatePicker', () => ({ PrimaryTeammatePicker: () => null }));
 vi.mock('../MarkdownRenderer/MarkdownRenderer', () => ({ MarkdownRenderer: () => null }));
 vi.mock('../AgentSelectionGrid', () => ({ AgentSelectionGrid: () => null, AVAILABLE_AGENTS: [] }));
+vi.mock('../SessionCanvas/SessionCanvas', () => ({ default: () => null }));
 
 const originalUrl = window.location.href;
 afterEach(() => {
@@ -47,13 +47,14 @@ const boards = new Map([
   ['b', { board_id: 'b', name: 'Beta', slug: 'beta' } as Board],
 ]);
 const branches = new Map([
-  ['assistant', { branch_id: 'assistant', board_id: 'a', name: 'Ada' } as Branch],
+  ['assistant', { branch_id: 'assistant', board_id: 'a', name: 'Ada', repo_id: 'r' } as Branch],
   ['other', { branch_id: 'other', board_id: 'b' } as Branch],
 ]);
 function mount(path = '/m/board/alpha') {
   agorStore.setState({
     boardById: boards,
     branchById: branches,
+    repoById: new Map([['r', { repo_id: 'r', slug: 'org/repo' } as Repo]]),
     sessionById: new Map([
       ['parent', { session_id: 'parent', title: 'Parent', branch_id: 'assistant' } as Session],
       [
@@ -94,8 +95,8 @@ function mount(path = '/m/board/alpha') {
 }
 
 it('uses real browser history for session switches, Back/Forward, a Back-style X and board switches', async () => {
-  mount(); // starts on /m/board/alpha (board a)
-  await userEvent.click(screen.getByRole('button', { name: 'Open Parent' }));
+  mount('/m/board/alpha?tab=teammate'); // board a, Teammate tab
+  await userEvent.click(await screen.findByRole('button', { name: /^Open session Parent/ }));
   await userEvent.click(await screen.findByRole('button', { name: 'Open child session' }));
   expect(window.location.pathname).toBe('/m/session/child');
   await act(async () => window.history.back());
@@ -113,8 +114,8 @@ it('uses real browser history for session switches, Back/Forward, a Back-style X
   await waitFor(() =>
     expect(screen.queryByRole('button', { name: 'Close session' })).not.toBeInTheDocument()
   );
-  await userEvent.click(await screen.findByRole('button', { name: /Switch board/ }));
-  await userEvent.click(screen.getByRole('button', { name: 'Switch to Beta' }));
+  await userEvent.click(await screen.findByRole('button', { name: /^Alpha/ }));
+  await userEvent.click(await screen.findByRole('menuitem', { name: /Beta/ }));
   expect(window.location.pathname).toBe('/m/board/b');
   await userEvent.click(screen.getByRole('button', { name: 'Home', exact: true }));
   await userEvent.click(screen.getByRole('button', { name: 'Board', exact: true }));

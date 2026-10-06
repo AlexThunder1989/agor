@@ -44,10 +44,20 @@ import type { BranchModalTab } from '../BranchModal';
 import { CommentsPanel } from '../CommentsPanel';
 import { MarkdownRenderer } from '../MarkdownRenderer';
 
-export type BoardTeammatePanelTab = 'teammate' | 'all-sessions' | 'all-branches' | 'comments';
+export type BoardTeammatePanelTab =
+  | 'board'
+  | 'teammate'
+  | 'all-sessions'
+  | 'all-branches'
+  | 'comments';
 
 interface BoardTeammatePanelProps {
   board: Board | null;
+  /** Content of a leading "Board" tab (the mobile board view). */
+  boardTab?: React.ReactNode;
+  showBranchesTab?: boolean;
+  /** Touch-size tabs (44px, 14px labels) for the mobile board screen. */
+  touch?: boolean;
   activeTab?: BoardTeammatePanelTab;
   onTabChange?: (tab: BoardTeammatePanelTab) => void;
   primaryTeammateBranch?: Branch;
@@ -87,6 +97,9 @@ interface BoardTeammatePanelProps {
 
 const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
   board,
+  boardTab,
+  showBranchesTab = true,
+  touch = false,
   activeTab: controlledActiveTab,
   onTabChange,
   primaryTeammateBranch,
@@ -470,7 +483,7 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
       style={{
         height: '100%',
         background: token.colorBgContainer,
-        borderRight: `1px solid ${token.colorBorderSecondary}`,
+        borderRight: touch ? undefined : `1px solid ${token.colorBorderSecondary}`,
         overflow: 'hidden',
       }}
     >
@@ -478,6 +491,7 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
         activeKey={activeTab}
         onChange={(key) => setActiveTab(key as BoardTeammatePanelTab)}
         items={[
+          ...(boardTab ? [{ key: 'board', label: 'Board', children: boardTab }] : []),
           {
             key: 'teammate',
             label: 'Teammate',
@@ -487,7 +501,7 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
             key: 'all-sessions',
             label: 'Sessions',
             children: board ? (
-              <div style={{ height: 'calc(100vh - 112px)', overflow: 'auto' }}>
+              <div style={{ height: '100%', overflow: 'auto' }}>
                 {sessionDetailsHydrated ? (
                   <BoardSessionList
                     board={board}
@@ -511,7 +525,7 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
             key: 'all-branches',
             label: 'Branches',
             children: board ? (
-              <div style={{ height: 'calc(100vh - 112px)', overflow: 'auto' }}>
+              <div style={{ height: '100%', overflow: 'auto' }}>
                 {sessionDetailsHydrated ? (
                   <BoardBranchList board={board} repoById={repoById} client={client} />
                 ) : (
@@ -553,7 +567,7 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
               </span>
             ),
             children: board ? (
-              <div style={{ height: 'calc(100vh - 112px)' }}>
+              <div style={{ height: '100%' }}>
                 <CommentsPanel
                   client={client}
                   boardId={board.board_id}
@@ -575,14 +589,16 @@ const BoardTeammatePanelComponent: React.FC<BoardTeammatePanelProps> = ({
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No board selected" />
             ),
           },
-        ]}
+        ].filter((item) => showBranchesTab || item.key !== 'all-branches')}
         rootClassName="agor-panel-tabs"
         tabBarGutter={token.marginSM}
         style={{ height: '100%' }}
         styles={{
           body: { height: '100%' },
           content: { height: '100%' },
-          item: { fontSize: token.fontSizeSM, padding: `${token.paddingXS}px 0` },
+          item: touch
+            ? { fontSize: token.fontSize, padding: `${token.paddingSM}px 0` }
+            : { fontSize: token.fontSizeSM, padding: `${token.paddingXS}px 0` },
         }}
         tabBarStyle={{ margin: 0 }}
         // Insets live in the extra slots, not tab-bar padding: rc-tabs measures the bar

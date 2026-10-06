@@ -28,7 +28,6 @@ vi.mock('../BranchModal', () => ({
   },
 }));
 
-vi.mock('./MobileNavTree', () => ({ MobileNavTree: () => null }));
 // Home is the shared HomePage (covered by its own suites); these cases drive the tab-bar Ask.
 vi.mock('../HomePage', () => ({ HomePage: () => null }));
 
