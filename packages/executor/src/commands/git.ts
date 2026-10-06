@@ -997,13 +997,16 @@ export async function handleGitBranchAdd(
     const sourceRemoteUrl = localHome ? TEAMMATE_FRAMEWORK_REPO_URL : baseRemoteUrl;
     const resolutionPath =
       storageMode === 'clone' && (!repoPath || !existsSync(repoPath)) ? undefined : repoPath;
-    const resolveStartingRef = () => {
+    const resolveStartingRef = async () => {
       // Persisted source identity is a locator, not credential authority. Resolve
       // it without the mutable cache, and bound credentials independently just as
-      // we do for the eventual clone transport. A teammate retry retains the
-      // selected source instead of reinterpreting its now-persisted bare ref.
-      // Older rows without provenance retain the legacy path.
-      if ((restoreMode || getTeammateConfig(branchRecord)) && branchRecord.base_source) {
+      // we do for the eventual clone transport. A new-branch or teammate retry
+      // retains the selected source instead of reinterpreting its now-persisted
+      // bare ref. Older rows without provenance retain the legacy path.
+      if (
+        (restoreMode || shouldCreateBranch || getTeammateConfig(branchRecord)) &&
+        branchRecord.base_source
+      ) {
         const source = branchRecord.base_source;
         return resolveGitRef(undefined, source.name, {
           refType: refType || 'branch',
@@ -1012,24 +1015,41 @@ export async function handleGitBranchAdd(
           env: gitEnvironmentForRemote(source.remote_url, [remoteUrl, sourceRemoteUrl], env),
         });
       }
-      // Omission, not the spelling "main", identifies the teammate default.
+      // Omission, not the spelling "main", identifies the implicit default.
       // Registered metadata is the source authority; mutable cache remotes and
       // local branches are not. Resolve its live tip, then let the materializer
       // fetch from this exact URL and consume the pinned SHA. No local reset or
       // stale-cache fallback, and no assumption that its remote is named origin.
-      if (
-        shouldCreateBranch &&
-        getTeammateConfig(branchRecord) &&
-        !branchRecord.base_ref &&
-        !sourceRemoteUrl &&
-        remoteUrl
-      ) {
+      if (shouldCreateBranch && !branchRecord.base_ref && !sourceRemoteUrl && remoteUrl) {
         return resolveGitRef(undefined, sourceBranch, {
           refType: refType || 'branch',
           remote: { url: remoteUrl },
           remoteOnly: true,
           env,
         });
+      }
+      // Clone storage treats the registered checkout as a cache, so a bare branch name on the remote means that remote branch.
+      if (
+        shouldCreateBranch &&
+        storageMode === 'clone' &&
+        (refType || 'branch') === 'branch' &&
+        !sourceRemoteUrl &&
+        remoteUrl &&
+        requestedStartingRef &&
+        !requestedStartingRef.startsWith('refs/') &&
+        !/^[0-9a-f]{7,64}$/i.test(requestedStartingRef)
+      ) {
+        try {
+          return await resolveGitRef(undefined, requestedStartingRef, {
+            refType: 'branch',
+            remote: { url: remoteUrl, name: 'origin' },
+            remoteOnly: true,
+            env,
+          });
+        } catch (error) {
+          // Not a remote branch (e.g. remote-qualified input): fall through to full resolution.
+          if (!(error instanceof Error && error.message.includes('does not exist'))) throw error;
+        }
       }
       return resolveGitRef(resolutionPath, requestedStartingRef, {
         refType: refType || 'branch',
