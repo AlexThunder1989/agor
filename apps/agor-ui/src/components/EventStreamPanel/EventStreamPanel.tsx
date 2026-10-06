@@ -22,7 +22,6 @@ import {
   selectBranchById,
   selectRepoById,
   selectSessionById,
-  selectSessionsByBranch,
   selectUserById,
 } from '../../store/selectors';
 import { getBoardEmoji } from '../BoardTile';
@@ -76,7 +75,6 @@ export const EventStreamPanel: React.FC<EventStreamPanelProps> = ({
   // entity family don't invalidate consumers of the others.
   const branchById = useAgorStore(selectBranchById);
   const sessionById = useAgorStore(selectSessionById);
-  const sessionsByBranch = useAgorStore(selectSessionsByBranch);
   const repoById = useAgorStore(selectRepoById);
   const userById = useAgorStore(selectUserById);
   const repos = useMemo(() => Array.from(repoById.values()), [repoById]);
@@ -433,7 +431,6 @@ export const EventStreamPanel: React.FC<EventStreamPanelProps> = ({
                 event={event}
                 branchById={branchById}
                 sessionById={sessionById}
-                sessionsByBranch={sessionsByBranch}
                 repos={repos}
                 userById={userById}
                 currentUserId={currentUserId}
