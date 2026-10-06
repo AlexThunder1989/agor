@@ -542,7 +542,12 @@ function discordInboundMetadataIsAuthoritative(
   ) {
     return false;
   }
-  if (!userAllowlist.includes(authorId) && !roles.some((role) => roleAllowlist.includes(role))) {
+  // The guild ID is Discord's @everyone role, which never appears in member roles.
+  if (
+    !userAllowlist.includes(authorId) &&
+    !roleAllowlist.includes(guildId) &&
+    !roles.some((role) => roleAllowlist.includes(role))
+  ) {
     return false;
   }
   if (metadata[DISCORD_METADATA_KEY.directMessage] === true) {
