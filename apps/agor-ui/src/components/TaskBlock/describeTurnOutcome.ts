@@ -39,6 +39,8 @@ export interface TurnOutcomeCopy {
   action?: 'resume' | 'retry' | 'settings';
   /** Plain-language context shown above the raw error inside Details. */
   detailsLead?: string;
+  /** The message names when the usage limit resets, so the rate-limit card need not. */
+  showsResetTime?: true;
 }
 
 export interface TurnOutcomeContext {
@@ -82,13 +84,18 @@ export function formatDuration(ms: number): string {
   return `${value} ${unit}${value === 1 ? '' : 's'}`;
 }
 
-/** "3:00 PM" today, "Mon 3:00 PM" otherwise. */
-function formatReset(resetsAt: number, now: Date): string {
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** "3:00 PM" today, "Mon 3:00 PM" within the week, "Oct 20, 3:00 PM" later; undefined once past. */
+function formatReset(resetsAt: number, now: Date): string | undefined {
   const at = new Date(resetsAt * 1000);
+  if (at.getTime() <= now.getTime()) return undefined;
   const time = at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  return at.toDateString() === now.toDateString()
-    ? time
-    : `${at.toLocaleDateString(undefined, { weekday: 'short' })} ${time}`;
+  if (at.toDateString() === now.toDateString()) return time;
+  if (at.getTime() - now.getTime() < 6 * DAY_MS) {
+    return `${at.toLocaleDateString(undefined, { weekday: 'short' })} ${time}`;
+  }
+  return `${at.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${time}`;
 }
 
 /** Friendly one-line outcome for a finished or stopping turn; null when nothing needs saying. */
@@ -235,13 +242,20 @@ export function describeTurnOutcome(
   }
   if (rateLimit) {
     const limit = agentName ? `${agentName} usage limit reached.` : 'Usage limit reached.';
-    return {
-      cause: 'usage_limit',
-      type: 'warning',
-      message: rateLimit.resetsAt
-        ? `${limit} Try again after ${formatReset(rateLimit.resetsAt, now)}.`
-        : `${limit} Try again later.`,
-    };
+    const reset = rateLimit.resetsAt ? formatReset(rateLimit.resetsAt, now) : undefined;
+    // A reset time already behind us is stale: the limit has lifted, so say only what happened.
+    return reset
+      ? {
+          cause: 'usage_limit',
+          type: 'warning',
+          message: `${limit} Try again after ${reset}.`,
+          showsResetTime: true,
+        }
+      : {
+          cause: 'usage_limit',
+          type: 'warning',
+          message: rateLimit.resetsAt ? limit : `${limit} Try again later.`,
+        };
   }
   if (error === CODEX_LIFECYCLE_MESSAGES.turn_failed) {
     return {

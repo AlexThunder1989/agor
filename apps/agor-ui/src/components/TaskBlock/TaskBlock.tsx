@@ -1154,6 +1154,7 @@ export const TaskBlock = React.memo<TaskBlockProps>(
                     message={block.message}
                     agentic_tool={agentic_tool}
                     settled={isTerminalTaskStatus(task.status)}
+                    resetShownInOutcome={outcome?.showsResetTime}
                   />
                 </div>
               );

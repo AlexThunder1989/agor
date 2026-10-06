@@ -855,6 +855,42 @@ it('lets the usage-limit banner own the reset time on a finished run', () => {
   expect(screen.queryByText(/Resets:/)).toBeNull();
 });
 
+it('keeps the reset time on the rate-limit card when the banner does not show it', () => {
+  const resetsAt = Math.floor(Date.now() / 1000) + 3600;
+  const limitMessage = {
+    ...message(2, MessageRole.SYSTEM, [
+      {
+        type: 'rate_limit',
+        status: 'rejected',
+        rateLimitType: 'five_hour',
+        resetsAt,
+        text: 'Rate limited (five_hour). Resets at 10/5/2026. Waiting for limit to reset...',
+      },
+    ]),
+    type: 'system',
+  } as Message;
+  const { rerender } = render(
+    view({
+      task: { ...task, status: TaskStatus.FAILED, error_message: 'socket has been disconnected' },
+      taskMessages: [...messages, limitMessage],
+      taskMessagesLoaded: true,
+    })
+  );
+  expect(outcome()).toHaveTextContent('Lost connection to the agent.');
+  expect(screen.getByText('Rate limited (five_hour).')).toBeVisible();
+  expect(screen.queryByText(/Waiting for limit to reset/)).toBeNull();
+  expect(screen.getByText(/Resets:/)).toBeVisible();
+  rerender(
+    view({
+      task: { ...task, status: TaskStatus.COMPLETED },
+      taskMessages: [...messages, limitMessage],
+      taskMessagesLoaded: true,
+    })
+  );
+  expect(outcome()).toBeNull();
+  expect(screen.getByText(/Resets:/)).toBeVisible();
+});
+
 it('opens technical details with the raw cause codes, agent, timing and task ID', () => {
   render(
     view({

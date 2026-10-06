@@ -19,14 +19,17 @@ const { Text } = Typography;
 interface RateLimitBlockProps {
   message: Message;
   agentic_tool?: string;
-  /** The turn has ended: nothing is waiting, and the outcome banner owns any reset time. */
+  /** The turn has ended, so nothing is still waiting on the limit. */
   settled?: boolean;
+  /** The turn's outcome banner already states when the limit resets. */
+  resetShownInOutcome?: boolean;
 }
 
 export const RateLimitBlock: React.FC<RateLimitBlockProps> = ({
   message,
   agentic_tool,
   settled = false,
+  resetShownInOutcome = false,
 }) => {
   const { token } = theme.useToken();
 
@@ -52,7 +55,9 @@ export const RateLimitBlock: React.FC<RateLimitBlockProps> = ({
   const rateLimitType =
     isRateLimit && 'rateLimitType' in block ? (block.rateLimitType as string) : undefined;
   const resetsAt =
-    isRateLimit && !settled && 'resetsAt' in block ? (block.resetsAt as number) : undefined;
+    isRateLimit && !resetShownInOutcome && 'resetsAt' in block
+      ? (block.resetsAt as number)
+      : undefined;
   const waitMs = !isRateLimit && 'waitMs' in block ? (block.waitMs as number) : undefined;
   const sdkType = isSdkEvent && 'sdkType' in block ? (block.sdkType as string) : undefined;
   const sdkSubtype = isSdkEvent && 'sdkSubtype' in block ? (block.sdkSubtype as string) : undefined;

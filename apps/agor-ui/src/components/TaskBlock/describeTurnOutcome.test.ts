@@ -308,14 +308,42 @@ describe('describeTurnOutcome v3', () => {
       cause: 'usage_limit',
       type: 'warning',
       message: `Claude Code usage limit reached. Try again after ${time}.`,
+      showsResetTime: true,
     });
     expect(limited({ resetsAt: at(new Date(2026, 9, 6, 15)) })?.message).toBe(
       `Claude Code usage limit reached. Try again after ${day} ${time}.`
     );
     expect(limited({})?.message).toBe('Claude Code usage limit reached. Try again later.');
+    expect(limited({})?.showsResetTime).toBeUndefined();
     expect(limited({}, { sdk_failure: sdkFailure() })?.cause).toBe('lost_connection');
     expect(limited({}, { sdk_failure: sdkFailure({ reason: 'startup_timeout' }) })?.cause).toBe(
       'never_started'
+    );
+  });
+
+  it('10. never offers a reset time that has passed, and dates one beyond this week', () => {
+    const now = new Date(2026, 9, 5, 9);
+    const at = (date: Date) => Math.floor(date.getTime() / 1000);
+    const limited = (resetsAt: number) =>
+      describe3(
+        { error_message: SAFE_ZERO_TURN_PROVIDER_RESULT_MESSAGE },
+        { rateLimit: { resetsAt }, now }
+      );
+    expect(limited(at(new Date(2026, 9, 5, 8)))).toEqual({
+      cause: 'usage_limit',
+      type: 'warning',
+      message: 'Usage limit reached.',
+    });
+    expect(limited(at(now))?.message).toBe('Usage limit reached.');
+    const later = new Date(2026, 9, 20, 15);
+    const time = later.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    const date = later.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    expect(limited(at(later))?.message).toBe(
+      `Usage limit reached. Try again after ${date}, ${time}.`
+    );
+    const weekday = new Date(2026, 9, 10, 15).toLocaleDateString(undefined, { weekday: 'short' });
+    expect(limited(at(new Date(2026, 9, 10, 15)))?.message).toBe(
+      `Usage limit reached. Try again after ${weekday} ${time}.`
     );
   });
 
