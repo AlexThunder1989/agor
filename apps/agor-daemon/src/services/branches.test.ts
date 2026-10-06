@@ -1290,6 +1290,14 @@ describe('BranchesService one-shot teammate creation wiring', () => {
 
 describe('BranchesService.unarchive', () => {
   const userParams = { user: { user_id: 'user-1' as UUID, role: 'member' } } as never;
+  // The response is a fresh post-restore read, not the request's prefetched get.
+  const stubCommittedRead = (service: BranchesService, branch: unknown) =>
+    vi
+      .spyOn(
+        service as unknown as { getCanonicalBranch: () => Promise<unknown> },
+        'getCanonicalBranch'
+      )
+      .mockResolvedValue(branch);
 
   // Filesystem restoration, failure publication, and missing homes are tested
   // through real repositories and executor handlers in branches.restore.integration.test.ts.
@@ -1306,6 +1314,7 @@ describe('BranchesService.unarchive', () => {
         .mockResolvedValue({ ...base, board_id: moved ? other : requested } as never)
         .mockResolvedValueOnce({ ...base, board_id: moved ? requested : other } as never);
       const patch = vi.spyOn(service, 'patch').mockResolvedValue(base as never);
+      stubCommittedRead(service, { ...base, archived: false });
       await service.unarchive(branchId, { boardId: requested }, userParams);
       expect(patch).toHaveBeenCalledTimes(moved ? 1 : 0);
       if (moved) expect(patch).toHaveBeenCalledWith(branchId, { board_id: requested }, userParams);
@@ -1337,8 +1346,11 @@ describe('BranchesService.unarchive', () => {
       x: 111,
       y: 222,
     });
+    const committed = { branch_id: branchId, archived: false, board_id: existingBoardId };
+    const committedRead = stubCommittedRead(service, committed);
 
-    await service.unarchive(branchId, undefined, userParams);
+    expect(await service.unarchive(branchId, undefined, userParams)).toBe(committed);
+    expect(committedRead).toHaveBeenCalledWith(branchId, userParams);
 
     expect(patchSpy).not.toHaveBeenCalled();
 
@@ -1376,6 +1388,7 @@ describe('BranchesService.unarchive', () => {
       board_id: boardId,
     } as never);
     boardObjectsService.findByBranchId.mockResolvedValue({ object_id: 'existing' });
+    stubCommittedRead(service, { branch_id: branchId, archived: false, board_id: boardId });
 
     await service.unarchive(branchId, undefined, userParams);
 
@@ -1408,6 +1421,7 @@ describe('BranchesService.unarchive', () => {
       x: 7,
       y: 8,
     });
+    stubCommittedRead(service, { branch_id: branchId, archived: false, board_id: newBoardId });
 
     await service.unarchive(branchId, { boardId: newBoardId }, userParams);
 

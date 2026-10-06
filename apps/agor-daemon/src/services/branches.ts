@@ -2392,7 +2392,7 @@ export class BranchesService extends DrizzleService<Branch, Partial<Branch>, Bra
     );
 
     console.log(`✅ Unarchived branch ${branch.name} and ${unarchivedSessions.count} session(s)`);
-    return this.withTenantDatabase(params, () => this.get(id, params));
+    return this.readCommittedBranch(branch.branch_id, params);
   }
 
   /**

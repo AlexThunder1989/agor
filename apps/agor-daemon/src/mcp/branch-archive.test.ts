@@ -348,3 +348,37 @@ for (const filesystemAction of ['preserved', 'deleted'] as const) {
     }
   );
 }
+
+dbTest(
+  'MCP unarchive returns the restored branch, not the prefetched archived row',
+  async ({ db }) => {
+    const { branch, user } = await seedEnvironmentCommandBranch(db);
+    const branches = new BranchRepository(db);
+    await branches.update(branch.branch_id, { archived: true, filesystem_status: 'preserved' });
+    const { rawKey } = await new UserApiKeysRepository(db).create(user.user_id, 'archive fixture');
+    const fixture = await archiveMcpFixture(db);
+    try {
+      // Restoration's executor owner is out of scope; commit only its archived flip.
+      fixture.app.use(
+        'repos',
+        {
+          async get() {
+            throw new Error('unused');
+          },
+          retryBranchProvisioning: (id: string) => branches.update(id, { archived: false }),
+        },
+        { methods: ['get', 'retryBranchProvisioning'] }
+      );
+      const response = await fixture.call(rawKey, 'agor_branches_unarchive', {
+        branchId: branch.branch_id,
+      });
+      expect(response.result?.isError, JSON.stringify(response)).not.toBe(true);
+      expect((await branches.findById(branch.branch_id))?.archived).toBe(false);
+      expect(JSON.parse(response.result!.content[0]!.text).branch).toMatchObject({
+        archived: false,
+      });
+    } finally {
+      await fixture.close();
+    }
+  }
+);
