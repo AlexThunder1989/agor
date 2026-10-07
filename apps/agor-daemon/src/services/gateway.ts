@@ -121,6 +121,7 @@ import {
   isDiscordDirectMessagesEnabled,
   isDiscordSnowflake,
   isTerminalTaskStatus,
+  previousDiscordSnowflake,
   ROLES,
   SessionStatus,
   TaskStatus,
@@ -5615,9 +5616,13 @@ export class GatewayService {
           });
           discordCursorToWrite = liveCursor;
         } else if (connector?.fetchProviderHistory) {
+          const starterMessageId = extractDiscordStarterMessageId(mappingMetadata);
+          // A first in-thread read includes the starter: a forum post's opener lives in the post.
           const afterCursor =
             mappingForCursor?.discord_last_admitted_message_id ??
-            extractDiscordStarterMessageId(mappingMetadata);
+            (starterMessageId && discordMetadata?.[DISCORD_METADATA_KEY.isThread] === true
+              ? previousDiscordSnowflake(starterMessageId)
+              : starterMessageId);
           if (!afterCursor) {
             throw new GatewayCatchUpError(
               'incomplete',
