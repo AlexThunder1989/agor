@@ -55,6 +55,7 @@ import type {
   GatewayContext,
   InboundFile,
   InboundMessage,
+  InboundSkippedFile,
   SlackThreadHistoryRequest,
   SlackThreadHistoryResult,
 } from '@agor/core/gateway';
@@ -219,6 +220,8 @@ interface PostMessageData {
   text: string;
   user_name?: string;
   files?: InboundFile[];
+  /** Attachments the connector did not pass on (Discord), named so the user can be told. */
+  skipped_files?: InboundSkippedFile[];
   metadata?: Record<string, unknown>;
   /** Daemon-internal durable identities for a claimed provider occurrence. */
   idempotency_task_id?: TaskID;
@@ -776,6 +779,36 @@ const SLACK_GATEWAY_REPLY_NOTE =
 
 const GATEWAY_STARTUP_BOOTSTRAP_HINT =
   'Startup/bootstrap note: Follow any startup/bootstrap instructions defined by the working directory before answering the gateway message above.';
+
+const DISCORD_SKIPPED_FILE_REASON: Record<InboundSkippedFile['reason'], string> = {
+  unsupported_type: 'unsupported file type',
+  files_disabled: 'attachments are turned off for this channel',
+  invalid: 'could not be read',
+};
+
+/**
+ * Attachment names are user-controlled and the note sits outside the
+ * untrusted-data wrapper, so quote them as bounded JSON strings without
+ * control or markup characters.
+ */
+function formatDiscordUnreadAttachment(name: string, reason: string): string {
+  const safeName = name
+    .replace(/[\p{Cc}\p{Zl}\p{Zp}<>`]/gu, ' ')
+    .trim()
+    .slice(0, 100);
+  return `${JSON.stringify(safeName || 'attachment')} (${reason})`;
+}
+
+/**
+ * Prompt note naming the attachments the agent could not read. The user must
+ * hear about them, so it overrides the option to stay silent.
+ */
+function formatDiscordUnreadAttachmentsNote(unread: string[], filesEnabled: boolean): string {
+  const hint = filesEnabled
+    ? 'Images (PNG, JPEG, GIF, WebP) and text files (.txt, .log, .md, .csv, .json) can be read; suggest one of those or pasting the text.'
+    : 'Attachments are turned off for this channel; suggest pasting the text instead.';
+  return `(Attachments you could not read: ${unread.join('; ')}. Tell the user which files you could not read, even if you would otherwise stay silent. ${hint})`;
+}
 
 /** Prompt note for a Discord message admitted by a response mode without a mention. */
 const DISCORD_UNADDRESSED_NOTE = `This Discord message did not mention you; the channel is set to let you answer anyway, and every message you write is posted. Reply only if you can genuinely help. If people are already handling it or you have nothing useful to add, write nothing else at all: your only message must be exactly ${DISCORD_NO_REPLY_SENTINEL}, and nothing will be posted.`;
@@ -6055,32 +6088,43 @@ export class GatewayService {
         }
       }
 
-      // Discord inbound images use the provider's signed CDN URL and the
+      // Discord inbound attachments use the provider's signed CDN URL and the
       // same tenant/session/branch-scoped staging plus executor materializer
-      // as browser and Slack uploads. The capability is opt-in; unsupported
-      // or mixed rich payloads are rejected by the connector before reaching
-      // this boundary, while individual download failures degrade the prompt.
-      if (
-        channel.channel_type === 'discord' &&
-        channelConfig.files === true &&
-        data.files &&
-        data.files.length > 0
-      ) {
-        const ingestion = await ingestDiscordInboundImages({
-          files: data.files,
-          tenantId: requireCurrentTenantId() as TenantID,
-          sessionId,
-          branchId: channel.target_branch_id,
-          createdBy: channel.agor_user_id ?? user.user_id,
-        });
-        if (ingestion.uploads.length > 0) {
-          promptText = buildPromptWithAttachments(promptText, ingestion.uploads);
-          console.log(
-            `[gateway] Ingested ${ingestion.uploads.length} Discord image attachment(s) for session ${shortId(sessionId)}`
-          );
+      // as browser and Slack uploads. The capability is opt-in. Every
+      // attachment the agent cannot read (skipped by the connector, or failed
+      // here) is named in the prompt so the agent tells the user.
+      if (channel.channel_type === 'discord') {
+        const unread = (data.skipped_files ?? []).map((file) =>
+          formatDiscordUnreadAttachment(file.name, DISCORD_SKIPPED_FILE_REASON[file.reason])
+        );
+        if (channelConfig.files !== true) {
+          for (const file of data.files ?? []) {
+            unread.push(
+              formatDiscordUnreadAttachment(file.name, DISCORD_SKIPPED_FILE_REASON.files_disabled)
+            );
+          }
+        } else if (data.files && data.files.length > 0) {
+          const ingestion = await ingestDiscordInboundImages({
+            files: data.files,
+            tenantId: requireCurrentTenantId() as TenantID,
+            sessionId,
+            branchId: channel.target_branch_id,
+            createdBy: channel.agor_user_id ?? user.user_id,
+          });
+          if (ingestion.uploads.length > 0) {
+            promptText = buildPromptWithAttachments(promptText, ingestion.uploads);
+            console.log(
+              `[gateway] Ingested ${ingestion.uploads.length} Discord attachment(s) for session ${shortId(sessionId)}`
+            );
+          }
+          for (const name of ingestion.failedNames ?? []) {
+            unread.push(
+              formatDiscordUnreadAttachment(name, 'could not be downloaded or is too large')
+            );
+          }
         }
-        if (ingestion.failed > 0) {
-          promptText = `${promptText}\n\n(an attachment could not be fetched)`;
+        if (unread.length > 0) {
+          promptText = `${promptText}\n\n${formatDiscordUnreadAttachmentsNote(unread, channelConfig.files === true)}`;
         }
       }
 
@@ -7470,6 +7514,7 @@ export class GatewayService {
                 text: msg.text,
                 user_name: msg.userId,
                 ...(msg.files ? { files: msg.files } : {}),
+                ...(msg.skippedFiles ? { skipped_files: msg.skippedFiles } : {}),
                 metadata,
                 ...(eventId && lease
                   ? {

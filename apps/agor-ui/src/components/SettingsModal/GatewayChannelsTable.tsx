@@ -1797,12 +1797,13 @@ const DiscordSetupFields: React.FC<{
           </Form.Item>
           <Form.Item name="discord_files" valuePropName="checked" initialValue={false}>
             <Checkbox>
-              Enable inbound PNG/JPEG image attachments (<code>files:true</code>)
+              Enable inbound image and text attachments (<code>files:true</code>)
             </Checkbox>
           </Form.Item>
           <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-            Only a message with text and supported PNG/JPEG attachments is admitted. Unsupported or
-            mixed rich payloads are rejected; existing text-only channels remain
+            Images (PNG, JPEG, GIF, WebP) and text files (.txt, .log, .md, .csv, .json) are passed
+            to the agent. Other files are not read, and the agent tells the user which ones it
+            skipped; existing text-only channels remain
             <code> files:false</code>.
           </Typography.Text>
           <Form.Item name="discord_channel_history" valuePropName="checked" initialValue={false}>
@@ -1894,7 +1895,7 @@ const DiscordSetupFields: React.FC<{
           <CompactAlert
             type="info"
             heading="Capabilities"
-            description={`Files: ${filesEnabled ? 'PNG/JPEG inbound images enabled (files:true)' : 'disabled (files:false)'}. Agent tools: ${channelHistoryEnabled ? 'channel history enabled (agent_tools.channel_history:true)' : 'none'}.`}
+            description={`Files: ${filesEnabled ? 'inbound image and text attachments enabled (files:true)' : 'disabled (files:false)'}. Agent tools: ${channelHistoryEnabled ? 'channel history enabled (agent_tools.channel_history:true)' : 'none'}.`}
             style={{ marginTop: 12 }}
           />
         </div>
