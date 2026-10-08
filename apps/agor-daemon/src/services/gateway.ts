@@ -1536,7 +1536,7 @@ export class GatewayService {
     channel: GatewayChannel,
     threadId: string,
     text: string,
-    opts?: { suppressSlack?: boolean; suppressDiscord?: boolean }
+    opts?: { suppressSlack?: boolean; suppressDiscord?: boolean; followUpHint?: boolean }
   ): Promise<void> {
     // GitHub and Shortcut have their own editable ack comment (the connector's
     // "Processing" / "👀 on it" comment that becomes the final reply), so they
@@ -1557,7 +1557,7 @@ export class GatewayService {
         getConnector(channel.channel_type as ChannelType, channel.config);
       await connector.sendMessage({
         threadId,
-        ...formatGatewaySystemPayload(channel.channel_type as ChannelType, text),
+        ...formatGatewaySystemPayload(channel.channel_type as ChannelType, text, opts),
       });
     } catch (error) {
       // Ignore — debug messages are best-effort
@@ -4812,13 +4812,22 @@ export class GatewayService {
     const discordMetadata =
       channel.channel_type === 'discord' ? parseDiscordAuthorityMetadata(data.metadata) : null;
     const discordDm = discordMetadata?.[DISCORD_METADATA_KEY.directMessage] === true;
-    // Admitted by a channel response mode without mentioning the bot.
-    // These stay quiet: no lifecycle, denial, or error notices, and a denial
-    // ends the event instead of failing the listener.
+    // Admitted by a channel response mode without mentioning the bot. These
+    // stay quiet on failure: no denial or error notices, and a denial ends the
+    // event instead of failing the listener.
     const discordUnaddressed =
       !!discordMetadata &&
       !discordDm &&
       discordResponseModeAdmitsMetadata(channel.config as Record<string, unknown>, discordMetadata);
+    // DMs and forum posts in `all` mode are answered without a mention, so the
+    // session-created notice does not tell people to mention the bot.
+    const discordParentChannelId = discordMetadata?.[DISCORD_METADATA_KEY.parentChannelId];
+    const discordFollowUpsNeedNoMention =
+      discordDm ||
+      (discordMetadata?.[DISCORD_METADATA_KEY.isThread] === true &&
+        typeof discordParentChannelId === 'string' &&
+        (channel.config as DiscordGatewayConfig).response_modes?.[discordParentChannelId] ===
+          'all');
 
     // 2. Look up existing thread mapping. New Discord admissions use the raw
     // provider thread Snowflake; a legacy composite is consulted only to
@@ -5424,13 +5433,28 @@ export class GatewayService {
         }
       }
 
-      const sessionUrl = await this.fetchExistingSessionUrlForGatewayUser(sessionId, user);
-      if (sessionUrl && channel.channel_type !== 'slack' && !discordDm && !discordUnaddressed) {
-        this.sendSystemMessage(
-          channel,
-          data.thread_id,
-          formatGatewayFollowUpRoutingMessage(sessionId, sessionUrl)
-        );
+      // Like Slack, Discord shows the session link once, when it is created. A
+      // redelivered first message may have stopped before posting it, so a
+      // recovery announces the session instead.
+      if (channel.channel_type !== 'slack' && channel.channel_type !== 'discord') {
+        const sessionUrl = await this.fetchExistingSessionUrlForGatewayUser(sessionId, user);
+        if (sessionUrl) {
+          this.sendSystemMessage(
+            channel,
+            data.thread_id,
+            formatGatewayFollowUpRoutingMessage(sessionId, sessionUrl)
+          );
+        }
+      } else if (channel.channel_type === 'discord' && recoveringInitialDelivery) {
+        const sessionUrl = await this.fetchExistingSessionUrlForGatewayUser(sessionId, user);
+        if (sessionUrl) {
+          this.sendSystemMessage(
+            channel,
+            data.thread_id,
+            formatGatewaySessionCreatedMessage(sessionId, sessionUrl),
+            { followUpHint: !discordFollowUpsNeedNoMention }
+          );
+        }
       }
     } else {
       // New thread → create session via FeathersJS service
@@ -5755,11 +5779,17 @@ export class GatewayService {
 
       const sessionUrl = await this.fetchExistingSessionUrlForGatewayUser(sessionId, user);
 
-      if ((sessionUrl || channel.channel_type === 'slack') && !discordUnaddressed) {
+      // On Discord only the event that created the session announces it, so a
+      // concurrent message that lost the thread race does not repeat the link.
+      if (
+        (sessionUrl || channel.channel_type === 'slack') &&
+        (created || channel.channel_type !== 'discord')
+      ) {
         this.sendSystemMessage(
           channel,
           data.thread_id,
-          formatGatewaySessionCreatedMessage(sessionId, sessionUrl)
+          formatGatewaySessionCreatedMessage(sessionId, sessionUrl),
+          { followUpHint: !discordFollowUpsNeedNoMention }
         );
       }
 
