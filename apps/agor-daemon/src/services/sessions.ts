@@ -219,6 +219,7 @@ export type SessionParams = QueryParams<{
   agentic_tool?: Session['agentic_tool'];
   board_id?: string;
   include_usage?: boolean | 'true' | 'false';
+  include_tasks_complete?: boolean | 'true' | 'false';
   /** List-only projection; see `LEAN_SESSION_LIST_OMITTED_CONTEXT_KEYS`. */
   lean?: boolean;
   include_last_message?: boolean | 'true' | 'false'; // Opt-in last message enrichment
@@ -1994,6 +1995,13 @@ export class SessionsService extends DrizzleService<Session, SessionUpdate, Sess
     if (params?.query?.include_usage === true || params?.query?.include_usage === 'true') {
       sessionWithRelationships.usage_summary = await this.taskRepo.getSessionUsage(
         session.session_id
+      );
+    }
+    const includeTasksComplete = params?.query?.include_tasks_complete;
+    if (includeTasksComplete === true || includeTasksComplete === 'true') {
+      sessionWithRelationships.tasks_complete = await this.taskRepo.isSessionTaskListComplete(
+        session.session_id,
+        session.tasks
       );
     }
 
