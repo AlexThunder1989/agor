@@ -1,5 +1,6 @@
 import { Footer } from 'nextra-theme-docs';
 import { FinePrint } from '../components/FinePrint';
+import { FooterLegal } from '../components/FooterLegal';
 import { IslandNav } from '../components/nav/IslandNav';
 
 // The floating-island global nav replaces Nextra's navbar site-wide; it owns
@@ -12,6 +13,7 @@ export const footer = (
   <Footer>
     <span>
       <FinePrint />
+      <FooterLegal className="agor-docs-footer-legal" />
     </span>
   </Footer>
 );
