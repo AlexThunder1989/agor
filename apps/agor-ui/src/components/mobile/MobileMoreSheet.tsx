@@ -1,4 +1,4 @@
-import type { Board, BoardComment, Branch, Session } from '@agor-live/client';
+import type { AgorClient, Board, BoardComment, Branch, Session } from '@agor-live/client';
 import { BulbOutlined, MoonOutlined } from '@ant-design/icons';
 import { Drawer, Flex, Segmented, Typography, theme } from 'antd';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -10,6 +10,8 @@ import { MobileNavTree } from './MobileNavTree';
 interface MobileMoreSheetProps {
   open: boolean;
   onClose: () => void;
+  client: AgorClient | null;
+  canUseMemberWorkspaceServices: boolean;
   boardById: Map<string, Board>;
   branchById: Map<string, Branch>;
   sessionsByBranch: Map<string, Session[]>;
@@ -32,6 +34,8 @@ interface MobileMoreSheetProps {
 export const MobileMoreSheet: React.FC<MobileMoreSheetProps> = ({
   open,
   onClose,
+  client,
+  canUseMemberWorkspaceServices,
   boardById,
   branchById,
   sessionsByBranch,
@@ -78,6 +82,8 @@ export const MobileMoreSheet: React.FC<MobileMoreSheetProps> = ({
         />
       </Flex>
       <MobileNavTree
+        client={client}
+        canUseMemberWorkspaceServices={canUseMemberWorkspaceServices}
         boardById={boardById}
         branchById={branchById}
         sessionsByBranch={sessionsByBranch}

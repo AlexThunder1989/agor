@@ -20,6 +20,8 @@ import type { AppActionsContextValue } from '../../contexts/AppActionsContext';
 import { useConnectionState } from '../../contexts/ConnectionContext';
 import type { NewSessionConfig, SessionCreationResult } from '../../domain/sessionCreation';
 import { useAppNavigation } from '../../hooks/useAppNavigation';
+import { useBoardPartition } from '../../hooks/useBoardPartition';
+import { useBranchSessions } from '../../hooks/useBranchSessions';
 import { useCommentsForYou } from '../../hooks/useCommentsForYou';
 import { type CreateBranchFn, useCreateFlows } from '../../hooks/useCreateFlows';
 import { useIdentityGuardedAsync } from '../../hooks/useIdentityGuardedAsync';
@@ -98,7 +100,12 @@ interface MobileAppProps {
   onSpawnSession: (sessionId: string, config: string | Partial<SpawnConfig>) => Promise<void>;
   onUpdateSession: (sessionId: string, updates: Partial<Session>) => void;
   onDeleteSession: (sessionId: string) => void;
-  onUpdateSessionMcpServers?: (sessionId: string, mcpServerIds: string[]) => void;
+  onUpdateSessionMcpServers?: (
+    sessionId: string,
+    mcpServerIds: string[],
+    /** The links the user was shown; the change is diffed against them. */
+    baselineIds?: string[]
+  ) => void;
   onUpdateSessionEnvSelections?: (sessionId: string, envVarNames: string[]) => void;
   onSendComment: (boardId: string, content: string) => void;
   onReplyComment?: (parentId: string, content: string) => void;
@@ -187,6 +194,8 @@ export const MobileApp: React.FC<MobileAppProps> = ({
   } | null>(null);
   const selectedBranch = branchEditor ? (branchById.get(branchEditor.branchId) ?? null) : null;
   const selectedRepo = selectedBranch ? (repoById.get(selectedBranch.repo_id) ?? null) : null;
+  // The desktop BranchModal's on-open read: the store holds only the loaded scopes' sessions.
+  const branchSessions = useBranchSessions(client, branchEditor?.branchId ?? null);
 
   // The caller's primary assistant: Home shows its name and emoji, and Ask starts its session.
   const {
@@ -242,6 +251,11 @@ export const MobileApp: React.FC<MobileAppProps> = ({
     if (mainBoardId && boardById.has(mainBoardId)) return mainBoardId;
     return boardById.keys().next().value as string | undefined;
   }, [routeBoardId, currentBoardId, boardById, user?.preferences?.mainBoardId]);
+
+  // Load the effective board's partition when it is not complete yet.
+  const { boardReady } = useBoardPartition(client, effectiveBoardId, {
+    canUseMemberWorkspaceServices: hasMinimumRole(user?.role, ROLES.MEMBER),
+  });
 
   // Same create flows as desktop, via the shared hook. Mobile has no board
   // canvas, so branch positions aren't captured; navigation lands on /m routes.
@@ -542,6 +556,7 @@ export const MobileApp: React.FC<MobileAppProps> = ({
             path="search"
             element={
               <MobileSearchPage
+                client={client}
                 currentUser={user}
                 onOpenWorkspaceSettings={onOpenWorkspaceSettings}
                 onOpenBranch={(branchId) => setBranchEditor({ branchId, tab: 'general' })}
@@ -575,6 +590,7 @@ export const MobileApp: React.FC<MobileAppProps> = ({
                 commentsBadge={boardCommentsBadge}
                 onOpenComments={openBoardComments}
                 userId={user?.user_id}
+                boardReady={boardReady}
               />
             }
           />
@@ -694,6 +710,8 @@ export const MobileApp: React.FC<MobileAppProps> = ({
       <MobileMoreSheet
         open={moreOpen}
         onClose={() => setMoreOpen(false)}
+        client={client}
+        canUseMemberWorkspaceServices={hasMinimumRole(user?.role, ROLES.MEMBER)}
         boardById={boardById}
         branchById={branchById}
         sessionsByBranch={sessionsByBranch}
@@ -714,7 +732,7 @@ export const MobileApp: React.FC<MobileAppProps> = ({
         onClose={() => setBranchEditor(null)}
         branch={selectedBranch}
         repo={selectedRepo}
-        sessions={selectedBranch ? (sessionsByBranch.get(selectedBranch.branch_id) ?? []) : []}
+        sessions={branchSessions}
         boardObjects={
           selectedBranch?.board_id ? (boardObjectsByBoardId.get(selectedBranch.board_id) ?? []) : []
         }

@@ -1,4 +1,4 @@
-import type { Board, BoardComment, Branch, Session } from '@agor-live/client';
+import type { AgorClient, Board, BoardComment, Branch, Session } from '@agor-live/client';
 import {
   AppstoreOutlined,
   BulbOutlined,
@@ -13,12 +13,14 @@ import {
   UserOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
-import { Badge, Button, Collapse, Divider, Menu, Space, Typography, theme } from 'antd';
+import { Badge, Button, Collapse, Divider, Menu, Space, Spin, Typography, theme } from 'antd';
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { resolveExternalAppLink } from '@/utils/externalAppLink';
 import { mapToArray } from '@/utils/mapHelpers';
 import { getSessionDisplayTitle } from '@/utils/sessionTitle';
+import { useBoardPartition } from '../../hooks/useBoardPartition';
+import { useBranchCounts } from '../../hooks/useBranchCounts';
 import { BoardCollapse } from '../BoardCollapse';
 import { getBoardEmoji } from '../BoardTile';
 import { type CreateModalKind, createMenuItems } from '../CreateMenu';
@@ -29,6 +31,8 @@ const CREATE_KEY_PREFIX = 'create:';
 const { Text } = Typography;
 
 interface MobileNavTreeProps {
+  client: AgorClient | null;
+  canUseMemberWorkspaceServices: boolean;
   boardById: Map<string, Board>;
   branchById: Map<string, Branch>;
   sessionsByBranch: Map<string, Session[]>; // O(1) branch filtering
@@ -46,7 +50,27 @@ interface MobileNavTreeProps {
   isAdmin: boolean;
 }
 
+/**
+ * An expanded board's body. Mounting it (boards are collapsed and destroyed
+ * when hidden) loads the board's partition in the background, so its branches
+ * and sessions come from that load rather than from workspace-wide data.
+ */
+const BoardPanel: React.FC<{
+  client: AgorClient | null;
+  boardId: string;
+  canUseMemberWorkspaceServices: boolean;
+  children: React.ReactNode;
+}> = ({ client, boardId, canUseMemberWorkspaceServices, children }) => {
+  const { boardReady } = useBoardPartition(client, boardId, {
+    canUseMemberWorkspaceServices,
+    background: true,
+  });
+  return boardReady ? children : <Spin size="small" style={{ display: 'block' }} />;
+};
+
 export const MobileNavTree: React.FC<MobileNavTreeProps> = ({
+  client,
+  canUseMemberWorkspaceServices,
   boardById,
   branchById,
   sessionsByBranch,
@@ -135,6 +159,16 @@ export const MobileNavTree: React.FC<MobileNavTreeProps> = ({
   };
 
   const boards = useMemo(() => mapToArray(boardById), [boardById]);
+  const branchCountByBoard = useBranchCounts(client);
+  const boardPanel = (boardId: string, body: React.ReactNode) => (
+    <BoardPanel
+      client={client}
+      boardId={boardId}
+      canUseMemberWorkspaceServices={canUseMemberWorkspaceServices}
+    >
+      {body}
+    </BoardPanel>
+  );
   const openSettings = (section: string) => {
     onOpenWorkspaceSettings(section);
     onNavigate?.();
@@ -191,7 +225,7 @@ export const MobileNavTree: React.FC<MobileNavTreeProps> = ({
             badge: (
               <Space size={8}>
                 <Badge
-                  count={boardBranches.length}
+                  count={branchCountByBoard.get(board.board_id) ?? 0}
                   style={{ backgroundColor: token.colorPrimaryBg }}
                   showZero
                 />
@@ -226,7 +260,8 @@ export const MobileNavTree: React.FC<MobileNavTreeProps> = ({
                 </Badge>
               </Space>
             ),
-            children:
+            children: boardPanel(
+              board.board_id,
               boardBranches.length === 0 ? (
                 <Text type="secondary">No branches on this board</Text>
               ) : (
@@ -313,7 +348,8 @@ export const MobileNavTree: React.FC<MobileNavTreeProps> = ({
                     };
                   })}
                 />
-              ),
+              )
+            ),
           };
         })}
       />

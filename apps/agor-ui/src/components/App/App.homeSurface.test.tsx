@@ -17,6 +17,8 @@ import { useAppNavigation } from '../../hooks/useAppNavigation';
 import { useSettingsRoute } from '../../hooks/useSettingsRoute';
 import { EMPTY_MAPS } from '../../store/agorMaps';
 import { agorStore } from '../../store/agorStore';
+import { USER_SCOPE_KEYS } from '../../store/scopeMerge';
+import { userScopeCoverage } from '../../test/userScopeCoverage';
 import { resetAccessCacheForTests } from '../../utils/accessCache';
 import { App } from './App';
 
@@ -151,9 +153,19 @@ function seedStore() {
       [BRANCH_B, [session2]],
     ]),
     userById: new Map([[user.user_id, user]]),
-    sessionsHydrated: true,
-    branchesHydrated: true,
+    coverage: mySessionsHeld(
+      userScopeCoverage({ sessions: true, references: true, teammates: true })
+    ),
   } as never);
+}
+
+/** My sessions belong to the loaded user scope (so no eviction drops them). */
+function mySessionsHeld(coverage: ReturnType<typeof userScopeCoverage>) {
+  const entry = coverage.get(USER_SCOPE_KEYS.sessions)!;
+  return coverage.set(USER_SCOPE_KEYS.sessions, {
+    ...entry,
+    members: { sessions: new Set([SESSION_1, SESSION_2]) },
+  });
 }
 
 /** Someone else's teammate on Alpha, so Home's rail shows "See all 1". */
