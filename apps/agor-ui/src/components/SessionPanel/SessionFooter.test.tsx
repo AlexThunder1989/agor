@@ -757,6 +757,20 @@ describe.each([320, 390, 768, 1280])('SessionFooter at %ipx', (width) => {
       fireEvent.click(screen.getByLabelText('More options'));
       const sheet = (await screen.findByText('Session controls')).closest('[role=dialog]')!;
       expect(within(sheet as HTMLElement).getByLabelText('Fork session')).toBeInTheDocument();
+      // A tap must not leave any action row's hover hint over the sheet.
+      for (const label of [
+        'Attach files',
+        'Advanced upload',
+        'Fork session',
+        'BTW fork',
+        'Spawn subsession',
+      ]) {
+        fireEvent.mouseEnter(within(sheet as HTMLElement).getByText(label, { exact: true }));
+      }
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      });
+      expect(document.querySelector('.ant-tooltip')).toBeNull();
       expect(within(sheet as HTMLElement).getByLabelText('Spawn subsession')).toHaveAttribute(
         'aria-disabled',
         'true'
