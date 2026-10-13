@@ -2116,7 +2116,7 @@ describe('GatewayService stop keyword', () => {
     );
   });
 
-  it('only stops for the !stop command, keeping the queue', async () => {
+  it('only stops for the !skip command, keeping the queue', async () => {
     const sendMessage = vi.fn(async () => '104.000000');
     const { service, promptCreate, stopCreate, cancelQueued } = makeGatewayHarness({
       existingMapping: makeMapping(),
@@ -2127,7 +2127,7 @@ describe('GatewayService stop keyword', () => {
       ],
     });
 
-    const result = await service.create(stopMessage('!stop'));
+    const result = await service.create(stopMessage('!skip'));
 
     expect(result).toMatchObject({ success: true, sessionId: 'sess-1', created: false });
     expect(promptCreate).not.toHaveBeenCalled();
@@ -2137,6 +2137,34 @@ describe('GatewayService stop keyword', () => {
     expect(reply).toContain('Stopped.');
     expect(reply).not.toContain('Cleared');
     expect(reply).not.toContain('Commands:');
+  });
+
+  it('changes nothing for !stop while prompts are queued, and stops when none are', async () => {
+    const sendMessage = vi.fn(async () => '104.000000');
+    const { service, promptCreate, stopCreate, cancelQueued } = makeGatewayHarness({
+      existingMapping: makeMapping(),
+      connector: { sendMessage },
+      sessionTasks: [
+        task('run-theirs', TaskStatus.RUNNING, 'U-anna'),
+        task('queued-theirs', TaskStatus.QUEUED, 'U-anna'),
+      ],
+    });
+    const idle = makeGatewayHarness({
+      existingMapping: makeMapping(),
+      connector: { sendMessage: vi.fn(async () => '104.000000') },
+      sessionTasks: [task('run-theirs', TaskStatus.RUNNING, 'U-anna')],
+    });
+
+    await service.create(stopMessage('!stop'));
+    await idle.service.create(stopMessage('!stop'));
+
+    expect(stopCreate).not.toHaveBeenCalled();
+    expect(cancelQueued).not.toHaveBeenCalled();
+    expect(promptCreate).not.toHaveBeenCalled();
+    expect(JSON.stringify(sendMessage.mock.calls)).toContain(
+      'Not stopped: 1 queued. Use `!skip` to stop and keep the queue, or `!stop-clear` to stop and clear it.'
+    );
+    expect(idle.stopCreate).toHaveBeenCalledOnce();
   });
 
   it('reports a failed stop and the age of queued prompts, or that nothing is running', async () => {

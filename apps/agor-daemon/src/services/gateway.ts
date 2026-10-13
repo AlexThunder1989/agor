@@ -1240,7 +1240,8 @@ function buildShortcutInitialPrompt(text: string, metadata?: Record<string, unkn
 const CHAT_COMMANDS_HELP = [
   'Commands:',
   '`stop` or `!stop-clear`: clears the queue and stops; text after it is sent next.',
-  '`!stop`: stops; the queue carries on.',
+  '`!skip`: stops; the queue carries on.',
+  '`!stop`: stops when nothing is queued.',
   '`!queue`: lists the queued prompts.',
   '`!help`: shows this list.',
 ].join('\n');
@@ -5592,7 +5593,7 @@ export class GatewayService {
   }
 
   /**
-   * Runs "stop", "!stop-clear", "!stop", "!queue" or "!help" as the chat user.
+   * Runs "stop", "!stop-clear", "!skip", "!stop", "!queue" or "!help" as the chat user.
    * Returns the text to prompt next, '' if none, or undefined if not a command.
    */
   private async runChatCommand(
@@ -5606,9 +5607,16 @@ export class GatewayService {
       await this.sendSystemMessage(channel, data.thread_id, CHAT_COMMANDS_HELP);
       return '';
     }
-    const stopMatch = /^(!stop-clear|!?stop)\s*(\n|[.,;:!?]+|$)/i.exec(text);
+    const stopMatch = /^(!stop-clear|!skip|!?stop)\s*(\n|[.,;:!?]+|$)/i.exec(text);
     if (!stopMatch && !/^!queue$/i.test(text)) return undefined;
-    const command = !stopMatch ? 'queue' : /^!stop$/i.test(stopMatch[1]) ? 'stop' : 'panic';
+    const keyword = stopMatch?.[1].toLowerCase();
+    const command = !keyword
+      ? 'queue'
+      : keyword === '!skip'
+        ? 'skip'
+        : keyword === '!stop'
+          ? 'stop'
+          : 'panic';
     const panic = command === 'panic';
     const tenantId = getCurrentTenantId();
     const asUser = {
@@ -5622,13 +5630,21 @@ export class GatewayService {
     // Read the queue and the running task internally: external reads strip the
     // chat author that the reply needs.
     const queue =
-      command !== 'stop'
+      command !== 'skip'
         ? (
             (await tasks.find({
               query: { session_id: sessionId, status: TaskStatus.QUEUED, $sort: { created_at: 1 } },
             })) as Paginated<Task>
           ).data
         : [];
+    if (command === 'stop' && queue.length > 0) {
+      await this.sendSystemMessage(
+        channel,
+        data.thread_id,
+        `Not stopped: ${queue.length} queued. Use \`!skip\` to stop and keep the queue, or \`!stop-clear\` to stop and clear it.`
+      );
+      return '';
+    }
     const [active] =
       command === 'queue' ? [] : await findActiveTasksForSession(this.app, sessionId);
 
