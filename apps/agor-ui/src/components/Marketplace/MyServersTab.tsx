@@ -6,7 +6,7 @@ import type {
 } from '@agor/core/types';
 import type { AgorClient, MCPServer, User } from '@agor-live/client';
 import { hasMinimumRole, ROLES } from '@agor-live/client';
-import { SettingOutlined } from '@ant-design/icons';
+import { PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import {
   Alert,
   Avatar,
@@ -30,15 +30,21 @@ import {
   type ActionErrorCopy,
   describeActionError,
   formatActionError,
+  LOST_CONNECTION_TOOLTIP,
 } from '@/utils/connectionErrors';
 import { useThemedMessage } from '@/utils/message';
 import { useMcpMemberPolicy } from '../../hooks/useMcpMemberPolicy';
 import { mcpServerRemoved } from '../../store/agorRealtimeActions';
 import { MCPServerEditModal } from '../MCPServer/MCPServerEditModal';
 import {
+  allowedMcpScopes,
+  allowedMcpTransports,
+  canAddMcpServer,
+  canAddSharedMcpServer,
   canDeleteMcpServer,
   canEditMcpServer,
   canRefreshMcpServer,
+  explainAddRestriction,
   explainManageRestriction,
   policyPendingState,
 } from '../MCPServer/memberPolicy';
@@ -152,6 +158,26 @@ export const MyServersTab: React.FC<MyServersTabProps> = ({
     [connectionReady, currentUser, memberPolicy.canConfigure, memberPolicy.policy]
   );
   const policyState = policyPendingState(memberPolicy);
+  // Same gates as the former Settings > MCP Servers create form.
+  const canAdd = !policyState.pending && canAddMcpServer(capability);
+  const addRestriction = !connectionReady
+    ? LOST_CONNECTION_TOOLTIP
+    : policyState.pending
+      ? policyState.hint
+      : explainAddRestriction(capability);
+  const createAuthorityKey =
+    canAdd && currentUser ? `${currentUser.user_id}:${currentUser.role}:${authGeneration}` : null;
+  const offeredTransports = useMemo(
+    () => allowedMcpTransports({ isAdmin: capability.isAdmin }),
+    [capability.isAdmin]
+  );
+  const offeredScopes = useMemo(
+    () => allowedMcpScopes({ isAdmin: capability.isAdmin, policy: memberPolicy.policy }),
+    [capability.isAdmin, memberPolicy.policy]
+  );
+  const [createOpen, setCreateOpen] = useState(false);
+  // A just-added server opens like a requested one once the refreshed overview lists it.
+  const [createdServerId, setCreatedServerId] = useState<string | null>(null);
   const authorityFor = useCallback(
     (server: MCPMarketplaceServer) => ({
       owner_user_id: currentUser?.user_id,
@@ -243,6 +269,8 @@ export const MyServersTab: React.FC<MyServersTabProps> = ({
     drawerTrigger.current = null;
     setSelectedServerId(null);
     setEditingCredentialServer(null);
+    setCreateOpen(false);
+    setCreatedServerId(null);
     setDiscoveryErrors(new Map());
   }, [active, clearRemovalFocusAuthority]);
 
@@ -369,19 +397,21 @@ export const MyServersTab: React.FC<MyServersTabProps> = ({
     showWarning,
   });
 
+  const serverToOpen = requestedServerId ?? createdServerId;
   useEffect(() => {
-    if (!requestedServerId) return;
-    const requested = overview.servers.find((server) => server.mcp_server_id === requestedServerId);
+    if (!serverToOpen) return;
+    const requested = overview.servers.find((server) => server.mcp_server_id === serverToOpen);
     if (!requested) return;
     drawerOpen.current = true;
     drawerTrigger.current =
       Array.from(
         document.querySelectorAll<HTMLElement>('[data-marketplace-settings-server-id]')
-      ).find((element) => element.dataset.marketplaceSettingsServerId === requestedServerId) ??
+      ).find((element) => element.dataset.marketplaceSettingsServerId === serverToOpen) ??
       document.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
-    setSelectedServerId(requestedServerId);
-    onRequestedServerOpened?.();
-  }, [onRequestedServerOpened, overview.servers, requestedServerId]);
+    setSelectedServerId(serverToOpen);
+    if (serverToOpen === createdServerId) setCreatedServerId(null);
+    else onRequestedServerOpened?.();
+  }, [createdServerId, onRequestedServerOpened, overview.servers, serverToOpen]);
 
   const mutate = async (
     action: string,
@@ -752,31 +782,82 @@ export const MyServersTab: React.FC<MyServersTabProps> = ({
     </Button>
   );
 
+  const addCustomServerButton = canAdd ? (
+    <Button icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+      Add custom server
+    </Button>
+  ) : (
+    // A disabled button can't host a tooltip of its own — hence the span.
+    <Tooltip title={addRestriction}>
+      <span>
+        <Button icon={<PlusOutlined />} disabled>
+          Add custom server
+        </Button>
+      </span>
+    </Tooltip>
+  );
+  // Every branch below renders this as the first child of a Flex root, so a
+  // list that appears mid-create (for example, during OAuth) keeps the form.
+  const createModal = (
+    <MCPServerEditModal
+      server={null}
+      open={createOpen}
+      client={client}
+      identityKey={currentUser?.user_id ?? null}
+      authGeneration={authGeneration}
+      authorityKey={createAuthorityKey}
+      offeredTransports={offeredTransports}
+      offeredScopes={offeredScopes}
+      allowSharedOwnership={canAddSharedMcpServer(capability)}
+      mutationAllowed={canAdd}
+      mutationBlockedReason={addRestriction}
+      onCreated={(server) => setCreatedServerId(server.mcp_server_id)}
+      onClose={() => {
+        setCreateOpen(false);
+        void refresh();
+      }}
+    />
+  );
+
   if (error && overview.servers.length === 0)
     return (
-      <Alert
-        type="error"
-        showIcon
-        title="Could not load your servers"
-        description={error}
-        action={<Button onClick={() => void refresh()}>Retry</Button>}
-      />
+      <Flex vertical gap={token.margin}>
+        {createModal}
+        <Alert
+          type="error"
+          showIcon
+          title="Could not load your servers"
+          description={error}
+          action={<Button onClick={() => void refresh()}>Retry</Button>}
+        />
+      </Flex>
     );
   if (!loading && overview.servers.length === 0)
     return (
-      <section ref={inventoryFocusTarget} tabIndex={-1} aria-label="Installed MCP server inventory">
-        <Empty description="No MCP servers installed">
-          {onBrowseCatalog && (
-            <Button type="primary" onClick={onBrowseCatalog}>
-              Browse catalog
-            </Button>
-          )}
-        </Empty>
-      </section>
+      <Flex vertical gap={token.margin}>
+        {createModal}
+        <section
+          ref={inventoryFocusTarget}
+          tabIndex={-1}
+          aria-label="Installed MCP server inventory"
+        >
+          <Empty description="No MCP servers installed">
+            <Space wrap>
+              {onBrowseCatalog && (
+                <Button type="primary" onClick={onBrowseCatalog}>
+                  Browse catalog
+                </Button>
+              )}
+              {addCustomServerButton}
+            </Space>
+          </Empty>
+        </section>
+      </Flex>
     );
 
   return (
     <Flex vertical gap={token.margin}>
+      {createModal}
       {error && (
         <Alert
           type="error"
@@ -793,6 +874,7 @@ export const MyServersTab: React.FC<MyServersTabProps> = ({
           title={policyState.pending ? policyState.hint : explainManageRestriction(capability)}
         />
       )}
+      <Flex justify="flex-end">{addCustomServerButton}</Flex>
       <section ref={inventoryFocusTarget} tabIndex={-1} aria-label="Installed MCP server inventory">
         {compact ? (
           <Spin spinning={loading}>
