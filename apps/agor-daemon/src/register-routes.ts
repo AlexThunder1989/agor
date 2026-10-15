@@ -77,6 +77,7 @@ import {
   isMCPServerUsableBy,
   MCP_RUNTIME_PROVIDER_CAPABILITIES,
   mcpRuntimeProviderCapability,
+  resolveEffectiveSessionMcpServers,
 } from '@agor/core/mcp';
 import { escapePromptProvenanceSentinels } from '@agor/core/templates/prompt-provenance';
 import type {
@@ -5521,26 +5522,21 @@ export async function registerRoutes(ctx: RegisterRoutesContext): Promise<void> 
           usableByUserId: credentialUserId,
           $limit: 1000,
         };
-        const globalResult = includeGlobal
-          ? await mcpService.find({
-              ...params,
-              provider: undefined,
-              query: globalQuery,
-            })
-          : [];
-        const globalServers = Array.isArray(globalResult) ? globalResult : globalResult.data;
-        const servers = (
-          includeGlobal
-            ? [
-                ...new Map(
-                  [...globalServers, ...sessionServers].map((server) => [
-                    server.mcp_server_id,
-                    server,
-                  ])
-                ).values(),
-              ]
-            : sessionServers
-        ).filter((server) => isMCPServerUsableBy(server, credentialUserId));
+        const servers = await resolveEffectiveSessionMcpServers(
+          session,
+          sessionServers,
+          async () => {
+            const globalResult = includeGlobal
+              ? await mcpService.find({
+                  ...params,
+                  provider: undefined,
+                  query: globalQuery,
+                })
+              : [];
+            return Array.isArray(globalResult) ? globalResult : globalResult.data;
+          },
+          credentialUserId
+        );
         return !(params as RouteParams & { _forceMcpRuntimeRedaction?: boolean })
           ._forceMcpRuntimeRedaction &&
           shouldExposeMCPServerSecrets(params, {
@@ -6749,7 +6745,10 @@ export async function registerRoutes(ctx: RegisterRoutesContext): Promise<void> 
           envVarNames: configuredEnvVarNames,
           setMcpServers: async (serverIds) => {
             try {
-              await sessionMCPServersService.setServers(session.session_id, serverIds, params);
+              // Initialization completes creation: its selection is explicit intent.
+              await sessionMCPServersService.setServers(session.session_id, serverIds, params, {
+                markSelectionExplicit: true,
+              });
             } catch (error) {
               if (isMCPServerNotUsableError(error)) {
                 throw new Forbidden('An MCP server is private to another user');
