@@ -125,6 +125,7 @@ import { AVAILABLE_AGENTS } from '../AgentSelectionGrid/availableAgents';
 import { ActionErrorNotice, CompactNotice } from '../CompactNotice';
 import { JSONEditor, validateJSON } from '../JSONEditor';
 import { BranchSelect } from './BranchSelect';
+import { GatewayTargetFields } from './GatewayTargetFields';
 import { FIELD_WIDTHS } from './panelPrimitives';
 import { ResponsiveSettingsHeader } from './ResponsiveSettingsHeader';
 import { ResponsiveTable } from './ResponsiveTable';
@@ -2360,26 +2361,33 @@ const ChannelFormFields: React.FC<{
             </Select>
           </Form.Item>
 
-          <Form.Item
-            label="Name"
-            name="name"
-            rules={[{ required: true, message: 'Please enter a channel name' }]}
-          >
-            <Input placeholder="e.g., Team Slack, Personal Discord" />
-          </Form.Item>
+          {mode === 'edit' && (
+            <Form.Item
+              label="Name"
+              name="name"
+              rules={[{ required: true, message: 'Please enter a channel name' }]}
+            >
+              <Input placeholder="e.g., Team Slack, Personal Discord" />
+            </Form.Item>
+          )}
 
-          <Form.Item
-            label="Target Branch"
-            name="target_branch_id"
-            rules={[{ required: true, message: 'Please select a target branch' }]}
-            tooltip={
-              mode === 'create'
-                ? 'New sessions from this channel will be created in this branch'
-                : undefined
-            }
-          >
-            <BranchSelect client={client} />
-          </Form.Item>
+          {mode === 'create' ? (
+            <GatewayTargetFields
+              client={client}
+              channelTypeLabel={
+                CHANNEL_TYPE_OPTIONS.find((option) => option.value === channelType)?.label ??
+                channelType
+              }
+            />
+          ) : (
+            <Form.Item
+              label="Target Branch"
+              name="target_branch_id"
+              rules={[{ required: true, message: 'Please select a target branch' }]}
+            >
+              <BranchSelect client={client} />
+            </Form.Item>
+          )}
 
           {/* Platform-specific identity sections own Slack/GitHub/Shortcut/Discord identity. */}
           {channelType !== 'slack' &&
