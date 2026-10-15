@@ -2630,7 +2630,7 @@ export function registerGatewayChannelTools(server: McpServer, ctx: McpContext):
           `Slack file ${args.fileId} is not shared in any conversation permitted by this gateway channel's allowed_channel_ids whitelist.`
         );
       }
-      const extraMimeTypes = target.channel.config?.ingest_mime_types as unknown[] | undefined;
+      const extraMimeTypes = target.channel.config?.ingest_mime_types;
       if (!isIngestableFile(file, extraMimeTypes)) {
         throw new Error(
           `Slack file "${file.name}" has type ${file.mimetype}, which the gateway does not download. Only image and text-like files (png/jpeg/gif/webp, plain text, markdown, CSV, JSON) and the channel's ingest_mime_types are supported.`

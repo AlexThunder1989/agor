@@ -6181,7 +6181,7 @@ export class GatewayService {
             sessionId,
             branchId: channel.target_branch_id,
             createdBy: channel.agor_user_id ?? user.user_id,
-            extraMimeTypes: channelConfig.ingest_mime_types as unknown[] | undefined,
+            extraMimeTypes: channelConfig.ingest_mime_types,
           });
           const stagedUploads = ingestion.uploads;
           const { failed } = ingestion;

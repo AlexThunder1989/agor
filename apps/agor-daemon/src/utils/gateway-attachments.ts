@@ -79,14 +79,20 @@ const GATEWAY_INGEST_MIME_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /** `extra` is the channel's `ingest_mime_types`; `type/*` entries match a whole family. */
-function isAllowedIngestMime(rawMime: string, extra: readonly unknown[] = []): boolean {
+function isAllowedIngestMime(rawMime: string, extra: unknown = []): boolean {
   const mime = normalizeUploadMimeType(rawMime);
   return (
     GATEWAY_INGEST_MIME_TYPES.has(mime) ||
-    extra.some((entry) => {
-      const allowed = normalizeUploadMimeType(String(entry));
-      return allowed === mime || (allowed.endsWith('/*') && mime.startsWith(allowed.slice(0, -1)));
-    })
+    // Channel config is an untyped persisted record. Invalid settings must not
+    // throw during filtering and prevent delivery of the message's text.
+    (Array.isArray(extra) &&
+      extra.some((entry: unknown) => {
+        if (typeof entry !== 'string') return false;
+        const allowed = normalizeUploadMimeType(entry);
+        return (
+          allowed === mime || (allowed.endsWith('/*') && mime.startsWith(allowed.slice(0, -1)))
+        );
+      }))
   );
 }
 
@@ -162,7 +168,7 @@ function discordDownloadTimeoutError(): Error {
 }
 
 /** Image and text-like attachments, plus the channel's `ingest_mime_types`. */
-export function isIngestableFile(file: InboundFile, extraMimeTypes?: readonly unknown[]): boolean {
+export function isIngestableFile(file: InboundFile, extraMimeTypes?: unknown): boolean {
   return isAllowedIngestMime(file.mimetype, extraMimeTypes);
 }
 
@@ -415,7 +421,7 @@ export async function ingestInboundAttachments(args: {
   branchId: BranchID;
   createdBy: UserID;
   store?: UploadStagingStore;
-  extraMimeTypes?: readonly unknown[];
+  extraMimeTypes?: unknown;
 }): Promise<AttachmentIngestResult> {
   const fetchImpl = args.fetchImpl ?? fetch;
   const store = args.store ?? getUploadStagingStore();
