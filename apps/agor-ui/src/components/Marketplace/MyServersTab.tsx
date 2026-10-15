@@ -1,3 +1,4 @@
+import { isMcpGrantSubjectEntitled } from '@agor/core/mcp/member-policy';
 import type {
   MCPMarketplaceOverview,
   MCPMarketplaceServer,
@@ -180,7 +181,8 @@ export const MyServersTab: React.FC<MyServersTabProps> = ({
   const [createdServerId, setCreatedServerId] = useState<string | null>(null);
   const authorityFor = useCallback(
     (server: MCPMarketplaceServer) => ({
-      owner_user_id: currentUser?.user_id,
+      // The overview lists the caller's own rows plus Shared (ownerless) ones.
+      owner_user_id: server.shared ? undefined : currentUser?.user_id,
       transport: server.transport,
     }),
     [currentUser?.user_id]
@@ -366,12 +368,21 @@ export const MyServersTab: React.FC<MyServersTabProps> = ({
   const canRemove = Boolean(
     selectedAuthority && !policyState.pending && canDeleteMcpServer(selectedAuthority, capability)
   );
-  const canReconnect = Boolean(
-    connectionReady && currentUser && hasMinimumRole(currentUser.role, ROLES.MEMBER)
-  );
   const selectedCredential = selectedServer
     ? credentials.get(selectedServer.mcp_server_id)
     : undefined;
+  // A shared-mode OAuth grant belongs to the workspace; the daemon lets only
+  // admins connect or disconnect it, whoever may change the configuration.
+  const grantEntitled = isMcpGrantSubjectEntitled(
+    currentUser?.role,
+    selectedCredential?.oauth_mode
+  );
+  const canReconnect = Boolean(
+    connectionReady &&
+      currentUser &&
+      hasMinimumRole(currentUser.role, ROLES.MEMBER) &&
+      grantEntitled
+  );
   const selectedStatus = marketplaceCredentialPresentation(
     selectedCredential,
     selectedServer?.enabled
@@ -763,6 +774,7 @@ export const MyServersTab: React.FC<MyServersTabProps> = ({
           <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
             {server.source === 'catalog' ? 'Catalog' : 'Manual'}
           </Text>
+          {server.shared && <Tag>Shared</Tag>}
           {!server.enabled && <Tag color="default">Disabled</Tag>}
         </Space>
       </Flex>
@@ -992,6 +1004,7 @@ export const MyServersTab: React.FC<MyServersTabProps> = ({
         canRefresh={canRefresh}
         canChangeTools={canChangeTools}
         canReconnect={canReconnect}
+        canDisconnect={canChangeTools && grantEntitled}
         canRemove={canRemove}
         busy={busy}
         toolDiscoveryError={
