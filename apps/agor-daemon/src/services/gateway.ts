@@ -147,6 +147,7 @@ import {
   compareDiscordSnowflakes,
   DEFAULT_DISCORD_CATCH_UP,
   DISCORD_NO_REPLY_SENTINEL,
+  discordChannelInScope,
   discordResponseModeAdmits,
   discordSnowflakeTimestampMs,
   GATEWAY_USER_ALIGNMENT_CONFIG_KEYS,
@@ -624,7 +625,8 @@ function isUnmentionedDiscordInbound(
 
 function discordInboundMetadataIsAuthoritative(
   channel: GatewayChannel,
-  data: PostMessageData
+  data: PostMessageData,
+  transported: boolean
 ): boolean {
   const config = channel.config as Record<string, unknown>;
   if (channel.channel_type !== 'discord') return true;
@@ -632,7 +634,7 @@ function discordInboundMetadataIsAuthoritative(
   if (!metadata) return false;
   const snowflake = isDiscordSnowflake;
   const guildId = config.guild_id;
-  const allowedChannels = config.allowed_channel_ids;
+  const allowedChannels = config.allowed_channel_ids ?? [];
   const authorId = metadata[DISCORD_METADATA_KEY.authorId];
   const channelId = metadata[DISCORD_METADATA_KEY.channelId];
   const messageId = metadata[DISCORD_METADATA_KEY.messageId];
@@ -685,17 +687,26 @@ function discordInboundMetadataIsAuthoritative(
       data.thread_id === buildDiscordDirectMessageThreadKey(channelId, authorId)
     );
   }
+  const deniedChannels = config.denied_channel_ids ?? [];
+  // The listener's connector proved an unlisted parent public; a transported caller has no such proof.
+  const inScope = (id: string) =>
+    transported
+      ? (allowedChannels as string[]).includes(id) &&
+        discordChannelInScope(config as DiscordGatewayConfig, id)
+      : discordChannelInScope(config as DiscordGatewayConfig, id);
   if (
     !Array.isArray(allowedChannels) ||
-    allowedChannels.length === 0 ||
+    (allowedChannels.length === 0 && config.allow_all_public_channels !== true) ||
     allowedChannels.some((id) => !snowflake(id)) ||
+    !Array.isArray(deniedChannels) ||
+    deniedChannels.some((id) => !snowflake(id)) ||
     metadata[DISCORD_METADATA_KEY.guildId] !== guildId ||
     (metadata[DISCORD_METADATA_KEY.hasMention] !== true &&
       !discordResponseModeAdmitsMetadata(config, metadata))
   )
     return false;
   if (isThread) {
-    if (!snowflake(parentChannelId) || !allowedChannels.includes(parentChannelId)) return false;
+    if (!snowflake(parentChannelId) || !inScope(parentChannelId)) return false;
     if (allowedChannels.includes(channelId)) return false;
     if (providerThreadId !== undefined) {
       if (
@@ -717,7 +728,7 @@ function discordInboundMetadataIsAuthoritative(
       return false;
     }
   } else {
-    if (!allowedChannels.includes(channelId) || parentChannelId !== undefined) return false;
+    if (!inScope(channelId) || parentChannelId !== undefined) return false;
     const replyTo = metadata[DISCORD_METADATA_KEY.replyToMessageId];
     if (replyTo !== undefined && !snowflake(replyTo)) return false;
     if (providerThreadId !== undefined) {
@@ -5575,7 +5586,7 @@ export class GatewayService {
    * Authenticates via channel_key, looks up or creates a session
    * for the given thread, and sends the prompt to the session.
    */
-  async create(data: PostMessageData): Promise<PostMessageResult> {
+  async create(data: PostMessageData, params?: AuthenticatedParams): Promise<PostMessageResult> {
     const durableListenerOwnership = await this.detectDurableListenerOwnership();
     const verifiedHttpAuthority = isVerifiedHttpGatewayCreate(data);
     const inboundAuthority = verifiedHttpGatewayAuthority(data);
@@ -5622,7 +5633,7 @@ export class GatewayService {
     // Connector metadata is untrusted at this service boundary. Reloaded
     // Discord configuration and the canonical provider identifiers must agree
     // before any mapping, seed, session, or prompt lookup can occur.
-    if (!discordInboundMetadataIsAuthoritative(channel, data)) {
+    if (!discordInboundMetadataIsAuthoritative(channel, data, Boolean(params?.provider))) {
       console.debug('[gateway] IGNORED: Discord inbound metadata failed authorization checks');
       return { success: false, sessionId: '', created: false };
     }
