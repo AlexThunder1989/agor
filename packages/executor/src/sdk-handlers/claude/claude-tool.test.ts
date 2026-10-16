@@ -1,4 +1,5 @@
 import { generateId, SAFE_ZERO_TURN_PROVIDER_RESULT_MESSAGE } from '@agor/core';
+import type { SDKSystemMessage } from '@agor/core/sdk';
 import type { Message, SessionID, TaskID } from '@agor/core/types';
 import { MessageRole, withProviderDetail } from '@agor/core/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -25,6 +26,7 @@ type Harness = {
   tool: ClaudeTool;
   outgoing: Partial<Message>[];
   persisted: Message[];
+  sessionsRepo: { update: ReturnType<typeof vi.fn> };
 };
 
 function createHarness(classifiedKind?: 'missing_credential'): Harness {
@@ -85,6 +87,7 @@ function createHarness(classifiedKind?: 'missing_credential'): Harness {
     ),
     outgoing,
     persisted,
+    sessionsRepo,
   };
 }
 
@@ -142,6 +145,31 @@ async function execute(tool: ClaudeTool, mode: 'streaming' | 'non-streaming', ta
   }
   return tool.executePrompt(sessionId, 'prompt', taskId);
 }
+
+describe('ClaudeTool command discovery persistence', () => {
+  it('persists filtered commands and skills through the existing session context fields', async () => {
+    const processor = new SDKMessageProcessor({ sessionId: generateId() as SessionID });
+    const initMessage = {
+      type: 'system',
+      subtype: 'init',
+      slash_commands: ['compact', 'usage', 'doctor'],
+      terminal_slash_commands: ['doctor'],
+      skills: ['doctor', 'project-review'],
+    } satisfies Pick<
+      SDKSystemMessage,
+      'type' | 'subtype' | 'slash_commands' | 'terminal_slash_commands' | 'skills'
+    >;
+    promptState.events = await processor.process(initMessage as SDKSystemMessage);
+    const harness = createHarness();
+    await execute(harness.tool, 'streaming', generateId() as TaskID);
+    expect(harness.sessionsRepo.update).toHaveBeenCalledWith(expect.any(String), {
+      custom_context: {
+        slash_commands: ['compact', 'usage'],
+        skills: ['project-review'],
+      },
+    });
+  });
+});
 
 describe('ClaudeTool provider-failure settlement', () => {
   beforeEach(() => {

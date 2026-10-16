@@ -682,8 +682,14 @@ export class SDKMessageProcessor {
 
       // Capture available slash commands and skills for autocomplete
       if (initMsg.slash_commands || initMsg.skills) {
-        this.state.slashCommands = initMsg.slash_commands || [];
-        this.state.skills = initMsg.skills || [];
+        // The SDK supplies headless-supported commands, including custom ones.
+        // Hide entries it tags as terminal-oriented from both autocomplete lists;
+        // a bundled skill (e.g. doctor) can appear in both inventories.
+        const terminalCommands = new Set(initMsg.terminal_slash_commands ?? []);
+        this.state.slashCommands = (initMsg.slash_commands ?? []).filter(
+          (command) => !terminalCommands.has(command)
+        );
+        this.state.skills = (initMsg.skills ?? []).filter((skill) => !terminalCommands.has(skill));
 
         // Emit event so claude-tool can persist to session for UI autocomplete
         events.push({
