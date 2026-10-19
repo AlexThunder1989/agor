@@ -28,6 +28,7 @@ import type {
 } from '@agor/core/sdk';
 import type { ContextUsageSnapshot, SessionID } from '@agor/core/types';
 import { MessageRole } from '@agor/core/types';
+import { type ClaudeExecutionError, classifyClaudeResultFailure } from './claude-error.js';
 import { CLAUDE_CODE_TODO_TOOLS } from './constants.js';
 
 const CLAUDE_CODE_TODO_TOOL_NAMES = new Set<string>(CLAUDE_CODE_TODO_TOOLS);
@@ -116,6 +117,8 @@ export type ProcessedEvent =
     }
   | {
       type: 'result';
+      /** Internal-only safe diagnosis; never a credential-recovery instruction. */
+      failure?: ClaudeExecutionError;
       /** Internal-only SDK value used for accounting before the executor applies
        * the closed persistence projection. Never persist or publish directly. */
       raw_sdk_message: SDKResultMessage;
@@ -601,6 +604,7 @@ export class SDKMessageProcessor {
       {
         type: 'result',
         raw_sdk_message: msg,
+        failure: classifyClaudeResultFailure(msg),
         agentSessionId: this.state.capturedAgentSessionId,
       },
       {
