@@ -299,12 +299,7 @@ If you continue to see authentication errors, please contact your Agor administr
       }
       // setupQuery normalizes only its SDK call; local setup/RPC errors retain
       // their identity and are never reinterpreted as provider authentication.
-      logClaudeFailure(
-        '[claude.query] setup_failed',
-        error,
-        { sessionId: shortId(sessionId) },
-        this.logger
-      );
+      logClaudeFailure('[claude.query] setup_failed', error, { sessionId, taskId }, this.logger);
       throw error;
     }
 
@@ -520,10 +515,10 @@ If you continue to see authentication errors, please contact your Agor administr
                 event.failure ??
                   new ClaudeExecutionError('unknown', SAFE_ZERO_TURN_PROVIDER_RESULT_MESSAGE),
                 {
-                  sessionId: shortId(sessionId),
-                  taskId: taskId ? shortId(taskId) : undefined,
                   messageCount: state.messageCount,
                   hasStderr: stderr.hasStderr,
+                  sessionId,
+                  taskId,
                 },
                 this.logger
               );
@@ -564,7 +559,7 @@ If you continue to see authentication errors, please contact your Agor administr
                 logClaudeFailure(
                   '[claude.query] context_usage_unavailable',
                   sanitizeClaudeExecutionError(error),
-                  { sessionId: shortId(sessionId) },
+                  { sessionId, taskId },
                   { error: (...args) => console.warn(...args) }
                 );
               } finally {
@@ -619,10 +614,10 @@ If you continue to see authentication errors, please contact your Agor administr
         '[executor:error] SDK iteration failed:',
         error,
         {
-          sessionId: shortId(sessionId),
-          taskId: taskId ? shortId(taskId) : undefined,
           messageCount: state?.messageCount,
           hasStderr: stderr.hasStderr,
+          sessionId,
+          taskId,
         },
         this.logger
       );
