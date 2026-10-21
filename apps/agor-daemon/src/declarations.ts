@@ -15,7 +15,6 @@ import type {
   TaskTerminationCoordinationClaimResult,
   TerminationClaimInput,
   TerminationClaimResult,
-  TerminationSettlementInput,
   TerminationSettlementResult,
 } from '@agor/core/db';
 import type { ExpressApplication, Service } from '@agor/core/feathers';
@@ -53,6 +52,7 @@ import type {
   SessionBulkArchiveOptions,
   SessionBulkArchiveResult,
 } from './services/sessions.js';
+import type { TaskTerminationSettlementInput } from './services/tasks.js';
 
 // Re-export core types for convenience
 export type AuthenticatedUser = CoreAuthenticatedUser;
@@ -245,7 +245,7 @@ export interface TasksServiceImpl extends Service<Task, Partial<Task>, FeathersP
     params?: FeathersParams
   ): Promise<Task | null>;
   settleTermination(
-    input: TerminationSettlementInput,
+    input: TaskTerminationSettlementInput,
     params?: FeathersParams
   ): Promise<TerminationSettlementResult>;
 }
