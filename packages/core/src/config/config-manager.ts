@@ -1034,6 +1034,7 @@ function validateConfig(config: AgorConfig): void {
     'sdk_home_mode',
     'preserve_canonical_home_alias',
     'extra_allow_write',
+    'extra_dev_bind',
     'extra_deny_read',
     'fail_if_unavailable',
   ]);

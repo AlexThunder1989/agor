@@ -351,6 +351,7 @@ export function resolveBwrapArgs(sandbox: AgorSandboxSettings, ctx: SandboxPathC
     // re-exposing it here is valid.
     appendBranchSdkHomeBinds(args, ctx);
     for (const p of sandbox.extra_allow_write ?? []) args.push('--bind', p, p);
+    for (const p of sandbox.extra_dev_bind ?? []) args.push('--dev-bind', p, p);
     appendBranchSdkCredentialBinds(args, ctx);
 
     // Daemon trust-root masks — UNCONDITIONAL (not gated on protect_secrets).
@@ -481,6 +482,7 @@ export function resolveBwrapArgs(sandbox: AgorSandboxSettings, ctx: SandboxPathC
   // of one shared home for all branches and users.
   appendBranchSdkHomeBinds(args, ctx);
   for (const p of sandbox.extra_allow_write ?? []) args.push('--bind', p, p);
+  for (const p of sandbox.extra_dev_bind ?? []) args.push('--dev-bind', p, p);
   appendBranchSdkCredentialBinds(args, ctx);
 
   // ── denials LAST so they win over any writable/home bind above ──

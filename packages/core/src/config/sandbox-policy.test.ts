@@ -197,10 +197,15 @@ describe('resolveBwrapArgs', () => {
     const clone = resolveBwrapArgs({}, { ...CTX, baseRepoPath: undefined });
     expect(clone.some((a) => a === BASE_GIT)).toBe(false);
     const extra = resolveBwrapArgs(
-      { extra_allow_write: ['/opt/cache'], extra_deny_read: ['/etc/secret'] },
+      {
+        extra_allow_write: ['/opt/cache'],
+        extra_dev_bind: ['/dev/dri'],
+        extra_deny_read: ['/etc/secret'],
+      },
       CTX
     );
     expect(hasTriple(extra, '--bind', '/opt/cache', '/opt/cache')).toBe(true);
+    expect(hasTriple(extra, '--dev-bind', '/dev/dri', '/dev/dri')).toBe(true);
     expect(hasTriple(extra, '--ro-bind', '/dev/null', '/etc/secret')).toBe(true);
   });
 });

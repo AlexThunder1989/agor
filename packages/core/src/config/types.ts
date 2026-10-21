@@ -602,6 +602,8 @@ export interface AgorSandboxSettings {
   preserve_canonical_home_alias?: boolean;
   /** Extra writable paths added to the `include.*` roots (escape hatch). */
   extra_allow_write?: string[];
+  /** Host device paths bound with `--dev-bind`, e.g. `/dev/dri` for GPU video (escape hatch). */
+  extra_dev_bind?: string[];
   /** Extra denied-read paths added to `protect_secrets` (escape hatch). */
   extra_deny_read?: string[];
   /**
