@@ -2415,6 +2415,36 @@ describe('gateway agent-tool capability gating (MCP)', () => {
       expect(payload).toMatchObject({ uploaded: true });
     });
 
+    it('defaults uploads to the session thread unless topLevel or another channel', async () => {
+      vi.mocked(requestExecutor).mockResolvedValue({
+        success: true,
+        data: { uploaded: { id: 'F456', name: 'chart.png' } },
+      });
+      spyCallerGatewaySession('branch-1', { ...gatewaySource, slack_root_ts: '171234.000100' });
+      vi.spyOn(GatewayChannelRepository.prototype, 'findById').mockResolvedValue(
+        fileUploadEnabled as any
+      );
+      vi.spyOn(BranchRepository.prototype, 'findById').mockResolvedValue(branch as any);
+
+      const tools = await captureTools('member');
+      await tools.agor_gateway_slack_file_upload.handler({
+        source: { kind: 'branch', branchPath: 'chart.png' },
+      });
+      await tools.agor_gateway_slack_file_upload.handler({
+        slackChannelId: 'C999',
+        source: { kind: 'branch', branchPath: 'chart.png' },
+      });
+      await tools.agor_gateway_slack_file_upload.handler({
+        topLevel: true,
+        source: { kind: 'branch', branchPath: 'chart.png' },
+      });
+
+      const params = vi.mocked(requestExecutor).mock.calls.map(([request]) => request.params);
+      expect(params[0]).toMatchObject({ channel: 'C123', threadTs: '171234.000100' });
+      expect(params[1]).toMatchObject({ channel: 'C999', threadTs: undefined });
+      expect(params[2]).toMatchObject({ channel: 'C123', threadTs: undefined });
+    });
+
     it('mounts the caller home store for branch file uploads under a per-user sandbox', async () => {
       vi.mocked(requestExecutor).mockResolvedValue({
         success: true,
